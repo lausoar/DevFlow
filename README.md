@@ -17,7 +17,7 @@ DevFlow 是一套面向企业研发团队的 **AI Native 协同研发平台**，
 企业组织 → 项目管理 → 需求 → 迭代 → 任务 → Bug → 测试用例 → 文档 Wiki → 实时聊天 → AI 助手 → 统计报表
 ```
 
-三个独立服务协同工作：**Next.js 前端**（16 个路由模块）、**Spring Boot 主服务**（28 个 Controller / 158 个 REST 端点 / 41 张表）、**FastAPI AI 服务**（RAG 知识库 + 多模型路由）。已有真实团队落地日常使用。
+三个独立服务协同工作：**Next.js 前端**（16 个路由模块）、**Spring Boot 主服务**（28 个 Controller / 158 个 REST 端点 / 41 张表）、**FastAPI AI 服务**（RAG 知识库 + 多模型路由）。
 
 <!-- 📸 截图区：把界面截图放到 docs/screenshots/ 目录后，取消下面的注释
 ## 📸 界面预览
