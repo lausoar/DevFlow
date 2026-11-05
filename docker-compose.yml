@@ -1,0 +1,91 @@
+# ============================================
+# DevFlow 基础设施 Docker Compose
+# ============================================
+# 启动: docker compose up -d
+# 停止: docker compose down
+# 查看: docker compose ps
+# ============================================
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: devflow-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: devflow123
+      MYSQL_DATABASE: devflow
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 注：不在挂载 schema.sql 初始化——Windows 下单文件 bind mount 会变成目录导致
+      # init 失败（batch_readline 错误）。建表由后端启动时的 spring.sql.init 自动完成。
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis 缓存
+  # 注意：宿主机 6379 被其他项目容器占用，映射到 6380（application.yml 已同步）
+  redis:
+    image: redis:7-alpine
+    container_name: devflow-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO 对象存储
+  # 注意：宿主机 9000/9001 被其他项目容器占用，映射到 9002/9003（application.yml 已同步）
+  minio:
+    image: minio/minio:latest
+    container_name: devflow-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9002:9000"   # API
+      - "9003:9001"   # 控制台
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ChromaDB 向量数据库（AI 服务用）
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: devflow-chromadb
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+
+volumes:
+  mysql_data:
+  redis_data:
+  minio_data:
+  chroma_data:

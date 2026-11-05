@@ -1,0 +1,88 @@
+# DevFlow 后端服务配置
+server:
+  port: 8080
+  servlet:
+    context-path: /api/v1
+
+spring:
+  application:
+    name: devflow-backend
+
+  # 数据源配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/devflow?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: devflow123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # Redis 配置（docker-compose 映射到宿主机 6380）
+  data:
+    redis:
+      host: localhost
+      port: 6380
+      password:
+      database: 0
+
+  # Jackson 配置
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+
+  # SQL 初始化（自动执行 schema.sql；必须显式指定编码，否则 Windows 默认 GBK 读取导致中文乱码）
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+      encoding: utf-8
+
+  # 文件上传限制
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
+
+# MyBatis Plus 配置
+mybatis-plus:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-aliases-package: com.devflow.entity
+  global-config:
+    db-config:
+      id-type: assign_uuid
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# JWT 配置
+jwt:
+  secret: ZGV2Zmxvdy1qd3Qtc2VjcmV0LWtleS0yMDI2LWVudGVycHJpc2UtYWktcGxhdGZvcm0=
+  expiration: 86400000  # 24 小时
+  refresh-expiration: 604800000  # 7 天
+
+# MinIO 配置（docker-compose 映射到宿主机 9002，控制台 9003）
+minio:
+  endpoint: http://localhost:9002
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: devflow
+
+# OpenAPI 配置
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+# AI 服务配置（文档知识库同步、聊天 @AI 助手）
+ai:
+  service:
+    base-url: http://localhost:8000/api/v1
+
+# 日志配置
+logging:
+  level:
+    com.devflow: debug
+    org.springframework.security: info

@@ -1,0 +1,48 @@
+# DevFlow AI Service - Python 依赖
+[project]
+name = "devflow-ai"
+version = "1.0.0"
+description = "DevFlow AI 智能服务 - RAG / Agent / LLM"
+requires-python = ">=3.11"
+dependencies = [
+    # Web 框架
+    "fastapi>=0.115.0",
+    "uvicorn[standard]==0.53.0",
+    # AI / LLM
+    "langchain>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-community>=0.3.0",
+    "openai>=1.50.0",
+    # 向量数据库
+    "chromadb>=1.0.0",
+    # 文本处理
+    "tiktoken>=0.7.0",
+    "sentence-transformers>=3.0.0",
+    # 数据库
+    "redis>=5.0.0",
+    "sqlalchemy>=2.0.0",
+    "asyncpg>=0.29.0",
+    # 工具
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.27.0",
+    "python-jose[cryptography]>=3.3.0",
+    # 任务队列
+    "celery>=5.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

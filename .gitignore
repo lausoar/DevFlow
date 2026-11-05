@@ -1,0 +1,57 @@
+# ============================================
+# DevFlow 全局 .gitignore
+# ============================================
+
+# 依赖
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+target/
+
+# 构建产物
+.next/
+dist/
+build/
+out/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker 卷
+mysql_data/
+redis_data/
+minio_data/
+chroma_data/
+
+# 日志
+*.log
+logs/
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# Python 构建产物
+*.egg-info/
+
+# AI 编程助手配置
+.claude/
+AGENTS.md
+CLAUDE.md
