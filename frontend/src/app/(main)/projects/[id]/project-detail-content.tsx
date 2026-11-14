@@ -31,9 +31,11 @@ import { useAuthStore } from '@/stores/auth-store';
 import { AutomationRulesDialog } from './automation-rules-dialog';
 import { RecycleBinDialog } from './recycle-bin-dialog';
 import { ReleasesTab } from './releases-tab';
+import { DeploymentsTab } from './deployments-tab';
 import {
   ArrowLeft,
   Rocket,
+  Server,
   Zap,
   Undo2,
   LayoutDashboard,
@@ -384,6 +386,10 @@ export default function ProjectDetailContent({
               <Rocket className="h-3.5 w-3.5" />
               版本
             </TabsTrigger>
+            <TabsTrigger value="deployments" className="gap-1.5 text-xs">
+              <Server className="h-3.5 w-3.5" />
+              部署
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -407,6 +413,9 @@ export default function ProjectDetailContent({
         </TabsContent>
         <TabsContent value="releases" className="flex-1 overflow-auto p-6">
           <ReleasesTab projectId={projectId} canManage={canEditProject} />
+        </TabsContent>
+        <TabsContent value="deployments" className="flex-1 overflow-auto p-6">
+          <DeploymentsTab projectId={projectId} canManage={canEditProject} />
         </TabsContent>
       </Tabs>
 

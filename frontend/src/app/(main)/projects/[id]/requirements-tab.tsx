@@ -57,6 +57,7 @@ import { useProjectMembers } from '@/lib/hooks/use-projects';
 import { useAuthStore } from '@/stores/auth-store';
 import { BugDescriptionField } from './bug-description-field';
 import { RichDescription } from './rich-description';
+import { WalkthroughPanel } from './walkthrough-panel';
 import { useTasks } from '@/lib/hooks/use-tasks';
 import type { Requirement, RequirementStatus, Priority } from '@/types';
 
@@ -775,6 +776,9 @@ function RequirementDetailDialog({
               <p className="text-[11px] text-muted-foreground">项目中的任务都已关联（或暂无任务），可到任务页新建</p>
             )}
           </div>
+          {/* UI 走查（只对参与需求管理的人可编辑） */}
+          <WalkthroughPanel requirementId={effectiveRequirement.id} canManage={canManageStatus} />
+
           {/* 变更记录 */}
           <details className="rounded-md border">
             <summary className="cursor-pointer px-3 py-2 text-sm font-medium">

@@ -835,3 +835,12 @@ CREATE INDEX idx_execution_cycle ON test_execution (cycle_id);
 CREATE INDEX idx_requirement_assignee ON requirement (assignee_id);
 ALTER TABLE design_asset ADD KEY idx_status (status);
 ALTER TABLE test_case ADD KEY idx_review_status (review_status);
+
+-- ============================================
+-- 第 3 批：部署与发布闭环、UI 走查（2026-11，见 docs/BATCH3_DELIVERY.md）
+-- 新表权威定义见 db/migration/V3__batch3_deploy_walkthrough.sql
+-- ============================================
+
+-- 部署记录关联提交（DORA 变更前置时间需要"提交→部署"的对应关系）
+ALTER TABLE deployment ADD COLUMN first_commit_at DATETIME DEFAULT NULL COMMENT '本版本首个提交时间（变更前置时间起点）';
+ALTER TABLE deployment ADD KEY idx_env_finished (environment_id, finished_at);
