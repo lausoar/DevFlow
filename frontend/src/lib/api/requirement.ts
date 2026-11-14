@@ -22,9 +22,9 @@ export const requirementApi = {
   }) =>
     request<PageResult<Requirement>>('GET', `/projects/${projectId}/requirements`, undefined, params as Record<string, unknown>),
 
-  /** 获取需求详情 */
-  getById: (id: string) =>
-    request<Requirement>('GET', `/requirements/${id}`),
+  /** 获取需求详情（后端挂在项目路径下：/projects/{projectId}/requirements/{id}） */
+  getById: (projectId: string, id: string) =>
+    request<Requirement>('GET', `/projects/${projectId}/requirements/${id}`),
 
   /** 创建需求 */
   create: (projectId: string, data: CreateRequirementRequest) =>

@@ -12,28 +12,70 @@ class AssistantService:
     def __init__(self):
         self.chat_service = ChatService()
 
-    async def generate_daily_report(self, request) -> dict:
+    async def generate_daily_report(self, request, token: Optional[str] = None) -> dict:
         """
         AI 生成日报
+
+        真实数据：以当前用户身份查询后端任务/Bug 列表（透传用户 JWT），
+        不再只把 user_id 丢给模型让它"编"一份日报。
+        查不到数据时明确告知，而不是生成看上去合理的虚假内容。
         """
-        prompt = f"""请为用户生成今日工作日报。
-用户 ID: {request.user_id}
-{'项目 ID: ' + request.project_id if request.project_id else '所有项目'}
+        from app.services.backend_client import BackendClient
+
+        client = BackendClient(token)
+        tasks: list[dict] = []
+        bugs: list[dict] = []
+        data_error: Optional[str] = None
+        try:
+            tasks = await client.list_my_tasks(limit=100)
+            bugs = await client.list_my_bugs(limit=100)
+        except Exception as e:  # noqa: BLE001 - 后端不可用时降级为"无数据"提示
+            data_error = str(e)
+
+        # 项目范围过滤必须在拼 prompt 之前：否则日报里会混入其它项目的任务
+        if getattr(request, "project_id", None):
+            tasks = [t for t in tasks if t.get("projectId") == request.project_id]
+            bugs = [b for b in bugs if b.get("projectId") == request.project_id]
+
+        def brief(item: dict) -> str:
+            bits = [item.get("title", "(无标题)")]
+            if item.get("status"):
+                bits.append(f"状态={item['status']}")
+            if item.get("priority"):
+                bits.append(f"优先级={item['priority']}")
+            if item.get("dueDate"):
+                bits.append(f"截止={item['dueDate']}")
+            return "；".join(bits)
+
+        task_lines = "\n".join(f"- {brief(t)}" for t in tasks) or "（无）"
+        bug_lines = "\n".join(f"- {brief(b)}" for b in bugs) or "（无）"
+
+        prompt = f"""请基于下面**真实数据**为用户生成今日工作日报。
 日期: {request.date or '今天'}
+{'项目范围: ' + request.project_id if request.project_id else '范围: 我参与的所有项目'}
 
-日报格式要求：
-1. 今日完成的工作
-2. 进行中的工作
-3. 遇到的问题/阻塞
-4. 明日计划
+【我的任务】（共 {len(tasks)} 条）
+{task_lines}
 
-请用简洁的中文输出，使用 Markdown 格式。"""
+【我负责的 Bug】（共 {len(bugs)} 条）
+{bug_lines}
+
+要求：
+1. 只依据上面列出的数据，不要编造不存在的任务或 Bug；
+2. 按"已完成 / 进行中 / 待办与阻塞 / 明日计划"四段输出，每条注明对应任务或 Bug 标题；
+3. 如果任务或 Bug 列表为空，直接说明"今日没有分配给我的任务或 Bug"，不要虚构；
+4. 使用 Markdown，中文，简洁。"""
 
         response = await self.chat_service.chat(
             ChatRequest(messages=[ChatMessage(role="user", content=prompt)])
         )
 
-        return {"report": response.content, "model": response.model}
+        return {
+            "report": response.content,
+            "model": response.model,
+            "stats": {"tasks": len(tasks), "bugs": len(bugs)},
+            "dataError": data_error,
+        }
 
     async def generate_summary(self, request) -> dict:
         """

@@ -1,6 +1,7 @@
 package com.devflow.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.devflow.entity.Task;
 import com.devflow.mapper.TaskMapper;
@@ -93,7 +94,28 @@ public class TaskServiceImpl implements TaskService {
         String oldAssigneeId = existing.getAssigneeId();
         String oldStatus = existing.getStatus();
 
+        // 空串表示"清除"（updateById 默认跳过 null 字段，无法用 null 表达"置空"）
+        boolean clearAssignee = "".equals(task.getAssigneeId());
+        boolean clearSprint = "".equals(task.getSprintId());
+        if (clearAssignee) {
+            task.setAssigneeId(null);
+        }
+        if (clearSprint) {
+            task.setSprintId(null);
+        }
+
         taskMapper.updateById(task);
+
+        if (clearAssignee || clearSprint) {
+            LambdaUpdateWrapper<Task> clear = new LambdaUpdateWrapper<Task>().eq(Task::getId, id);
+            if (clearAssignee) {
+                clear.set(Task::getAssigneeId, null);
+            }
+            if (clearSprint) {
+                clear.set(Task::getSprintId, null);
+            }
+            taskMapper.update(null, clear);
+        }
 
         // 重新查询以获取更新后的完整数据
         Task updated = taskMapper.selectById(id);

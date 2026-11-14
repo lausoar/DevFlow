@@ -73,9 +73,17 @@ export const aiApi = {
 
   // ---- 助手 ----
 
-  /** AI 生成日报 */
+  /**
+   * AI 生成日报：user_id 仅作标识，真实数据由 AI 服务用当前 JWT 查询
+   * projectId 用于把范围收敛到单个项目（不传则覆盖我参与的全部项目）
+   */
   dailyReport: (userId: string, projectId?: string, date?: string) =>
-    aiClient.post('/assistant/daily-report', { user_id: userId, project_id: projectId, date }),
+    aiClient.post<{
+      report: string;
+      model: string;
+      stats?: { tasks: number; bugs: number };
+      dataError?: string | null;
+    }>('/assistant/daily-report', { user_id: userId, project_id: projectId, date }),
 
   /** AI 总结内容 */
   summary: (content: string, summaryType = 'general') =>

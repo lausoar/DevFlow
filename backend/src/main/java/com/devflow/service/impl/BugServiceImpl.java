@@ -82,16 +82,16 @@ public class BugServiceImpl implements BugService {
             );
         }
 
-        // 自动化规则：BUG_CREATED 触发（未指派时自动指派给规则成员+通知）
+        // 自动化规则：BUG_CREATED —— 先做自动指派（会落库并通知被指派人），再跑规则里的通知
         try {
             automationRuleService.autoAssignBug(projectId, bug, reporterId);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.warn("Bug 自动指派失败（不影响创建）: bugId={}, 原因={}", bug.getId(), e.getMessage());
         }
-
-        // 自动化规则：BUG_CREATED 触发（自动指派+通知）
         try {
             automationRuleService.fire("BUG_CREATED", projectId, bug.getId(), bug.getTitle(), reporterId);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.warn("BUG_CREATED 自动化规则执行失败: bugId={}, 原因={}", bug.getId(), e.getMessage());
         }
 
         // 企业微信群机器人：新缺陷出站推送（异步，失败静默）
@@ -182,6 +182,16 @@ public class BugServiceImpl implements BugService {
                 "Bug「" + bug.getTitle() + "」状态由 " + oldStatus + " 变更为 " + status,
                 "/projects/" + bug.getProjectId() + "?tab=bugs"
             );
+        }
+
+        // 自动化规则：BUG_FAIL —— 缺陷被重新打开（REOPENED）表示修复失败/回归，需要通知规则成员
+        if ("REOPENED".equals(status) && !"REOPENED".equals(oldStatus)) {
+            try {
+                automationRuleService.fire("BUG_FAIL", bug.getProjectId(), bug.getId(),
+                        bug.getTitle(), operatorId);
+            } catch (Exception e) {
+                log.warn("BUG_FAIL 自动化规则执行失败: bugId={}, 原因={}", id, e.getMessage());
+            }
         }
         return bug;
     }

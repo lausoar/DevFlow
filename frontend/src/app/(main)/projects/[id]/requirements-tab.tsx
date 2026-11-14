@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import {
   useRequirements,
+  useRequirement,
   useCreateRequirement,
   useUpdateRequirement,
   useDeleteRequirement,
@@ -237,6 +238,7 @@ export function RequirementsTab({ projectId }: { projectId: string }) {
         open={detailDialogOpen}
         onOpenChange={setDetailDialogOpen}
         requirement={selectedRequirement}
+        requirementId={selectedRequirementId}
         projectId={projectId}
         onEdit={selectedRequirement ? () => openEditDialog(selectedRequirement.id) : undefined}
       />
@@ -577,17 +579,27 @@ function RequirementDetailDialog({
   open,
   onOpenChange,
   requirement,
+  requirementId,
   projectId,
   onEdit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 列表页内的同一行（首屏即可渲染） */
   requirement: Requirement | null;
+  /** 选中的需求 ID：翻页/筛选后列表里可能没有它，此时用详情接口拉取 */
+  requirementId?: string | null;
   projectId: string;
   onEdit?: () => void;
 }) {
-  const linkTask = useLinkTask(projectId, requirement?.id || '');
-  const unlinkTask = useUnlinkTask(projectId, requirement?.id || '');
+  // 列表里找不到时（翻页后点开、从搜索跳转）回落到详情接口，避免弹窗空白
+  const { data: detailRes } = useRequirement(
+    open && !requirement ? projectId : null,
+    open && !requirement ? requirementId ?? null : null,
+  );
+  const effectiveRequirement = requirement ?? detailRes?.data ?? null;
+  const linkTask = useLinkTask(projectId, effectiveRequirement?.id || '');
+  const unlinkTask = useUnlinkTask(projectId, effectiveRequirement?.id || '');
   const updateRequirement = useUpdateRequirement(projectId);
   const [linkTaskId, setLinkTaskId] = useState('');
   const { data: tasksRes } = useTasks(projectId);
@@ -597,25 +609,25 @@ function RequirementDetailDialog({
   // 变更记录（详情打开时才请求）
   const { data: changesRes } = useRequirementChanges(
     open ? projectId : null,
-    open ? requirement?.id ?? null : null,
+    open ? effectiveRequirement?.id ?? null : null,
   );
   const changes = changesRes?.data || [];
 
-  if (!requirement) return null;
+  if (!effectiveRequirement) return null;
 
   // 状态流转权限与编辑一致：创建人、企业 SUPER_ADMIN/ADMIN、项目 OWNER/MANAGER
   const myProjectRole = membersRes?.data?.find((m) => m.userId === currentUser?.id)?.role;
   const canManageStatus =
-    requirement.requesterId === currentUser?.id ||
+    effectiveRequirement.requesterId === currentUser?.id ||
     currentUser?.role === 'SUPER_ADMIN' ||
     currentUser?.role === 'ADMIN' ||
     myProjectRole === 'OWNER' ||
     myProjectRole === 'MANAGER';
 
   const handleStatusChange = (status: RequirementStatus) => {
-    if (status === requirement.status) return;
+    if (status === effectiveRequirement.status) return;
     updateRequirement.mutate(
-      { id: requirement.id, data: { status } },
+      { id: effectiveRequirement.id, data: { status } },
       {
         onError: (e) => {
           alert(
@@ -627,9 +639,9 @@ function RequirementDetailDialog({
     );
   };
 
-  const statusConfig = getStatusConfig(requirement.status);
-  const priorityConfig = getPriorityConfig(requirement.priority);
-  const linkedIds = new Set((requirement.linkedTasks || []).map((t) => t.taskId));
+  const statusConfig = getStatusConfig(effectiveRequirement.status);
+  const priorityConfig = getPriorityConfig(effectiveRequirement.priority);
+  const linkedIds = new Set((effectiveRequirement.linkedTasks || []).map((t) => t.taskId));
   const linkableTasks = allTasks.filter((t) => !linkedIds.has(t.id));
 
   return (
@@ -641,9 +653,9 @@ function RequirementDetailDialog({
               <statusConfig.icon className={`h-5 w-5 ${statusConfig.color}`} />
             </div>
             <div>
-              <DialogTitle>{requirement.title}</DialogTitle>
+              <DialogTitle>{effectiveRequirement.title}</DialogTitle>
               <DialogDescription className="mt-1">
-                #{requirement.id.slice(-8)} · {requirement.requesterName} · {formatDate(requirement.createdAt)}
+                #{effectiveRequirement.id.slice(-8)} · {effectiveRequirement.requesterName} · {formatDate(effectiveRequirement.createdAt)}
               </DialogDescription>
             </div>
           </div>
@@ -654,7 +666,7 @@ function RequirementDetailDialog({
           <div className="flex items-center gap-3">
             {canManageStatus ? (
               <Select
-                value={requirement.status}
+                value={effectiveRequirement.status}
                 onValueChange={(v) => { if (v) handleStatusChange(v as RequirementStatus); }}
               >
                 <SelectTrigger className="h-7 w-24 gap-1 text-xs">
@@ -672,9 +684,9 @@ function RequirementDetailDialog({
             <Badge variant="outline" className={priorityConfig.color}>
               {priorityConfig.label}
             </Badge>
-            {requirement.estimatedHours && (
+            {effectiveRequirement.estimatedHours && (
               <span className="text-sm text-muted-foreground">
-                预估 {requirement.estimatedHours} 小时
+                预估 {effectiveRequirement.estimatedHours} 小时
               </span>
             )}
             {onEdit && (
@@ -692,16 +704,16 @@ function RequirementDetailDialog({
           {/* 描述 */}
           <div className="space-y-2">
             <h4 className="text-sm font-medium">需求描述</h4>
-            <RichDescription text={requirement.description?.trim() || ''} />
+            <RichDescription text={effectiveRequirement.description?.trim() || ''} />
           </div>
 
           {/* 关联任务 */}
           <div className="space-y-2">
             <h4 className="text-sm font-medium">关联任务</h4>
 
-            {(requirement.linkedTasks || []).length > 0 ? (
+            {(effectiveRequirement.linkedTasks || []).length > 0 ? (
               <div className="space-y-1">
-                {requirement.linkedTasks?.map((task) => (
+                {effectiveRequirement.linkedTasks?.map((task) => (
                   <div key={task.taskId} className="flex items-center gap-2 p-2 rounded-md bg-muted/30">
                     <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm flex-1">{task.taskTitle}</span>

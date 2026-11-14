@@ -13,7 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useQuery } from '@tanstack/react-query';
-import { useChannels, useMessages, useSendMessage } from '@/lib/hooks/use-chat';
+import { useChannels, useMessageHistory, useSendMessage } from '@/lib/hooks/use-chat';
 import { chatApi } from '@/lib/api/chat';
 import { useAuthStore } from '@/stores';
 import { usePresenceStore } from '@/stores/presence-store';
@@ -578,12 +578,25 @@ function MessageList({
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   currentUserId?: string;
 }) {
-  const { data: messagesRes, isLoading } = useMessages(channelId);
-  const messages = messagesRes?.data?.records || [];
-
-  // 自动滚动到底部
+  // page=1 是最新一页；loadedPages 增加时向上加载更早的历史
+  const [loadedPages, setLoadedPages] = useState(1);
+  // 切换频道时重置已加载页数，避免把上一个频道的翻页状态带过来
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setLoadedPages(1);
+  }, [channelId]);
+
+  const { data: historyRes, isLoading } = useMessageHistory(channelId, loadedPages);
+  const messages = historyRes?.records || [];
+  const totalMessages = historyRes?.total || 0;
+  const hasMore = messages.length < totalMessages;
+
+  // 自动滚动到底部（只在新增消息时滚，翻看历史时不打断）
+  const prevCountRef = useRef(0);
+  useEffect(() => {
+    if (messages.length > prevCountRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: prevCountRef.current === 0 ? 'auto' : 'smooth' });
+    }
+    prevCountRef.current = messages.length;
   }, [messages.length, messagesEndRef]);
 
   if (isLoading) {
@@ -606,6 +619,14 @@ function MessageList({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
       <div className="space-y-4">
+        {/* 更早的历史：每次追加一页（pageSize=50） */}
+        {hasMore && (
+          <div className="flex justify-center pb-1">
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setLoadedPages((p) => p + 1)}>
+              加载更早的消息
+            </Button>
+          </div>
+        )}
         {messages.map((msg) => (
           <MessageItem key={msg.id} message={msg} currentUserId={currentUserId} />
         ))}

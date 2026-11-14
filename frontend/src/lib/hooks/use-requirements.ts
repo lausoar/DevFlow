@@ -26,12 +26,12 @@ export function useRequirements(
   });
 }
 
-/** 获取需求详情 */
-export function useRequirement(id: string | null) {
+/** 获取需求详情（需求挂在项目下，必须带 projectId） */
+export function useRequirement(projectId: string | null, id: string | null) {
   return useQuery({
-    queryKey: ['requirement', id],
-    queryFn: () => requirementApi.getById(id!),
-    enabled: !!id,
+    queryKey: ['requirement', projectId, id],
+    queryFn: () => requirementApi.getById(projectId!, id!),
+    enabled: !!projectId && !!id,
   });
 }
 

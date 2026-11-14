@@ -49,7 +49,11 @@ const PRIORITY_COLORS: Record<string, string> = {
 export default function GanttTab() {
   const { data: projectsRes } = useProjects({ page: 1, pageSize: 20 });
   const projects = projectsRes?.data?.records || [];
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
+  // 用户手动选择优先；未选择时回落到第一个项目。
+  // 用派生值而不是"在 effect 里 setState"，避免首屏空态与级联渲染。
+  const [pickedProjectId, setPickedProjectId] = useState<string>('');
+  const selectedProjectId = pickedProjectId || projects[0]?.id || '';
+  const setSelectedProjectId = setPickedProjectId;
 
   const { data: ganttRes, isLoading } = useProjectGantt(selectedProjectId || null);
   const gantt = ganttRes?.data;

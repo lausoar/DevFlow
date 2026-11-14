@@ -1,9 +1,10 @@
 """
 AI 助手接口 - 日报、总结、代码审查、任务生成等
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
+from app.core.auth import require_user_token
 from app.services.assistant_service import AssistantService
 
 router = APIRouter()
@@ -46,12 +47,15 @@ class BugAnalysisRequest(BaseModel):
 
 
 @router.post("/daily-report")
-async def generate_daily_report(request: DailyReportRequest):
+async def generate_daily_report(
+    request: DailyReportRequest,
+    user_token: str = Depends(require_user_token),
+):
     """
-    AI 生成日报
+    AI 生成日报（以当前用户身份查询真实任务/Bug 数据，需要用户 JWT）
     """
     try:
-        result = await assistant_service.generate_daily_report(request)
+        result = await assistant_service.generate_daily_report(request, token=user_token)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"生成日报失败: {str(e)}")

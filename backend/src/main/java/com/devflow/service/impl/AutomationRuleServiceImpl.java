@@ -1,6 +1,7 @@
 package com.devflow.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.devflow.common.EnterpriseRoles;
 import com.devflow.common.PermissionCodes;
 import com.devflow.common.exception.BusinessException;
@@ -15,6 +16,7 @@ import com.devflow.service.ProjectAccessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -32,6 +34,7 @@ import java.util.List;
 public class AutomationRuleServiceImpl implements AutomationRuleService {
 
     private final AutomationRuleMapper automationRuleMapper;
+    private final com.devflow.mapper.BugMapper bugMapper;
     private final UserMapper userMapper;
     private final NotificationService notificationService;
     private final PermissionService permissionService;
@@ -107,13 +110,12 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                             .eq(AutomationRule::getEnabled, 1));
             int handled = 0;
             for (AutomationRule rule : rules) {
-                // 自动指派：仅新对象（BUG_CREATED）且对象未指派
+                // 自动指派由调用方（BugServiceImpl.autoAssignBug）完成并落库，这里只计数，
+                // 不再 continue —— 否则同时配了"指派 + 通知"的规则会静默吞掉通知
                 if ("BUG_CREATED".equals(triggerType)
                         && StringUtils.hasText(rule.getAssignToUserId())
                         && !rule.getAssignToUserId().equals(creatorId)) {
-                    // 由调用方（BugServiceImpl）负责实际指派，这里只计数
                     handled++;
-                    continue;
                 }
                 // 通知
                 if (StringUtils.hasText(rule.getNotifyUserId())
@@ -135,10 +137,11 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     }
 
     @Override
+    @Transactional
     public String autoAssignBug(String projectId, com.devflow.entity.Bug bug, String reporterId) {
         try {
-            if (StringUtils.hasText(bug.getAssigneeId())) {
-                return null; // 已指派则不动
+            if (bug.getId() == null || StringUtils.hasText(bug.getAssigneeId())) {
+                return null; // 未落库或已指派则不动
             }
             AutomationRule rule = automationRuleMapper.selectList(
                     new LambdaQueryWrapper<AutomationRule>()
@@ -147,12 +150,30 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                             .eq(AutomationRule::getEnabled, 1)
                             .isNotNull(AutomationRule::getAssignToUserId)
                             .last("LIMIT 1")).stream().findFirst().orElse(null);
-            if (rule == null || rule.getAssignToUserId().equals(reporterId)) {
+            if (rule == null || !StringUtils.hasText(rule.getAssignToUserId())
+                    || rule.getAssignToUserId().equals(reporterId)) {
                 return null;
+            }
+
+            // 关键：必须回写数据库。此前只改内存对象，接口响应显示"已指派"而库里仍是 NEW/未指派。
+            LambdaUpdateWrapper<com.devflow.entity.Bug> update =
+                    new LambdaUpdateWrapper<com.devflow.entity.Bug>()
+                            .eq(com.devflow.entity.Bug::getId, bug.getId())
+                            .isNull(com.devflow.entity.Bug::getAssigneeId)
+                            .set(com.devflow.entity.Bug::getAssigneeId, rule.getAssignToUserId())
+                            .set(com.devflow.entity.Bug::getStatus, "ASSIGNED");
+            int updated = bugMapper.update(null, update);
+            if (updated == 0) {
+                return null; // 并发下已被别人指派，放弃
             }
             bug.setAssigneeId(rule.getAssignToUserId());
             bug.setStatus("ASSIGNED");
-            com.devflow.mapper.BugMapper bugMapper = null; // 由调用方更新，此处直接置内存字段
+
+            notificationService.createNotification(
+                    rule.getAssignToUserId(), "BUG_UPDATE",
+                    "Bug 自动指派",
+                    "自动化规则「" + rule.getName() + "」把 Bug「" + bug.getTitle() + "」指派给你",
+                    "/projects/" + projectId + "?tab=bugs");
             return rule.getAssignToUserId();
         } catch (Exception e) {
             log.warn("Bug 自动指派失败（不影响创建）: {}", e.getMessage());

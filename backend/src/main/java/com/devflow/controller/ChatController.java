@@ -114,7 +114,11 @@ public class ChatController {
 
         requireChannel(guard.userId(authentication), channelId);
         Page<ChatMessage> pageParam = new Page<>(page, pageSize);
-        return R.ok(messageMapper.selectMessagesWithUser(pageParam, channelId));
+        Page<ChatMessage> result = messageMapper.selectMessagesWithUser(pageParam, channelId);
+        // SQL 按时间倒序取"最新一页"，这里翻回正序，前端按时间自上而下渲染
+        result.setRecords(new java.util.ArrayList<>(result.getRecords()));
+        java.util.Collections.reverse(result.getRecords());
+        return R.ok(result);
     }
 
     /**

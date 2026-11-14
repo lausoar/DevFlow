@@ -184,23 +184,37 @@ export function TasksTab({ projectId }: { projectId: string }) {
     await deleteTask.mutateAsync(taskId);
   };
 
-  // 创建任务表单
+  // 创建任务表单（默认挂到当前活跃迭代，避免"新建的任务永远不在迭代里"）
   const [newTask, setNewTask] = useState<{
     title: string;
     description: string;
     priority: Priority;
+    sprintId: string;
+    assigneeId: string;
   }>({
     title: '',
     description: '',
     priority: 'MEDIUM',
+    sprintId: '',
+    assigneeId: '',
   });
 
   const handleCreate = async () => {
     if (!newTask.title.trim()) return;
-    await createTask.mutateAsync(newTask);
-    setNewTask({ title: '', description: '', priority: 'MEDIUM' });
+    await createTask.mutateAsync({
+      title: newTask.title,
+      description: newTask.description || undefined,
+      priority: newTask.priority,
+      sprintId: newTask.sprintId || undefined,
+      assigneeId: newTask.assigneeId || undefined,
+    });
+    // 保留本次选择的迭代，便于连续录入同一批次任务
+    setNewTask({ title: '', description: '', priority: 'MEDIUM', sprintId: newTask.sprintId, assigneeId: '' });
     setCreateOpen(false);
   };
+
+  // 新建任务默认落点：活跃迭代优先，其次第一个规划中的迭代
+  const defaultSprintId = activeSprint?.id || sprints.find((sp) => sp.status === 'PLANNING')?.id || '';
 
   return (
     <div className="flex h-full flex-col">
@@ -219,7 +233,13 @@ export function TasksTab({ projectId }: { projectId: string }) {
           <Download className="h-3.5 w-3.5" />
           导出
         </Button>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <Dialog
+          open={createOpen}
+          onOpenChange={(open) => {
+            setCreateOpen(open);
+            if (open) setNewTask((prev) => ({ ...prev, sprintId: prev.sprintId || defaultSprintId }));
+          }}
+        >
           <DialogTrigger className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
             <Plus className="h-4 w-4" />
             新建任务
@@ -246,18 +266,48 @@ export function TasksTab({ projectId }: { projectId: string }) {
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
-              <div>
-                <Label>优先级</Label>
-                <select
-                  value={newTask.priority}
-                  onChange={(e) => setNewTask({ ...newTask, priority: e.target.value as Priority })}
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <option value="LOW">低</option>
-                  <option value="MEDIUM">中</option>
-                  <option value="HIGH">高</option>
-                  <option value="CRITICAL">紧急</option>
-                </select>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div>
+                  <Label>优先级</Label>
+                  <select
+                    value={newTask.priority}
+                    onChange={(e) => setNewTask({ ...newTask, priority: e.target.value as Priority })}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="LOW">低</option>
+                    <option value="MEDIUM">中</option>
+                    <option value="HIGH">高</option>
+                    <option value="CRITICAL">紧急</option>
+                  </select>
+                </div>
+                <div>
+                  <Label>所属迭代</Label>
+                  <select
+                    value={newTask.sprintId}
+                    onChange={(e) => setNewTask({ ...newTask, sprintId: e.target.value })}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">不放入迭代</option>
+                    {sprints
+                      .filter((sp) => sp.status !== 'COMPLETED')
+                      .map((sp) => (
+                        <option key={sp.id} value={sp.id}>{sp.name}</option>
+                      ))}
+                  </select>
+                </div>
+                <div>
+                  <Label>负责人</Label>
+                  <select
+                    value={newTask.assigneeId}
+                    onChange={(e) => setNewTask({ ...newTask, assigneeId: e.target.value })}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">未指派</option>
+                    {(taskMembersRes?.data || []).map((m) => (
+                      <option key={m.userId} value={m.userId}>{m.realName || m.username}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -444,6 +494,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
                 onEdit={setEditTask}
                 onDelete={handleDeleteTask}
                 extras={taskExtras}
+                memberNames={taskMemberMap}
               />
             ))}
           </div>
@@ -486,13 +537,21 @@ function TaskEditDialog({
     priority: Priority;
     dueDate: string;
     assigneeId: string;
+    sprintId: string;
   }>({
     title: '',
     description: '',
     priority: 'MEDIUM',
     dueDate: '',
     assigneeId: '',
+    sprintId: '',
   });
+
+  // 迭代与项目成员（用于负责人/迭代选择）
+  const { data: dialogSprintsRes } = useSprints(projectId);
+  const dialogSprints = dialogSprintsRes?.data || [];
+  const { data: dialogMembersRes } = useProjectMembers(projectId);
+  const dialogMembers = dialogMembersRes?.data || [];
 
   // 当 task 变化时同步表单数据，并重置评论面板
   useEffect(() => {
@@ -503,6 +562,7 @@ function TaskEditDialog({
         priority: task.priority || 'MEDIUM',
         dueDate: task.dueDate ? task.dueDate.slice(0, 10) : '',
         assigneeId: task.assigneeId || '',
+        sprintId: task.sprintId || '',
       });
       // 每次打开新任务时重置评论面板
       setShowComments(false);
@@ -520,6 +580,9 @@ function TaskEditDialog({
         description: form.description || undefined,
         priority: form.priority,
         dueDate: form.dueDate || undefined,
+        // 空串表示"清除"：后端会把空串解释为置空，而不是跳过
+        assigneeId: form.assigneeId,
+        sprintId: form.sprintId,
       },
     });
     onOpenChange(false);
@@ -585,6 +648,32 @@ function TaskEditDialog({
                   onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
                 />
               </div>
+              <div>
+                <Label>负责人</Label>
+                <select
+                  value={form.assigneeId}
+                  onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="">未指派</option>
+                  {dialogMembers.map((m) => (
+                    <option key={m.userId} value={m.userId}>{m.realName || m.username}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>所属迭代</Label>
+                <select
+                  value={form.sprintId}
+                  onChange={(e) => setForm({ ...form, sprintId: e.target.value })}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="">不放入迭代</option>
+                  {dialogSprints.map((sp) => (
+                    <option key={sp.id} value={sp.id}>{sp.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -629,6 +718,7 @@ function KanbanColumn({
   onEdit,
   onDelete,
   extras,
+  memberNames,
 }: {
   status: TaskStatus;
   label: string;
@@ -642,6 +732,7 @@ function KanbanColumn({
     undoneBlockers: Record<string, number>;
     worklogHours: Record<string, number>;
   };
+  memberNames?: Record<string, string>;
 }) {
   // 整列作为拖拽落点
   const { setNodeRef, isOver } = useDroppable({ id: status });
@@ -670,7 +761,15 @@ function KanbanColumn({
           </div>
         ) : (
           tasks.map((task) => (
-            <TaskCard key={task.id} task={task} onStatusChange={onStatusChange} onEdit={onEdit} onDelete={onDelete} />
+            <TaskCard
+              key={task.id}
+              task={task}
+              onStatusChange={onStatusChange}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              extras={extras}
+              memberNames={memberNames}
+            />
           ))
         )}
       </div>
@@ -687,6 +786,7 @@ function TaskCard({
   onEdit,
   onDelete,
   extras,
+  memberNames,
 }: {
   task: Task;
   onStatusChange: (taskId: string, newStatus: string) => void;
@@ -697,6 +797,8 @@ function TaskCard({
     undoneBlockers: Record<string, number>;
     worklogHours: Record<string, number>;
   };
+  /** userId → 展示名（负责人显示用） */
+  memberNames?: Record<string, string>;
 }) {
   const priority = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.MEDIUM;
 
@@ -837,6 +939,12 @@ function TaskCard({
             <span className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />
               {new Date(task.dueDate).toLocaleDateString('zh-CN')}
+            </span>
+          )}
+          {task.assigneeId && (
+            <span className="ml-auto flex items-center gap-1" title="负责人">
+              <User className="h-3 w-3" />
+              {memberNames?.[task.assigneeId] || '未知成员'}
             </span>
           )}
         </div>

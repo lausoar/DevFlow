@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { aiApi, type AiMessage, type AgentResult, type RagSearchResult } from '@/lib/api/ai';
 import { useProjects } from '@/lib/hooks/use-projects';
+import { useAuthStore } from '@/stores/auth-store';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { aiChatHistoryApi, aiKindLabels, persistAiMessage, type AiChatHistoryItem } from '@/lib/api/ai-history';
 import {
@@ -318,10 +319,9 @@ function AgentPanel() {
   // Agent 的知识库工具按项目隔离：选中的项目会随请求下发
   const { data: projectsRes } = useProjects({ page: 1, pageSize: 50 });
   const projects = projectsRes?.data?.records || [];
-  const [projectId, setProjectId] = useState<string>('');
-  useEffect(() => {
-    if (!projectId && projects.length > 0) setProjectId(projects[0].id);
-  }, [projects, projectId]);
+  // 同上：派生默认项目，不在 effect 里 setState
+  const [pickedProjectId, setProjectId] = useState<string>('');
+  const projectId = pickedProjectId || projects[0]?.id || '';
 
   const handleRun = async () => {
     if (!query.trim() || loading) return;
@@ -454,10 +454,9 @@ function RagPanel() {
   // 知识库按项目隔离：必须先选项目再检索（后端不再接受无范围的全局检索）
   const { data: projectsRes } = useProjects({ page: 1, pageSize: 50 });
   const projects = projectsRes?.data?.records || [];
-  const [projectId, setProjectId] = useState<string>('');
-  useEffect(() => {
-    if (!projectId && projects.length > 0) setProjectId(projects[0].id);
-  }, [projects, projectId]);
+  // 派生默认项目：首帧即取第一个，避免 effect 内 setState 造成二次渲染
+  const [pickedProjectId, setProjectId] = useState<string>('');
+  const projectId = pickedProjectId || projects[0]?.id || '';
 
   const handleSearch = async () => {
     if (!query.trim() || loading) return;
@@ -633,7 +632,7 @@ function CodeReviewPanel() {
               <div className="whitespace-pre-wrap text-xs leading-relaxed">{review}</div>
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                粘贴代码后点击"开始审查"
+                粘贴代码后点击「开始审查」
               </div>
             )}
           </ScrollArea>
@@ -651,6 +650,11 @@ function AssistantPanel() {
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
+  // 日报范围：选定项目时只看该项目，留空则覆盖我参与的全部项目
+  const { data: projectsRes } = useProjects({ page: 1, pageSize: 50 });
+  const projects = projectsRes?.data?.records || [];
+  const [dailyProjectId, setDailyProjectId] = useState<string>('');
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -659,10 +663,21 @@ function AssistantPanel() {
     try {
       let result: string;
       switch (mode) {
-        case 'daily':
-          const dailyRes = await aiApi.dailyReport('current-user');
-          result = dailyRes.data.report;
+        case 'daily': {
+          const dailyRes = await aiApi.dailyReport(currentUserId || 'current-user', dailyProjectId || undefined);
+          const stats = dailyRes.data.stats;
+          const note = dailyRes.data.dataError
+            ? `
+
+> ⚠️ 查询业务数据失败（${dailyRes.data.dataError}），以下内容仅供参考。`
+            : stats
+              ? `
+
+> 数据来源：任务 ${stats.tasks} 条、Bug ${stats.bugs} 条。`
+              : '';
+          result = dailyRes.data.report + note;
           break;
+        }
         case 'summary':
           if (!input.trim()) return;
           const summaryRes = await aiApi.summary(input);
@@ -714,6 +729,24 @@ function AssistantPanel() {
           </button>
         ))}
       </div>
+
+      {/* 日报范围选择 */}
+      {mode === 'daily' && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">统计范围</span>
+          <Select value={dailyProjectId || '_all'} onValueChange={(v) => { if (v) setDailyProjectId(v === '_all' ? '' : v); }}>
+            <SelectTrigger className="h-8 w-56 text-xs">
+              <SelectValue placeholder="我参与的全部项目" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">我参与的全部项目</SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* 输入 */}
       {mode !== 'daily' && (

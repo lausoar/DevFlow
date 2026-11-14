@@ -11,6 +11,7 @@ import {
   useDeleteDocComment,
 } from '@/lib/hooks/use-doc-extras';
 import { History, MessageSquare, RotateCcw, Trash2, Loader2 } from 'lucide-react';
+import { MarkdownView } from '@/components/common/markdown-view';
 
 // ============================================
 // 文档右侧面板：版本历史 / 评论（DocEditor 内切换）
@@ -42,8 +43,9 @@ export function DocSidePanelView({
   return (
     <>
       <div className="border-b px-4 py-2 text-xs font-medium text-muted-foreground">预览</div>
-      <div className="p-4 text-sm prose prose-sm dark:prose-invert max-w-none">
-        {currentContent || <span className="text-muted-foreground">预览区域</span>}
+      {/* 之前直接把 Markdown 字符串塞进 div，语法原样显示；现在真正渲染 */}
+      <div className="p-4">
+        <MarkdownView content={currentContent} />
       </div>
     </>
   );
@@ -109,7 +111,9 @@ function VersionsPanel({
           <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
             版本 {preview.version} · {preview.title}
           </div>
-          <pre className="flex-1 overflow-auto whitespace-pre-wrap p-4 text-xs">{preview.content || '（空）'}</pre>
+          <div className="flex-1 overflow-auto p-4">
+            <MarkdownView content={preview.content || ''} />
+          </div>
         </div>
       ) : (
         <div className="flex-1 space-y-1.5 overflow-y-auto p-3">
