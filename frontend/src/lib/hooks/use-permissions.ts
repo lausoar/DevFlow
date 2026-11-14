@@ -6,12 +6,14 @@ import type { PageQuery } from '@/types';
 // 权限相关 Hooks
 // ============================================
 
-/** 当前用户权限点集合（按钮可见性判定统一走这里，不再手写角色名比较） */
+/**
+ * 当前用户权限点集合（按钮可见性判定统一走这里，不再手写角色名比较）。
+ * 不传 projectId 时只取企业级权限点，用于企业设置页等无项目上下文的场景。
+ */
 export function useMyPermissions(projectId?: string | null) {
   return useQuery({
     queryKey: ['my-permissions', projectId || ''],
     queryFn: () => permissionApi.me(projectId || undefined),
-    enabled: !!projectId,
     staleTime: 30 * 1000,
   });
 }

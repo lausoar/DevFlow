@@ -1,9 +1,10 @@
 """
 Agent 接口 - 工具调用、智能体
 """
-from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from typing import Optional
+from app.core.auth import require_user_token
 from app.services.agent_service import AgentService
 
 router = APIRouter()
@@ -13,7 +14,7 @@ agent_service = AgentService()
 
 class AgentRequest(BaseModel):
     """Agent 运行请求"""
-    query: str
+    query: str = Field(min_length=1, max_length=4000)
     project_id: Optional[str] = None
     conversation_id: Optional[str] = None
 
@@ -25,15 +26,18 @@ class AgentStatusResponse(BaseModel):
 
 
 @router.post("/run")
-async def run_agent(request: AgentRequest, authorization: Optional[str] = Header(None)):
+async def run_agent(
+    payload: AgentRequest,
+    user_token: str = Depends(require_user_token),
+):
     """
     运行 Agent - 自动选择工具完成任务
 
     Agent 会分析用户意图，自动调用业务数据查询、知识库搜索、代码分析、任务生成等工具。
-    请求头中的 Authorization（用户 JWT）会透传给业务查询工具，以该用户身份访问后端数据。
+    用户 JWT 会透传给业务查询工具，以该用户身份访问后端数据（服务令牌不可用于本接口）。
     """
     try:
-        result = await agent_service.run(request, token=authorization)
+        result = await agent_service.run(payload, token=user_token)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent 运行失败: {str(e)}")

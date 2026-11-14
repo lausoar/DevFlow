@@ -1,10 +1,13 @@
 """
 RAG 知识库接口 - 文档向量化、检索增强生成
+
+数据隔离：index 写入 enterprise_id/project_id；search/query 必须带范围，
+没有任何范围参数时直接 400（宁可拒绝也不跨租户检索）。
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from pydantic import BaseModel
+from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel, Field
 from typing import Optional
-from app.services.rag_service import RagService
+from app.services.rag_service import RagService, RagScopeError
 
 router = APIRouter()
 rag_router = router
@@ -13,27 +16,30 @@ rag_service = RagService()
 
 class IndexDocumentRequest(BaseModel):
     """文档索引请求"""
-    doc_id: str
-    title: str
-    content: str
+    doc_id: str = Field(min_length=1, max_length=64)
+    title: str = Field(default="", max_length=300)
+    content: str = Field(default="", max_length=2_000_000)
     doc_type: str = "doc"  # doc / wiki / report
     project_id: Optional[str] = None
+    enterprise_id: Optional[str] = None
     metadata: Optional[dict] = None
 
 
 class SearchRequest(BaseModel):
     """知识库检索请求"""
-    query: str
+    query: str = Field(min_length=1, max_length=2000)
     project_id: Optional[str] = None
-    top_k: int = 5
+    enterprise_id: Optional[str] = None
+    top_k: int = Field(default=5, ge=1, le=50)
     doc_type: Optional[str] = None
 
 
 class RagQueryRequest(BaseModel):
     """RAG 问答请求"""
-    question: str
+    question: str = Field(min_length=1, max_length=4000)
     project_id: Optional[str] = None
-    top_k: int = 5
+    enterprise_id: Optional[str] = None
+    top_k: int = Field(default=5, ge=1, le=50)
 
 
 class SearchResult(BaseModel):
@@ -48,6 +54,8 @@ async def index_document(request: IndexDocumentRequest):
     """
     索引文档到向量数据库
     """
+    if not request.project_id and not request.enterprise_id:
+        raise HTTPException(status_code=400, detail="索引必须指定 project_id 或 enterprise_id（数据隔离）")
     try:
         result = await rag_service.index_document(request)
         return {"status": "ok", "doc_id": request.doc_id, "chunks": result["chunks"]}
@@ -58,11 +66,12 @@ async def index_document(request: IndexDocumentRequest):
 @router.post("/search", response_model=list[SearchResult])
 async def search_knowledge(request: SearchRequest):
     """
-    检索知识库
+    检索知识库（必须带项目或企业范围）
     """
     try:
-        results = await rag_service.search(request)
-        return results
+        return await rag_service.search(request)
+    except RagScopeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"检索失败: {str(e)}")
 
@@ -70,11 +79,12 @@ async def search_knowledge(request: SearchRequest):
 @router.post("/query")
 async def rag_query(request: RagQueryRequest):
     """
-    RAG 问答 - 结合检索和 LLM 生成
+    RAG 问答 - 结合检索和 LLM 生成（必须带项目或企业范围）
     """
     try:
-        result = await rag_service.query_with_context(request)
-        return result
+        return await rag_service.query_with_context(request)
+    except RagScopeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"问答失败: {str(e)}")
 

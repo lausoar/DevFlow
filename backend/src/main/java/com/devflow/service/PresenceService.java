@@ -1,5 +1,8 @@
 package com.devflow.service;
 
+import com.devflow.entity.User;
+import com.devflow.mapper.UserMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -17,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class PresenceService {
 
     /** userId -> 该用户的活跃 WebSocket 会话ID集合（支持同一用户多端在线） */
@@ -26,10 +30,7 @@ public class PresenceService {
 
     /** 延迟获取消息模板，避免与 WebSocket 配置类形成 bean 循环依赖 */
     private final ObjectProvider<SimpMessagingTemplate> messagingTemplateProvider;
-
-    public PresenceService(ObjectProvider<SimpMessagingTemplate> messagingTemplateProvider) {
-        this.messagingTemplateProvider = messagingTemplateProvider;
-    }
+    private final UserMapper userMapper;
 
     /** 记录一次会话连接 */
     public void connect(String userId, String sessionId) {
@@ -62,17 +63,30 @@ public class PresenceService {
         return Set.copyOf(userSessions.keySet());
     }
 
-    /** 在线名单变化后广播给所有已连接客户端 */
+    /**
+     * 在线名单变化后按企业广播（/topic/presence.{enterpriseId}）：
+     * 在线状态属于组织内部信息，不能跨租户广播全量名单。
+     */
     public void broadcast() {
         SimpMessagingTemplate template = messagingTemplateProvider.getIfAvailable();
         if (template == null) {
             return;
         }
-        try {
-            template.convertAndSend("/topic/presence",
-                    Map.of("onlineUserIds", onlineUserIds()));
-        } catch (Exception e) {
-            log.warn("在线状态广播失败: {}", e.getMessage());
+        Map<String, java.util.List<String>> byEnterprise = new java.util.HashMap<>();
+        for (String userId : onlineUserIds()) {
+            User user = userMapper.selectById(userId);
+            if (user == null || user.getEnterpriseId() == null) {
+                continue;
+            }
+            byEnterprise.computeIfAbsent(user.getEnterpriseId(), k -> new java.util.ArrayList<>()).add(userId);
         }
+        byEnterprise.forEach((enterpriseId, ids) -> {
+            try {
+                template.convertAndSend("/topic/presence." + enterpriseId,
+                        Map.of("onlineUserIds", ids));
+            } catch (Exception e) {
+                log.warn("在线状态广播失败: enterprise={}, 原因={}", enterpriseId, e.getMessage());
+            }
+        });
     }
 }

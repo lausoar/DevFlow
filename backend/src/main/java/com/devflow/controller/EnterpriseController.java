@@ -9,6 +9,7 @@ import com.devflow.entity.Enterprise;
 import com.devflow.entity.User;
 import com.devflow.common.PermissionCodes;
 import com.devflow.common.exception.BusinessException;
+import com.devflow.security.AccessGuard;
 import com.devflow.service.AuditService;
 import com.devflow.service.EnterpriseService;
 import com.devflow.service.PermissionService;
@@ -19,12 +20,16 @@ import com.devflow.dto.request.UpdateMemberRoleRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 /**
  * 企业管理控制器
+ *
+ * 鉴权口径：除"创建/加入企业"外，全部要求操作者属于路径中的企业；
+ * 敏感字段（wecomWebhook / inviteCode）只对有相应管理权限的成员下发。
  */
 @Tag(name = "企业管理", description = "企业创建、成员管理、邀请码")
 @RestController
@@ -35,13 +40,15 @@ public class EnterpriseController {
     private final EnterpriseService enterpriseService;
     private final AuditService auditService;
     private final PermissionService permissionService;
+    private final AccessGuard guard;
 
     /** 获取当前用户的企业 */
     @Operation(summary = "获取当前用户的企业信息")
     @GetMapping("/current")
     public R<Enterprise> getCurrent(Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
-        return R.ok(enterpriseService.getUserEnterprise(userId));
+        String userId = guard.userId(authentication);
+        Enterprise enterprise = enterpriseService.getUserEnterprise(userId);
+        return R.ok(maskSensitive(enterprise, userId));
     }
 
     /** 创建企业 */
@@ -49,7 +56,7 @@ public class EnterpriseController {
     @PostMapping
     public R<Enterprise> create(@Valid @RequestBody CreateEnterpriseRequest request,
                                 Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
+        String userId = guard.userId(authentication);
         return R.ok(enterpriseService.createEnterprise(request, userId));
     }
 
@@ -59,21 +66,30 @@ public class EnterpriseController {
     public R<Enterprise> update(@PathVariable String id,
                                 @Valid @RequestBody UpdateEnterpriseRequest request,
                                 Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
+        String userId = guard.userId(authentication);
+        guard.requireEnterprisePermission(userId, id, PermissionCodes.ENTERPRISE_MANAGE);
         return R.ok(enterpriseService.updateEnterprise(id, request, userId));
     }
 
-    /** 获取企业详情 */
+    /** 获取企业详情（仅本企业成员） */
     @Operation(summary = "获取企业详情（含成员和部门树）")
     @GetMapping("/{id}")
-    public R<EnterpriseDetailResponse> getDetail(@PathVariable String id) {
-        return R.ok(enterpriseService.getEnterpriseDetail(id));
+    public R<EnterpriseDetailResponse> getDetail(@PathVariable String id, Authentication authentication) {
+        String userId = guard.userId(authentication);
+        guard.requireEnterpriseMember(userId, id);
+        EnterpriseDetailResponse detail = enterpriseService.getEnterpriseDetail(id);
+        if (detail != null && detail.getEnterprise() != null) {
+            detail.setEnterprise(maskSensitive(detail.getEnterprise(), userId));
+        }
+        return R.ok(detail);
     }
 
-    /** 获取企业成员列表 */
+    /** 获取企业成员列表（仅本企业成员） */
     @Operation(summary = "获取企业成员列表")
     @GetMapping("/{id}/members")
-    public R<List<User>> getMembers(@PathVariable String id) {
+    public R<List<User>> getMembers(@PathVariable String id, Authentication authentication) {
+        String userId = guard.userId(authentication);
+        guard.requireEnterpriseMember(userId, id);
         return R.ok(enterpriseService.getMembers(id));
     }
 
@@ -83,7 +99,8 @@ public class EnterpriseController {
     public R<com.devflow.dto.response.InviteMemberResponse> inviteMember(@PathVariable String id,
                                 @Valid @RequestBody InviteMemberRequest request,
                                 Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
+        String userId = guard.userId(authentication);
+        guard.requireEnterprisePermission(userId, id, PermissionCodes.MEMBER_INVITE);
         return R.ok(enterpriseService.inviteMember(id, request, userId));
     }
 
@@ -93,8 +110,13 @@ public class EnterpriseController {
     public R<java.util.Map<String, String>> resetMemberPassword(@PathVariable String id,
                                           @PathVariable String memberId,
                                           Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
+        String userId = guard.userId(authentication);
+        guard.requireEnterpriseMember(userId, id);
+        if (!guard.isEnterpriseSuperAdmin(userId)) {
+            throw new BusinessException(403, "仅超级管理员可重置密码");
+        }
         String password = enterpriseService.resetMemberPassword(id, memberId, userId);
+        // 临时密码只应被当事人看到一次，禁止缓存
         return R.ok(java.util.Map.of("password", password));
     }
 
@@ -104,19 +126,21 @@ public class EnterpriseController {
     public R<Void> removeMember(@PathVariable String id,
                                 @PathVariable String memberId,
                                 Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
+        String userId = guard.userId(authentication);
+        guard.requireEnterprisePermission(userId, id, PermissionCodes.MEMBER_REMOVE);
         enterpriseService.removeMember(id, memberId, userId);
         return R.ok();
     }
 
-    /** 解散企业（仅企业管理员） */
+    /** 修改成员角色 */
     @Operation(summary = "修改成员角色")
     @PutMapping("/{id}/members/{memberId}/role")
     public R<User> updateMemberRole(@PathVariable String id,
                                     @PathVariable String memberId,
                                     @Valid @RequestBody UpdateMemberRoleRequest request,
                                     Authentication authentication) {
-        String operatorId = (String) authentication.getPrincipal();
+        String operatorId = guard.userId(authentication);
+        guard.requireEnterprisePermission(operatorId, id, PermissionCodes.MEMBER_ROLE);
         return R.ok(enterpriseService.updateMemberRole(id, memberId, request.getRole(), operatorId));
     }
 
@@ -126,14 +150,17 @@ public class EnterpriseController {
                                           @PathVariable String memberId,
                                           @RequestBody UpdateMemberDepartmentRequest request,
                                           Authentication authentication) {
-        String operatorId = (String) authentication.getPrincipal();
+        String operatorId = guard.userId(authentication);
+        guard.requireEnterprisePermission(operatorId, id, PermissionCodes.MEMBER_DEPARTMENT);
         return R.ok(enterpriseService.updateMemberDepartment(id, memberId, request.getDepartmentId(), operatorId));
     }
 
     @Operation(summary = "解散企业（仅企业管理员）")
     @PostMapping("/{id}/dissolve")
     public R<Void> dissolve(@PathVariable String id, Authentication authentication) {
-        enterpriseService.dissolveEnterprise(id, (String) authentication.getPrincipal());
+        String userId = guard.userId(authentication);
+        guard.requireEnterprisePermission(userId, id, PermissionCodes.ENTERPRISE_MANAGE);
+        enterpriseService.dissolveEnterprise(id, userId);
         return R.ok();
     }
 
@@ -141,11 +168,13 @@ public class EnterpriseController {
     @Operation(summary = "退出企业")
     @PostMapping("/{id}/leave")
     public R<Void> leave(@PathVariable String id, Authentication authentication) {
-        enterpriseService.leaveEnterprise(id, (String) authentication.getPrincipal());
+        String userId = guard.userId(authentication);
+        guard.requireEnterpriseMember(userId, id);
+        enterpriseService.leaveEnterprise(id, userId);
         return R.ok();
     }
 
-    /** 审计日志（audit:read 权限点，当前为管理员及以上） */
+    /** 审计日志（audit:read 权限点，当前为管理员及以上；只允许查询本企业） */
     @Operation(summary = "分页查询企业审计日志")
     @GetMapping("/{id}/audit-logs")
     public R<com.baomidou.mybatisplus.extension.plugins.pagination.Page<com.devflow.entity.AuditLog>> auditLogs(
@@ -153,10 +182,9 @@ public class EnterpriseController {
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "20") Integer pageSize,
             Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
-        if (!permissionService.hasEnterprisePermission(userId, PermissionCodes.AUDIT_READ)) {
-            throw new BusinessException(403, "无权查看审计日志");
-        }
+        String userId = guard.userId(authentication);
+        // 关键：先校验路径企业在调用者企业范围内，再校验权限点，避免跨租户读日志
+        guard.requireEnterprisePermission(userId, id, PermissionCodes.AUDIT_READ);
         return R.ok(auditService.pageByEnterprise(id, page, pageSize));
     }
 
@@ -165,7 +193,25 @@ public class EnterpriseController {
     @PostMapping("/join")
     public R<Enterprise> joinByInviteCode(@RequestParam String inviteCode,
                                           Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
+        String userId = guard.userId(authentication);
         return R.ok(enterpriseService.joinByInviteCode(inviteCode, userId));
+    }
+
+    /**
+     * 敏感字段脱敏：企业微信 Webhook（内含机器人 key）与邀请码
+     * 只对有企业级管理权限的成员可见，其他成员拿到的是 null。
+     */
+    private Enterprise maskSensitive(Enterprise enterprise, String userId) {
+        if (enterprise == null) {
+            return null;
+        }
+        var codes = permissionService.enterprisePermissions(userId);
+        boolean manage = codes.contains(PermissionCodes.ENTERPRISE_MANAGE)
+                || codes.contains(PermissionCodes.MEMBER_INVITE);
+        if (!manage) {
+            enterprise.setWecomWebhook(null);
+            enterprise.setInviteCode(null);
+        }
+        return enterprise;
     }
 }

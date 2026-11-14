@@ -3,6 +3,7 @@ package com.devflow.config;
 import com.devflow.security.JwtAuthFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -18,10 +19,16 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
 import java.util.List;
 
 /**
  * Spring Security 配置
+ *
+ * 安全基线：
+ * - 未认证 401 / 无权限 403，均返回统一 JSON，前端据此决定是否跳登录；
+ * - 安全响应头（nosniff / DENY 框架 / Referrer 策略）全局下发；
+ * - CORS 白名单来自配置，不再散落硬编码。
  */
 @Configuration
 @EnableWebSecurity
@@ -31,17 +38,26 @@ public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
 
+    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:3001}")
+    private String allowedOrigins;
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-            // 禁用 CSRF（使用 JWT 无需 CSRF）
+            // 禁用 CSRF：鉴权走 Authorization 头；cookie 仅作为 <img>/<a> 下载的回退通道，
+            // 且写操作全部要求 Authorization 头之外的显式权限校验
             .csrf(AbstractHttpConfigurer::disable)
-            // 配置 CORS
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-            // 无状态会话
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            // 接口权限配置
+            // 安全响应头
+            .headers(headers -> headers
+                .contentTypeOptions(opts -> {})
+                .frameOptions(frame -> frame.deny())
+                .referrerPolicy(referrer -> referrer.policy(
+                        org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter
+                                .ReferrerPolicy.NO_REFERRER))
+            )
             .authorizeHttpRequests(auth -> auth
                 // 公开接口
                 .requestMatchers(
@@ -57,11 +73,10 @@ public class SecurityConfig {
                     "/swagger-ui.html",
                     "/actuator/health"
                 ).permitAll()
-                // 其他接口需要认证
                 .anyRequest().authenticated()
             )
             // 未认证（含 Token 过期/无效）统一 401 JSON，前端拦截器据此清会话跳登录；
-            // 已认证但权限不足统一 403 JSON（Spring 默认是 403 空体，语义上未认证应为 401）
+            // 已认证但权限不足统一 403 JSON
             .exceptionHandling(ex -> ex
                 .authenticationEntryPoint((req, res, e) -> {
                     res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -74,7 +89,6 @@ public class SecurityConfig {
                     res.getWriter().write("{\"code\":403,\"message\":\"权限不足\"}");
                 })
             )
-            // 注入 JWT 过滤器
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -88,7 +102,10 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of("http://localhost:3000", "http://localhost:3001"));
+        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);

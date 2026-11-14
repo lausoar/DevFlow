@@ -62,6 +62,8 @@ class ProjectAccessServiceImplTest {
     @DisplayName("普通成员：只可见自己参与的项目")
     void memberSeesOnlyJoinedProjects() {
         when(projectMemberMapper.selectList(any())).thenReturn(List.of(membership("p1"), membership("p2")));
+        // 可见性查询会对"参与的项目"做一次未删除过滤（@TableLogic 自动生效）
+        when(projectMapper.selectList(any())).thenReturn(List.of(project("p1"), project("p2")));
         when(userMapper.selectById("u1")).thenReturn(user("MEMBER", "e1"));
 
         List<String> ids = service.visibleProjectIds("u1");
@@ -95,14 +97,27 @@ class ProjectAccessServiceImplTest {
     @DisplayName("经理/管理员（非超管）：不加企业视野，仅成员口径")
     void managerDoesNotGetEnterpriseView() {
         when(projectMemberMapper.selectList(any())).thenReturn(List.of(membership("p1")));
+        when(projectMapper.selectList(any())).thenReturn(List.of(project("p1")));
         when(userMapper.selectById("u1")).thenReturn(user("MANAGER", "e1"));
 
         assertThat(service.visibleProjectIds("u1")).containsExactly("p1");
     }
 
     @Test
-    @DisplayName("无企业用户：可见集为空（越权防护）")
-    void userWithoutEnterpriseSeesNothing() {
+    @DisplayName("项目已逻辑删除：成员不再可见（防止删除后继续读写子资源）")
+    void deletedProjectNotVisible() {
+        when(projectMemberMapper.selectList(any())).thenReturn(List.of(membership("p1"), membership("p2")));
+        // 未删除过滤只返回 p2（p1 已被逻辑删除）
+        when(projectMapper.selectList(any())).thenReturn(List.of(project("p2")));
+        when(userMapper.selectById("u1")).thenReturn(user("MEMBER", "e1"));
+
+        assertThat(service.visibleProjectIds("u1")).containsExactly("p2");
+        assertThat(service.canView("u1", "p1")).isFalse();
+    }
+
+    @Test
+    @DisplayName("无企业用户：只能看到自己参与的项目，不获得额外视野")
+    void userWithoutEnterpriseHasNoExtraScope() {
         when(projectMemberMapper.selectList(any())).thenReturn(List.of());
         when(userMapper.selectById("u1")).thenReturn(user("MEMBER", null));
 

@@ -362,7 +362,9 @@ export function BugsTab({ projectId }: { projectId: string }) {
           <Select
             value="_noop"
             onValueChange={(v) => {
-              if (v && v !== '_noop') batchMutate.mutate({ data: { assigneeId: v } });
+              if (!v || v === '_noop') return;
+              // 后端把空串解释为"取消指派"；'_none' 是 UI 占位符，绝不能直接落库
+              batchMutate.mutate({ data: { assigneeId: v === '_none' ? '' : v } });
             }}
           >
             <SelectTrigger className="h-7 w-32 text-xs">

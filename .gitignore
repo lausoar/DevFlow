@@ -16,11 +16,12 @@ dist/
 build/
 out/
 
-# 环境变量
+# 环境变量（所有环境文件都含密钥，只保留 .example 模板）
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
+application-local.yml
+*.local.yml
 
 # IDE
 .idea/

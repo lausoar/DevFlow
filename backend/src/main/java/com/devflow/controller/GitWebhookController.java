@@ -57,7 +57,11 @@ public class GitWebhookController {
             return null;
         }
         String expected = project.getGitWebhookSecret();
-        if (expected == null || expected.isBlank() || !expected.equals(secret)) {
+        // 常量时间比较：String.equals 是短路比较，理论上可按响应时间逐字节猜测密钥
+        if (expected == null || expected.isBlank() || secret == null
+                || !java.security.MessageDigest.isEqual(
+                        expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        secret.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
             response.setStatus(401);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"code\":401,\"message\":\"Webhook 密钥无效\"}");

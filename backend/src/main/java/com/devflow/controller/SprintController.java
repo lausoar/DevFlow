@@ -9,6 +9,8 @@ import com.devflow.entity.Task;
 import com.devflow.mapper.SprintMapper;
 import com.devflow.mapper.TaskMapper;
 import com.devflow.service.ProjectAccessService;
+import com.devflow.common.PermissionCodes;
+import com.devflow.security.AccessGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +31,7 @@ public class SprintController {
     private final SprintMapper sprintMapper;
     private final TaskMapper taskMapper;
     private final ProjectAccessService projectAccessService;
+    private final AccessGuard guard;
 
     /** 按 ID 取迭代并校验项目可见性，不可见时与"不存在"同响应（不泄露存在性） */
     private Sprint requireVisible(String sprintId, Authentication authentication) {
@@ -37,6 +40,14 @@ public class SprintController {
                 (String) authentication.getPrincipal(), sprint.getProjectId())) {
             throw new BusinessException(404, "迭代不存在");
         }
+        return sprint;
+    }
+
+    /** 迭代可见 + 拥有 sprint:manage 权限点（OWNER/MANAGER） */
+    private Sprint requireManageable(String sprintId, Authentication authentication) {
+        Sprint sprint = requireVisible(sprintId, authentication);
+        guard.requireProjectPermission(guard.userId(authentication), sprint.getProjectId(),
+                PermissionCodes.SPRINT_MANAGE);
         return sprint;
     }
 
@@ -66,9 +77,8 @@ public class SprintController {
     public R<Sprint> create(@PathVariable String projectId,
                             @RequestBody Sprint sprint,
                             Authentication authentication) {
-        if (!projectAccessService.canView((String) authentication.getPrincipal(), projectId)) {
-            throw new BusinessException(404, "项目不存在或已被删除");
-        }
+        guard.requireProjectPermission(guard.userId(authentication), projectId,
+                PermissionCodes.SPRINT_MANAGE);
         sprint.setId(null);
         sprint.setProjectId(projectId);
         sprint.setStatus("PLANNING");
@@ -83,7 +93,7 @@ public class SprintController {
     public R<Sprint> update(@PathVariable String id,
                             @RequestBody Sprint sprint,
                             Authentication authentication) {
-        Sprint existing = requireVisible(id, authentication);
+        Sprint existing = requireManageable(id, authentication);
         // 迭代归属与状态不可通过通用更新接口改动（状态走 activate/complete）
         sprint.setId(id);
         sprint.setProjectId(existing.getProjectId());
@@ -97,7 +107,7 @@ public class SprintController {
     @Operation(summary = "激活 Sprint")
     @PostMapping("/sprints/{id}/activate")
     public R<Sprint> activate(@PathVariable String id, Authentication authentication) {
-        Sprint sprint = requireVisible(id, authentication);
+        Sprint sprint = requireManageable(id, authentication);
         sprint.setStatus("ACTIVE");
         sprintMapper.updateById(sprint);
         return R.ok(sprint);
@@ -107,7 +117,7 @@ public class SprintController {
     @Operation(summary = "完成 Sprint")
     @PostMapping("/sprints/{id}/complete")
     public R<Map<String, Object>> complete(@PathVariable String id, Authentication authentication) {
-        Sprint sprint = requireVisible(id, authentication);
+        Sprint sprint = requireManageable(id, authentication);
         sprint.setStatus("COMPLETED");
         sprintMapper.updateById(sprint);
 
@@ -127,7 +137,7 @@ public class SprintController {
     @Operation(summary = "删除 Sprint（逻辑删除）")
     @DeleteMapping("/sprints/{id}")
     public R<Void> delete(@PathVariable String id, Authentication authentication) {
-        requireVisible(id, authentication);
+        requireManageable(id, authentication);
         taskMapper.update(null, new LambdaUpdateWrapper<Task>()
                 .eq(Task::getSprintId, id)
                 .set(Task::getSprintId, null));

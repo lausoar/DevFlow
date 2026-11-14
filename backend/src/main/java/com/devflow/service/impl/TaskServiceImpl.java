@@ -127,8 +127,9 @@ public class TaskServiceImpl implements TaskService {
         if (StringUtils.hasText(task.getAssigneeId())) notifyUsers.add(task.getAssigneeId());
 
         String statusLabel = switch (status) {
-            case "IN_PROGRESS" -> "进行中";
-            case "IN_REVIEW" -> "评审中";
+            case "TODO" -> "待办";
+            case "DOING" -> "进行中";
+            case "TESTING" -> "测试中";
             case "DONE" -> "已完成";
             default -> status;
         };

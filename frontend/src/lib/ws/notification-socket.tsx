@@ -38,17 +38,20 @@ export function NotificationSocket() {
           // 收到实时通知，刷新通知相关查询
           queryClient.invalidateQueries({ queryKey: ['notifications'] });
         });
-        // 订阅全站在线名单（连接/断开时后端广播）
-        client.subscribe('/topic/presence', (message: IMessage) => {
-          try {
-            const body = JSON.parse(message.body);
-            if (Array.isArray(body.onlineUserIds)) {
-              usePresenceStore.getState().setOnlineUserIds(body.onlineUserIds);
+        // 订阅本企业的在线名单（后端按 enterprise 分 topic 广播，不再全平台广播）
+        const enterpriseId = useAuthStore.getState().user?.enterpriseId;
+        if (enterpriseId) {
+          client.subscribe(`/topic/presence.${enterpriseId}`, (message: IMessage) => {
+            try {
+              const body = JSON.parse(message.body);
+              if (Array.isArray(body.onlineUserIds)) {
+                usePresenceStore.getState().setOnlineUserIds(body.onlineUserIds);
+              }
+            } catch {
+              // 忽略非法消息
             }
-          } catch {
-            // 忽略非法消息
-          }
-        });
+          });
+        }
         // 订阅轻量聊天事件（任意页面都能感知新消息并维护未读角标）
         client.subscribe('/topic/chat.events', (message: IMessage) => {
           try {

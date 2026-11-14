@@ -3,7 +3,7 @@ package com.devflow.common;
 /**
  * 权限点常量（与 sys_permission 表种子一一对应）
  * 业务代码只依赖权限点做判定，禁止再手写角色名比较；
- * 角色→权限点的映射关系由 sys_role_permission 表决定（全局固定一套）。
+ * 角色→权限点的映射关系由 sys_role_permission 表决定（按企业隔离，见 PermissionService）。
  * 设计文档：docs/PERMISSION_DESIGN.md
  */
 public final class PermissionCodes {
@@ -25,6 +25,8 @@ public final class PermissionCodes {
     // ===== 项目级 =====
     /** 项目设置/归档/删除 */
     public static final String PROJECT_MANAGE = "project:manage";
+    /** 项目基本信息编辑（名称/标识/描述/仓库地址/状态） */
+    public static final String PROJECT_EDIT = "project:edit";
     /** 项目成员管理（加人/改角色/移除） */
     public static final String MEMBER_MANAGE = "member:manage";
     /** 新建 Bug */
@@ -36,6 +38,19 @@ public final class PermissionCodes {
 
     /** 测试用例管理（新建/编辑/删除/执行/转缺陷） */
     public static final String TESTCASE_MANAGE = "testcase:manage";
+
+    /** 任务管理（新建/编辑/删除/状态流转/依赖/清单/工时） */
+    public static final String TASK_MANAGE = "task:manage";
+    /** 需求管理（新建/编辑/删除/关联任务） */
+    public static final String REQUIREMENT_MANAGE = "requirement:manage";
+    /** 文档编辑（新建/编辑/版本恢复/评论） */
+    public static final String DOCUMENT_MANAGE = "document:manage";
+    /** 文档删除 */
+    public static final String DOCUMENT_DELETE = "document:delete";
+    /** 文件管理（上传/删除） */
+    public static final String FILE_MANAGE = "file:manage";
+    /** 迭代管理（创建/更新/激活/完成/删除） */
+    public static final String SPRINT_MANAGE = "sprint:manage";
 
     /**
      * 变更 Bug 状态——特殊：不走角色映射，走资源关系（负责人/创建人），

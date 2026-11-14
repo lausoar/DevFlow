@@ -40,6 +40,8 @@ class PermissionServiceImplTest {
     @Mock
     private ProjectMemberMapper projectMemberMapper;
     @Mock
+    private com.devflow.mapper.ProjectMapper projectMapper;
+    @Mock
     private UserMapper userMapper;
     @Mock
     private AuditService auditService;
@@ -66,9 +68,17 @@ class PermissionServiceImplTest {
 
     private static SysRolePermission rp(String scope, String role, String code) {
         SysRolePermission r = new SysRolePermission();
+        // 未指定企业视为全局默认模板（企业未自定义时回落到它）
+        r.setEnterpriseId(PermissionServiceImpl.GLOBAL_TEMPLATE);
         r.setScope(scope);
         r.setRole(role);
         r.setPermissionCode(code);
+        return r;
+    }
+
+    private static SysRolePermission rpOf(String enterpriseId, String scope, String role, String code) {
+        SysRolePermission r = rp(scope, role, code);
+        r.setEnterpriseId(enterpriseId);
         return r;
     }
 

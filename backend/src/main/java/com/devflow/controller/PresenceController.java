@@ -1,13 +1,16 @@
 package com.devflow.controller;
 
 import com.devflow.common.result.R;
+import com.devflow.entity.User;
+import com.devflow.mapper.UserMapper;
+import com.devflow.security.AccessGuard;
 import com.devflow.service.PresenceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -24,15 +27,24 @@ import java.util.Map;
 public class PresenceController {
 
     private final PresenceService presenceService;
+    private final UserMapper userMapper;
+    private final AccessGuard guard;
 
-    @Operation(summary = "获取当前全部在线用户ID快照")
+    @Operation(summary = "获取当前在线用户ID快照（仅本企业）")
     @GetMapping
     public org.springframework.http.ResponseEntity<R<Map<String, List<String>>>> online(
-            @RequestParam(required = false) String enterpriseId) {
-        // enterpriseId 预留：当前广播为全量在线名单，由前端按企业成员过滤。
+            Authentication authentication) {
+        // 在线名单按企业收敛：跨企业暴露在线状态属于组织信息泄露
+        String myEnterpriseId = guard.enterpriseIdOf(guard.userId(authentication));
+        List<String> online = presenceService.onlineUserIds().stream()
+                .filter(id -> {
+                    User u = userMapper.selectById(id);
+                    return u != null && myEnterpriseId != null
+                            && myEnterpriseId.equals(u.getEnterpriseId());
+                })
+                .toList();
         // no-store：在线名单实时变化，浏览器不得缓存 GET 响应（否则快照会读到过期名单）
-        R<Map<String, List<String>>> body = R.ok(Map.of("onlineUserIds",
-                List.copyOf(presenceService.onlineUserIds())));
+        R<Map<String, List<String>>> body = R.ok(Map.of("onlineUserIds", online));
         return org.springframework.http.ResponseEntity.ok()
                 .cacheControl(org.springframework.http.CacheControl.noStore())
                 .body(body);

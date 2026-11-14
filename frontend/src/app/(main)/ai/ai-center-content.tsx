@@ -8,6 +8,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { aiApi, type AiMessage, type AgentResult, type RagSearchResult } from '@/lib/api/ai';
+import { useProjects } from '@/lib/hooks/use-projects';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { aiChatHistoryApi, aiKindLabels, persistAiMessage, type AiChatHistoryItem } from '@/lib/api/ai-history';
 import {
   Bot,
@@ -313,13 +315,20 @@ function AgentPanel() {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<AgentResult | null>(null);
   const [loading, setLoading] = useState(false);
+  // Agent 的知识库工具按项目隔离：选中的项目会随请求下发
+  const { data: projectsRes } = useProjects({ page: 1, pageSize: 50 });
+  const projects = projectsRes?.data?.records || [];
+  const [projectId, setProjectId] = useState<string>('');
+  useEffect(() => {
+    if (!projectId && projects.length > 0) setProjectId(projects[0].id);
+  }, [projects, projectId]);
 
   const handleRun = async () => {
     if (!query.trim() || loading) return;
     setLoading(true);
     persistAiMessage('user', query, 'AGENT');
     try {
-      const res = await aiApi.agentRun(query);
+      const res = await aiApi.agentRun(query, projectId || undefined);
       setResult(res.data);
       persistAiMessage('assistant', res.data.answer, 'AGENT', res.data.model);
     } catch {
@@ -346,8 +355,18 @@ function AgentPanel() {
         </p>
       </div>
 
-      {/* 输入 */}
+      {/* 输入（项目范围决定知识库检索边界） */}
       <div className="flex gap-2">
+        <Select value={projectId} onValueChange={(v) => { if (v) setProjectId(v); }}>
+          <SelectTrigger className="w-40 shrink-0">
+            <SelectValue placeholder="选择项目" />
+          </SelectTrigger>
+          <SelectContent>
+            {projects.map((p) => (
+              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -432,14 +451,25 @@ function RagPanel() {
   const [results, setResults] = useState<RagSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  // 知识库按项目隔离：必须先选项目再检索（后端不再接受无范围的全局检索）
+  const { data: projectsRes } = useProjects({ page: 1, pageSize: 50 });
+  const projects = projectsRes?.data?.records || [];
+  const [projectId, setProjectId] = useState<string>('');
+  useEffect(() => {
+    if (!projectId && projects.length > 0) setProjectId(projects[0].id);
+  }, [projects, projectId]);
 
   const handleSearch = async () => {
     if (!query.trim() || loading) return;
+    if (!projectId) {
+      persistAiMessage('assistant', '请先选择要检索的项目。', 'RAG');
+      return;
+    }
     setLoading(true);
     setSearched(true);
     persistAiMessage('user', query, 'RAG');
     try {
-      const res = await aiApi.ragSearch(query);
+      const res = await aiApi.ragSearch(query, projectId);
       setResults(res.data);
       const summary = res.data.length
         ? '命中文档：\n' + res.data.map((r, i) => `${i + 1}. ${r.metadata?.title || '未命名'}（相似度 ${r.score.toFixed(3)}）`).join('\n')
@@ -462,8 +492,18 @@ function RagPanel() {
         </p>
       </div>
 
-      {/* 搜索输入 */}
+      {/* 检索范围 + 搜索输入 */}
       <div className="flex gap-2">
+        <Select value={projectId} onValueChange={(v) => { if (v) setProjectId(v); }}>
+          <SelectTrigger className="w-44 shrink-0">
+            <SelectValue placeholder="选择项目" />
+          </SelectTrigger>
+          <SelectContent>
+            {projects.map((p) => (
+              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -474,7 +514,7 @@ function RagPanel() {
             className="pl-9"
           />
         </div>
-        <Button onClick={handleSearch} disabled={!query.trim() || loading}>
+        <Button onClick={handleSearch} disabled={!query.trim() || loading || !projectId}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
           <span className="ml-1.5">搜索</span>
         </Button>

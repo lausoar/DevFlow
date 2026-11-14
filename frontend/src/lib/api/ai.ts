@@ -56,9 +56,12 @@ export const aiApi = {
 
   // ---- RAG ----
 
-  /** RAG 知识库搜索 */
-  ragSearch: (query: string, topK = 5) =>
-    aiClient.post<RagSearchResult[]>('/rag/search', { query, top_k: topK }),
+  /**
+   * RAG 知识库搜索（必须带项目范围：AI 服务按项目/企业做数据隔离，
+   * 不带范围的请求会被拒绝，避免跨项目检索）
+   */
+  ragSearch: (query: string, projectId: string, topK = 5) =>
+    aiClient.post<RagSearchResult[]>('/rag/search', { query, project_id: projectId, top_k: topK }),
 
   /** RAG 问答（检索 + 生成） */
   ragQuery: (question: string, projectId?: string, topK = 5) =>

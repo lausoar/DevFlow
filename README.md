@@ -234,11 +234,24 @@ mvn spring-boot:run
 # Swagger:  http://localhost:8080/api/v1/swagger-ui.html
 ```
 
-### 3️⃣ 启动 AI 服务（:8000）
+### 3️⃣ 配置环境变量（必读）
+
+后端与 AI 服务共享 JWT 密钥，**两边必须一致**，否则登录态无法在 AI 侧通过校验：
+
+```bash
+cp .env.example .env              # 根目录：数据库/MinIO 口令、JWT_SECRET、AI_SERVICE_TOKEN
+cp ai-service/.env.example ai-service/.env
+openssl rand -base64 48           # 生成 JWT_SECRET，分别填入上面的两个 .env
+```
+
+未配置 `JWT_SECRET` 时后端会生成一次性随机密钥（重启即掉登录），AI 服务则直接拒绝所有请求（fail-closed）。
+完整清单见 [docs/SECURITY_HARDENING.md](docs/SECURITY_HARDENING.md)。
+
+### 4️⃣ 启动 AI 服务（:8000）
 
 ```bash
 cd ai-service
-cp .env.example .env        # 填入任一家 LLM 的 API Key（六选一）
+# 在 .env 中填入任一家 LLM 的 API Key（六选一）与 JWT_SECRET / AI_SERVICE_TOKEN
 pip install -e ".[dev]"
 uvicorn app.main:app --reload --port 8000
 # 文档: http://localhost:8000/docs
@@ -246,7 +259,7 @@ uvicorn app.main:app --reload --port 8000
 
 > 💡 不配 API Key 也能跑：AI 功能走降级路径，不影响主平台使用。本地嵌入模式（`EMBEDDING_PROVIDER=local`）RAG 完全免费。
 
-### 4️⃣ 启动前端（:3000）
+### 5️⃣ 启动前端（:3000）
 
 ```bash
 cd frontend
@@ -349,6 +362,7 @@ DevFlow/
 坦诚记录当前的权衡，也是后续迭代方向：
 
 - 全局搜索基于 MySQL `LIKE`，未引入 ES——中小团队规模下够用，数据量上来后是第一个要换的件
+- 所有敏感凭据（数据库/MinIO/JWT/服务令牌）一律从环境变量注入，仓库内不含真实密钥；WebSocket 仍为单机 SimpleBroker
 - 统计报表为内存聚合（无物化/无 SQL 聚合），适合当前量级
 - 防爆破计数在单实例内存（重启清零），多实例部署需迁移 Redis
 - 邮件通知未接 SMTP（当前通知通道：站内 + 企业微信机器人）

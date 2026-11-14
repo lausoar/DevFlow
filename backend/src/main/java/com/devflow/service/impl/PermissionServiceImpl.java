@@ -2,9 +2,11 @@ package com.devflow.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.devflow.common.PermissionCodes;
+import com.devflow.entity.Project;
 import com.devflow.entity.ProjectMember;
 import com.devflow.entity.SysRolePermission;
 import com.devflow.entity.User;
+import com.devflow.mapper.ProjectMapper;
 import com.devflow.mapper.ProjectMemberMapper;
 import com.devflow.mapper.SysRolePermissionMapper;
 import com.devflow.mapper.UserMapper;
@@ -26,19 +28,29 @@ import java.util.concurrent.ConcurrentHashMap;
  * 统一权限判定实现
  * 启动时把 sys_role_permission 全量加载进内存（行数很小），判定零额外查表；
  * 修改映射后调用 reload() 生效。
+ *
+ * 多租户：映射按 enterprise_id 分组缓存；某个企业没有自己的行时回落到全局模板（'*'）。
+ * 这样某一企业超管调整矩阵只影响本企业，不会再"修改全平台权限"。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class PermissionServiceImpl implements PermissionService {
 
+    /** 全局默认模板的 enterprise_id */
+    public static final String GLOBAL_TEMPLATE = "*";
+
     private final SysRolePermissionMapper sysRolePermissionMapper;
     private final ProjectMemberMapper projectMemberMapper;
+    private final ProjectMapper projectMapper;
     private final UserMapper userMapper;
     private final AuditService auditService;
 
-    /** key = "SCOPE:role"，value = 该角色拥有的权限点集合 */
-    private volatile Map<String, Set<String>> rolePermissions = new ConcurrentHashMap<>();
+    /**
+     * 企业 ID → ("SCOPE:role" → 权限点集合)
+     * 键为 {@link #GLOBAL_TEMPLATE} 时是全局默认模板。
+     */
+    private volatile Map<String, Map<String, Set<String>>> enterprisePermissions = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void init() {
@@ -48,13 +60,19 @@ public class PermissionServiceImpl implements PermissionService {
     @Override
     public void reload() {
         List<SysRolePermission> all = sysRolePermissionMapper.selectList(null);
-        Map<String, Set<String>> map = new ConcurrentHashMap<>();
+        Map<String, Map<String, Set<String>>> byEnterprise = new ConcurrentHashMap<>();
         for (SysRolePermission rp : all) {
+            String eid = StringUtils.hasText(rp.getEnterpriseId()) ? rp.getEnterpriseId() : GLOBAL_TEMPLATE;
             String key = rp.getScope() + ":" + rp.getRole();
-            map.computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet()).add(rp.getPermissionCode());
+            byEnterprise
+                    .computeIfAbsent(eid, k -> new ConcurrentHashMap<>())
+                    .computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet())
+                    .add(rp.getPermissionCode());
         }
-        this.rolePermissions = map;
-        log.info("权限映射已加载：{} 个角色条目", map.size());
+        this.enterprisePermissions = byEnterprise;
+        log.info("权限映射已加载：{} 个企业的映射（含全局模板 {} 条）",
+                byEnterprise.size(),
+                byEnterprise.getOrDefault(GLOBAL_TEMPLATE, Map.of()).size());
     }
 
     @Override
@@ -66,8 +84,8 @@ public class PermissionServiceImpl implements PermissionService {
         if (user == null || !StringUtils.hasText(user.getRole())) {
             return false;
         }
-        Set<String> codes = rolePermissions.get(PermissionCodes.SCOPE_ENTERPRISE + ":" + user.getRole());
-        boolean allowed = codes != null && codes.contains(permissionCode);
+        boolean allowed = codesFor(user.getEnterpriseId(), PermissionCodes.SCOPE_ENTERPRISE, user.getRole())
+                .contains(permissionCode);
         if (!allowed) {
             auditService.log(userId, user.getEnterpriseId(), null, "permission.denied",
                     "permission", permissionCode, "企业权限判定未通过: " + permissionCode);
@@ -87,10 +105,12 @@ public class PermissionServiceImpl implements PermissionService {
         if (member == null || !StringUtils.hasText(member.getRole())) {
             return false;
         }
-        Set<String> codes = rolePermissions.get(PermissionCodes.SCOPE_PROJECT + ":" + member.getRole());
-        boolean allowed = codes != null && codes.contains(permissionCode);
+        Project project = projectMapper.selectById(projectId);
+        String enterpriseId = project != null ? project.getEnterpriseId() : null;
+        boolean allowed = codesFor(enterpriseId, PermissionCodes.SCOPE_PROJECT, member.getRole())
+                .contains(permissionCode);
         if (!allowed) {
-            auditService.log(userId, null, projectId, "permission.denied",
+            auditService.log(userId, enterpriseId, projectId, "permission.denied",
                     "permission", permissionCode, "项目权限判定未通过: " + permissionCode);
         }
         return allowed;
@@ -105,8 +125,8 @@ public class PermissionServiceImpl implements PermissionService {
         if (user == null || !StringUtils.hasText(user.getRole())) {
             return Set.of();
         }
-        Set<String> codes = rolePermissions.get(PermissionCodes.SCOPE_ENTERPRISE + ":" + user.getRole());
-        return codes != null ? Set.copyOf(codes) : Set.of();
+        return Set.copyOf(codesFor(user.getEnterpriseId(),
+                PermissionCodes.SCOPE_ENTERPRISE, user.getRole()));
     }
 
     @Override
@@ -121,7 +141,29 @@ public class PermissionServiceImpl implements PermissionService {
         if (member == null || !StringUtils.hasText(member.getRole())) {
             return Set.of();
         }
-        Set<String> codes = rolePermissions.get(PermissionCodes.SCOPE_PROJECT + ":" + member.getRole());
-        return codes != null ? Set.copyOf(codes) : Set.of();
+        Project project = projectMapper.selectById(projectId);
+        return Set.copyOf(codesFor(project != null ? project.getEnterpriseId() : null,
+                PermissionCodes.SCOPE_PROJECT, member.getRole()));
+    }
+
+    /**
+     * 取某企业在某作用域/角色下的权限点集合。
+     * 企业一旦有自己的映射快照（哪怕某角色被清空），就完全以快照为准，
+     * 不能回落到全局模板——否则"收回某角色全部权限"会被模板静默还原。
+     */
+    private Set<String> codesFor(String enterpriseId, String scope, String role) {
+        Map<String, Map<String, Set<String>>> snapshot = this.enterprisePermissions;
+        String key = scope + ":" + role;
+        if (StringUtils.hasText(enterpriseId)) {
+            Map<String, Set<String>> own = snapshot.get(enterpriseId);
+            if (own != null) {
+                return own.getOrDefault(key, Set.of());
+            }
+        }
+        Map<String, Set<String>> global = snapshot.get(GLOBAL_TEMPLATE);
+        if (global == null) {
+            return Set.of();
+        }
+        return global.getOrDefault(key, Set.of());
     }
 }

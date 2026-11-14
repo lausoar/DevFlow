@@ -41,24 +41,34 @@ public class AiChatAssistantService {
 
     private final ChatMessageMapper messageMapper;
     private final UserMapper userMapper;
+    private final com.devflow.mapper.ChatChannelMapper channelMapper;
+    private final com.devflow.mapper.ProjectMapper projectMapper;
     private final SimpMessagingTemplate messagingTemplate;
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper;
 
     private final RestClient restClient;
+    /** 服务间调用令牌（AI 服务强制认证后必须带上） */
+    private final String serviceToken;
 
     public AiChatAssistantService(
             ChatMessageMapper messageMapper,
             UserMapper userMapper,
+            com.devflow.mapper.ChatChannelMapper channelMapper,
+            com.devflow.mapper.ProjectMapper projectMapper,
             SimpMessagingTemplate messagingTemplate,
             PasswordEncoder passwordEncoder,
             ObjectMapper objectMapper,
-            @Value("${ai.service.base-url:http://localhost:8000/api/v1}") String aiBaseUrl) {
+            @Value("${ai.service.base-url:http://localhost:8000/api/v1}") String aiBaseUrl,
+            @Value("${ai.service.token:}") String serviceToken) {
         this.messageMapper = messageMapper;
         this.userMapper = userMapper;
+        this.channelMapper = channelMapper;
+        this.projectMapper = projectMapper;
         this.messagingTemplate = messagingTemplate;
         this.passwordEncoder = passwordEncoder;
         this.objectMapper = objectMapper;
+        this.serviceToken = serviceToken;
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout((int) Duration.ofSeconds(3).toMillis());
         factory.setReadTimeout((int) Duration.ofSeconds(120).toMillis());
@@ -86,7 +96,7 @@ public class AiChatAssistantService {
      */
     @Async("aiExecutor")
     public void replyToChannel(String channelId, String question) {
-        String answer = askAi(question);
+        String answer = askAi(question, channelId);
         try {
             User aiUser = ensureAiUser();
             ChatMessage reply = new ChatMessage();
@@ -109,11 +119,35 @@ public class AiChatAssistantService {
 
     /** RAG 问答优先，知识库未命中或调用失败时降级为普通对话 */
     private String askAi(String question) {
+        return askAi(question, null);
+    }
+
+    /**
+     * RAG 问答（带检索范围）。
+     * 频道属于某个项目时把 project_id / enterprise_id 传给 AI 服务，
+     * 否则 AI 侧无法做隔离会直接拒绝（宁可降级也不跨项目检索）。
+     */
+    private String askAi(String question, String channelId) {
+        Map<String, Object> ragBody = new java.util.HashMap<>();
+        ragBody.put("question", question);
+        ragBody.put("top_k", 4);
+        Scope scope = resolveScope(channelId);
+        if (scope.projectId() != null) {
+            ragBody.put("project_id", scope.projectId());
+        }
+        if (scope.enterpriseId() != null) {
+            ragBody.put("enterprise_id", scope.enterpriseId());
+        }
+        if (scope.projectId() == null && scope.enterpriseId() == null) {
+            // 无范围可检索：直接走普通对话，避免把全平台知识库暴露给无归属频道
+            return plainChat(question);
+        }
         try {
             String raw = restClient.post()
                     .uri("/rag/query")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(Map.of("question", question, "top_k", 4))
+                    .headers(this::applyServiceToken)
+                    .body(ragBody)
                     .retrieve()
                     .body(String.class);
             JsonNode node = objectMapper.readTree(raw);
@@ -124,11 +158,16 @@ public class AiChatAssistantService {
         } catch (Exception e) {
             log.info("RAG 问答不可用，降级为普通对话: {}", e.getMessage());
         }
+        return plainChat(question);
+    }
 
+    /** 普通对话兜底（不带知识库上下文） */
+    private String plainChat(String question) {
         try {
             String raw = restClient.post()
                     .uri("/chat/completions")
                     .contentType(MediaType.APPLICATION_JSON)
+                    .headers(this::applyServiceToken)
                     .body(Map.of(
                             "messages", java.util.List.of(Map.of("role", "user", "content", question)),
                             "temperature", 0.3))
@@ -143,6 +182,28 @@ public class AiChatAssistantService {
             log.warn("AI 对话调用失败: {}", e.getMessage());
         }
         return "⚠️ AI 助手暂时无法回复，请确认 ai-service 已启动且配置了 LLM API Key，稍后再试。";
+    }
+
+    /** 频道 → 检索范围（项目优先，其次项目所属企业） */
+    private record Scope(String projectId, String enterpriseId) {
+    }
+
+    private Scope resolveScope(String channelId) {
+        if (channelId == null || channelId.isBlank()) {
+            return new Scope(null, null);
+        }
+        com.devflow.entity.ChatChannel channel = channelMapper.selectById(channelId);
+        if (channel == null || channel.getProjectId() == null) {
+            return new Scope(null, null);
+        }
+        com.devflow.entity.Project project = projectMapper.selectById(channel.getProjectId());
+        return new Scope(channel.getProjectId(), project != null ? project.getEnterpriseId() : null);
+    }
+
+    private void applyServiceToken(org.springframework.http.HttpHeaders headers) {
+        if (serviceToken != null && !serviceToken.isBlank()) {
+            headers.set("X-Service-Token", serviceToken);
+        }
     }
 
     /** 获取或懒创建 AI 助手系统用户（聊天历史联表 sys_user 渲染发送者信息） */

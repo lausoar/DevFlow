@@ -69,15 +69,19 @@ class ChromaClient:
         )
         resp.raise_for_status()
 
-    async def query(self, query_embeddings, n_results: int) -> dict:
+    async def query(self, query_embeddings, n_results: int, where: dict | None = None) -> dict:
         cid = await self.ensure_collection()
+        payload = {
+            "query_embeddings": query_embeddings,
+            "n_results": n_results,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        # 数据隔离的关键：带上 where 过滤，避免把 A 项目/企业的文档检索给 B 项目成员
+        if where:
+            payload["where"] = where
         resp = await self.client.post(
             self._url(f"/collections/{cid}/query"),
-            json={
-                "query_embeddings": query_embeddings,
-                "n_results": n_results,
-                "include": ["documents", "metadatas", "distances"],
-            },
+            json=payload,
         )
         resp.raise_for_status()
         return resp.json()
