@@ -30,6 +30,7 @@ public class StatisticsServiceImpl implements StatisticsService {
     private final RequirementMapper requirementMapper;
     private final ProjectMemberMapper projectMemberMapper;
     private final UserMapper userMapper;
+    private final com.devflow.service.WorkflowService workflowService;
 
     // ============================================
     // 企业级统计
@@ -83,15 +84,28 @@ public class StatisticsServiceImpl implements StatisticsService {
             members.forEach(m -> memberIds.add(m.getUserId()));
         }
 
-        // 任务总览
+        // 任务总览：按工作流分类聚合（项目可能自定义状态码，不能按状态码硬编码）
         int totalTasks = allTasks.size();
-        int completedTasks = (int) allTasks.stream().filter(t -> "DONE".equals(t.getStatus())).count();
-        int inProgressTasks = (int) allTasks.stream().filter(t -> "DOING".equals(t.getStatus())).count();
-        int todoTasks = (int) allTasks.stream().filter(t -> "TODO".equals(t.getStatus())).count();
-        int overdueTasks = (int) allTasks.stream()
-            .filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(LocalDateTime.now())
-                && !"DONE".equals(t.getStatus()))
-            .count();
+        int completedTasks = 0;
+        int inProgressTasks = 0;
+        int todoTasks = 0;
+        int overdueTasks = 0;
+        for (String pid : projectIds) {
+            java.util.Set<String> doneCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                    pid, com.devflow.service.WorkflowService.TYPE_TASK, com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+            java.util.Set<String> progCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                    pid, com.devflow.service.WorkflowService.TYPE_TASK, com.devflow.entity.WorkflowStatus.CATEGORY_IN_PROGRESS));
+            List<com.devflow.entity.Task> projectTasks = allTasks.stream()
+                    .filter(t -> pid.equals(t.getProjectId())).toList();
+            completedTasks += (int) projectTasks.stream().filter(t -> doneCodes.contains(t.getStatus())).count();
+            inProgressTasks += (int) projectTasks.stream().filter(t -> progCodes.contains(t.getStatus())).count();
+            todoTasks += (int) projectTasks.stream()
+                    .filter(t -> !doneCodes.contains(t.getStatus()) && !progCodes.contains(t.getStatus())).count();
+            overdueTasks += (int) projectTasks.stream()
+                    .filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(LocalDateTime.now())
+                            && !doneCodes.contains(t.getStatus()))
+                    .count();
+        }
 
         // Bug 总览
         int totalBugs = allBugs.size();
@@ -122,10 +136,15 @@ public class StatisticsServiceImpl implements StatisticsService {
                     .collect(Collectors.toList());
 
                 int pTotal = projectTasks.size();
-                int pCompleted = (int) projectTasks.stream().filter(t -> "DONE".equals(t.getStatus())).count();
-                int pOpenBugs = (int) projectBugs.stream()
-                    .filter(b -> !"RESOLVED".equals(b.getStatus()) && !"CLOSED".equals(b.getStatus()))
-                    .count();
+                java.util.Set<String> pDoneCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                        project.getId(), com.devflow.service.WorkflowService.TYPE_TASK,
+                        com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+                java.util.Set<String> pResolvedBugCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                        project.getId(), com.devflow.service.WorkflowService.TYPE_BUG,
+                        com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+                pResolvedBugCodes.add("RESOLVED");
+                int pCompleted = (int) projectTasks.stream().filter(t -> pDoneCodes.contains(t.getStatus())).count();
+                int pOpenBugs = (int) projectBugs.stream().filter(b -> !pResolvedBugCodes.contains(b.getStatus())).count();
 
                 List<ProjectMember> pMembers = projectMemberMapper.selectList(
                     new LambdaQueryWrapper<ProjectMember>().eq(ProjectMember::getProjectId, project.getId())
@@ -149,12 +168,25 @@ public class StatisticsServiceImpl implements StatisticsService {
         // 任务趋势（最近 14 天）
         List<EnterpriseStatsResponse.TrendPoint> taskTrend = buildTaskTrend(allTasks, 14);
 
-        // 分布统计
+        // 分布统计：按各项目工作流的实际状态码聚合（去重合并同名状态）
         Map<String, Integer> taskStatusDist = new LinkedHashMap<>();
-        taskStatusDist.put("TODO", todoTasks);
-        taskStatusDist.put("DOING", inProgressTasks);
-        taskStatusDist.put("TESTING", (int) allTasks.stream().filter(t -> "TESTING".equals(t.getStatus())).count());
-        taskStatusDist.put("DONE", completedTasks);
+        Map<String, String> statusLabels = new HashMap<>();
+        for (String pid : projectIds) {
+            for (com.devflow.entity.WorkflowStatus st :
+                    workflowServiceStatuses(pid, com.devflow.service.WorkflowService.TYPE_TASK)) {
+                int count = (int) allTasks.stream()
+                        .filter(t -> pid.equals(t.getProjectId()) && st.getCode().equals(t.getStatus()))
+                        .count();
+                if (count > 0) {
+                    taskStatusDist.merge(st.getCode(), count, Integer::sum);
+                    statusLabels.putIfAbsent(st.getCode(), st.getName());
+                }
+            }
+        }
+        // 兜底：未知状态码（历史数据）也纳入分布，避免总量对不上
+        allTasks.stream()
+                .filter(t -> t.getStatus() != null && !taskStatusDist.containsKey(t.getStatus()))
+                .forEach(t -> taskStatusDist.merge(t.getStatus(), 1, Integer::sum));
 
         Map<String, Integer> bugSeverityDist = new LinkedHashMap<>();
         bugSeverityDist.put("BLOCKER", (int) allBugs.stream().filter(b -> "BLOCKER".equals(b.getSeverity())).count());
@@ -232,22 +264,33 @@ public class StatisticsServiceImpl implements StatisticsService {
 
         // 计算各维度指标
         int totalTasks = tasks.size();
-        int completedTasks = (int) tasks.stream().filter(t -> "DONE".equals(t.getStatus())).count();
+        java.util.Set<String> doneTaskCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
+                com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+        int completedTasks = (int) tasks.stream().filter(t -> doneTaskCodes.contains(t.getStatus())).count();
         double taskCompletionRate = totalTasks > 0 ? (double) completedTasks / totalTasks * 100 : 0;
 
         int totalBugs = bugs.size();
-        int resolvedBugs = (int) bugs.stream()
-            .filter(b -> "RESOLVED".equals(b.getStatus()) || "CLOSED".equals(b.getStatus()))
-            .count();
+        java.util.Set<String> doneBugCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, com.devflow.service.WorkflowService.TYPE_BUG,
+                com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+        // 缺陷"已解决"在默认流程里属于 IN_PROGRESS 分类（还需回归），单独取 RESOLVED/CLOSED 语义
+        java.util.Set<String> resolvedBugCodes = new java.util.HashSet<>(doneBugCodes);
+        resolvedBugCodes.add("RESOLVED");
+        int resolvedBugs = (int) bugs.stream().filter(b -> resolvedBugCodes.contains(b.getStatus())).count();
         double bugResolutionRate = totalBugs > 0 ? (double) resolvedBugs / totalBugs * 100 : 0;
 
         int totalRequirements = requirements.size();
-        int completedRequirements = (int) requirements.stream().filter(r -> "COMPLETED".equals(r.getStatus())).count();
+        java.util.Set<String> doneReqCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, com.devflow.service.WorkflowService.TYPE_REQUIREMENT,
+                com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+        int completedRequirements = (int) requirements.stream()
+                .filter(r -> doneReqCodes.contains(r.getStatus())).count();
         double requirementCompletionRate = totalRequirements > 0 ? (double) completedRequirements / totalRequirements * 100 : 0;
 
         int overdueTasks = (int) tasks.stream()
             .filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(LocalDateTime.now())
-                && !"DONE".equals(t.getStatus()))
+                && !doneTaskCodes.contains(t.getStatus()))
             .count();
         double overdueRate = totalTasks > 0 ? (double) overdueTasks / totalTasks * 100 : 0;
 
@@ -259,7 +302,7 @@ public class StatisticsServiceImpl implements StatisticsService {
         if (!completedSprints.isEmpty()) {
             double totalPoints = completedSprints.stream().mapToDouble(s -> {
                 return tasks.stream()
-                    .filter(t -> s.getId().equals(t.getSprintId()) && "DONE".equals(t.getStatus()))
+                    .filter(t -> s.getId().equals(t.getSprintId()) && doneTaskCodes.contains(t.getStatus()))
                     .mapToInt(t -> t.getStoryPoints() != null ? t.getStoryPoints() : 1)
                     .sum();
             }).sum();
@@ -363,6 +406,18 @@ public class StatisticsServiceImpl implements StatisticsService {
 
         LocalDateTime now = LocalDateTime.now();
 
+        // 按项目工作流分类聚合（自定义状态同样正确归类）
+        java.util.Set<String> doneCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
+                com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+        java.util.Set<String> progCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
+                com.devflow.entity.WorkflowStatus.CATEGORY_IN_PROGRESS));
+        java.util.Set<String> resolvedBugCodes = new java.util.HashSet<>(
+                workflowService.statusCodesInCategory(projectId, com.devflow.service.WorkflowService.TYPE_BUG,
+                        com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+        resolvedBugCodes.add("RESOLVED");
+
         List<MemberWorkloadResponse.MemberStats> memberStatsList = members.stream()
             .map(member -> {
                 String userId = member.getUserId();
@@ -376,19 +431,19 @@ public class StatisticsServiceImpl implements StatisticsService {
                     .collect(Collectors.toList());
 
                 int totalTasks = memberTasks.size();
-                int completedTasks = (int) memberTasks.stream().filter(t -> "DONE".equals(t.getStatus())).count();
-                int inProgressTasks = (int) memberTasks.stream().filter(t -> "DOING".equals(t.getStatus())).count();
-                int todoTasks = (int) memberTasks.stream().filter(t -> "TODO".equals(t.getStatus())).count();
+                int completedTasks = (int) memberTasks.stream().filter(t -> doneCodes.contains(t.getStatus())).count();
+                int inProgressTasks = (int) memberTasks.stream().filter(t -> progCodes.contains(t.getStatus())).count();
+                int todoTasks = memberTasks.size() - completedTasks - inProgressTasks;
                 int bugCount = memberBugs.size();
                 int resolvedBugCount = (int) memberBugs.stream()
-                    .filter(b -> "RESOLVED".equals(b.getStatus()) || "CLOSED".equals(b.getStatus()))
+                    .filter(b -> resolvedBugCodes.contains(b.getStatus()))
                     .count();
                 int criticalTasks = (int) memberTasks.stream()
                     .filter(t -> "CRITICAL".equals(t.getPriority()) || "HIGH".equals(t.getPriority()))
                     .count();
                 int overdueTasks = (int) memberTasks.stream()
                     .filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(now)
-                        && !"DONE".equals(t.getStatus()))
+                        && !doneCodes.contains(t.getStatus()))
                     .count();
                 double completionRate = totalTasks > 0 ? (double) completedTasks / totalTasks * 100 : 0;
 
@@ -498,6 +553,10 @@ public class StatisticsServiceImpl implements StatisticsService {
         long totalDays = ChronoUnit.DAYS.between(startDate, endDate);
         if (totalDays <= 0) totalDays = 1;
 
+        // "已完成"按工作流分类判定（项目可自定义终态标签）
+        java.util.Set<String> doneCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
+                com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
         // 计算每天的燃尽数据
         List<BurndownResponse.BurndownPoint> dataPoints = new ArrayList<>();
         LocalDate today = LocalDate.now();
@@ -512,7 +571,7 @@ public class StatisticsServiceImpl implements StatisticsService {
             // 实际剩余（截止到该日期完成的任务）
             final LocalDate currentDate = date;
             int actualCompleted = sprintTasks.stream()
-                .filter(t -> "DONE".equals(t.getStatus()))
+                .filter(t -> doneCodes.contains(t.getStatus()))
                 .filter(t -> t.getUpdatedAt() != null && t.getUpdatedAt().toLocalDate().isBefore(currentDate.plusDays(1)))
                 .mapToInt(t -> t.getStoryPoints() != null ? t.getStoryPoints() : 1)
                 .sum();
@@ -521,14 +580,14 @@ public class StatisticsServiceImpl implements StatisticsService {
             // 当天完成
             final LocalDate prevDate = date.minusDays(1);
             int completedBefore = sprintTasks.stream()
-                .filter(t -> "DONE".equals(t.getStatus()))
+                .filter(t -> doneCodes.contains(t.getStatus()))
                 .filter(t -> t.getUpdatedAt() != null && t.getUpdatedAt().toLocalDate().isBefore(prevDate.plusDays(1)))
                 .mapToInt(t -> t.getStoryPoints() != null ? t.getStoryPoints() : 1)
                 .sum();
             int completedToday = actualCompleted - completedBefore;
 
             long completedTasksOnDate = sprintTasks.stream()
-                .filter(t -> "DONE".equals(t.getStatus()))
+                .filter(t -> doneCodes.contains(t.getStatus()))
                 .filter(t -> t.getUpdatedAt() != null && t.getUpdatedAt().toLocalDate().isEqual(date))
                 .count();
 
@@ -588,6 +647,14 @@ public class StatisticsServiceImpl implements StatisticsService {
             new LambdaQueryWrapper<Task>().eq(Task::getProjectId, projectId)
         );
 
+        // 甘特进度按工作流分类推断，不写死状态名
+        java.util.Set<String> ganttDoneCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
+                com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+        java.util.Set<String> ganttProgCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
+                com.devflow.entity.WorkflowStatus.CATEGORY_IN_PROGRESS));
+
         // 获取用户名映射
         Set<String> assigneeIds = tasks.stream()
             .map(Task::getAssigneeId)
@@ -630,19 +697,20 @@ public class StatisticsServiceImpl implements StatisticsService {
                     endDate = LocalDate.now().plusDays(7).toString();
                 }
 
-                // 进度
+                // 进度：按工作流分类推断（终态 100%，进行中 50%，待办 0%），
+                // 不再依赖写死的状态名
                 int progress;
-                switch (task.getStatus()) {
-                    case "DONE": progress = 100; break;
-                    case "TESTING": progress = 80; break;
-                    case "DOING": progress = 50; break;
-                    case "TODO": progress = 0; break;
-                    default: progress = 0;
+                if (ganttDoneCodes.contains(task.getStatus())) {
+                    progress = 100;
+                } else if (ganttProgCodes.contains(task.getStatus())) {
+                    progress = 50;
+                } else {
+                    progress = 0;
                 }
 
                 boolean overdue = task.getDueDate() != null
                     && task.getDueDate().isBefore(now)
-                    && !"DONE".equals(task.getStatus());
+                    && !ganttDoneCodes.contains(task.getStatus());
 
                 return GanttTaskResponse.GanttTask.builder()
                     .id(task.getId())
@@ -679,6 +747,18 @@ public class StatisticsServiceImpl implements StatisticsService {
         List<EnterpriseStatsResponse.TrendPoint> trend = new ArrayList<>();
         LocalDate today = LocalDate.now();
 
+        // 任务可能来自不同项目，各自有自己的工作流：按"项目→已完成状态码集合"预计算一次
+        Map<String, java.util.Set<String>> doneCodesByProject = new HashMap<>();
+        for (Task t : tasks) {
+            doneCodesByProject.computeIfAbsent(t.getProjectId(), pid -> new java.util.HashSet<>(
+                    workflowService.statusCodesInCategory(pid, com.devflow.service.WorkflowService.TYPE_TASK,
+                            com.devflow.entity.WorkflowStatus.CATEGORY_DONE)));
+        }
+        java.util.function.Predicate<Task> isDone = t -> {
+            java.util.Set<String> codes = doneCodesByProject.get(t.getProjectId());
+            return codes != null && codes.contains(t.getStatus());
+        };
+
         for (int i = days - 1; i >= 0; i--) {
             LocalDate date = today.minusDays(i);
             final LocalDate dateEnd = date.plusDays(1);
@@ -688,7 +768,7 @@ public class StatisticsServiceImpl implements StatisticsService {
                 .count();
 
             int completed = (int) tasks.stream()
-                .filter(t -> "DONE".equals(t.getStatus()))
+                .filter(isDone)
                 .filter(t -> t.getUpdatedAt() != null && t.getUpdatedAt().toLocalDate().isEqual(date))
                 .count();
 
@@ -724,5 +804,14 @@ public class StatisticsServiceImpl implements StatisticsService {
         if (cv < 0.5) return 80;
         if (cv < 0.7) return 60;
         return 40;
+    }
+
+    /** 项目某问题类型的全部工作流状态（报表分布用） */
+    private List<com.devflow.entity.WorkflowStatus> workflowServiceStatuses(String projectId, String issueType) {
+        com.devflow.entity.Workflow wf = workflowService.resolve(projectId, issueType);
+        if (wf == null) {
+            return List.of();
+        }
+        return workflowService.statuses(wf.getId());
     }
 }

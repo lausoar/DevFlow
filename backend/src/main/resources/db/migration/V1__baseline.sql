@@ -1,0 +1,12 @@
+-- ============================================
+-- V1：基线占位
+-- ============================================
+-- 本项目的历史表结构由 schema.sql（spring.sql.init，幂等）负责创建。
+-- 这里保留一个空基线，使已有数据库在首次接入 Flyway 时以 version=1 打点，
+-- 从 V2 开始的版本化迁移才有明确起点。
+--
+-- 迁移到完全由 Flyway 管理的步骤（后续批次执行）：
+--   1. 用 mysqldump --no-data 导出当前 schema，作为 V1__baseline.sql 的真实内容；
+--   2. 清空 Flyway 历史表后以 baseline-version=0 重新 baseline；
+--   3. 下线 schema.sql 的 spring.sql.init。
+SELECT 1;

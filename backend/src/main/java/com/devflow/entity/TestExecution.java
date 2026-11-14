@@ -17,8 +17,14 @@ public class TestExecution {
     /** 用例 ID */
     private String caseId;
 
+    /** 执行时的用例版本号 */
+    private Integer caseVersion;
+
     /** 项目 ID */
     private String projectId;
+
+    /** 所属测试轮次（为空表示散点执行） */
+    private String cycleId;
 
     /** 结果: PASS / FAIL / BLOCKED / SKIP */
     private String result;

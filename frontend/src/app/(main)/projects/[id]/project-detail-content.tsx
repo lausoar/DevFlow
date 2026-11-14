@@ -30,8 +30,10 @@ import { useMyPermissions } from '@/lib/hooks/use-permissions';
 import { useAuthStore } from '@/stores/auth-store';
 import { AutomationRulesDialog } from './automation-rules-dialog';
 import { RecycleBinDialog } from './recycle-bin-dialog';
+import { ReleasesTab } from './releases-tab';
 import {
   ArrowLeft,
+  Rocket,
   Zap,
   Undo2,
   LayoutDashboard,
@@ -378,6 +380,10 @@ export default function ProjectDetailContent({
               <FlaskConical className="h-3.5 w-3.5" />
               测试
             </TabsTrigger>
+            <TabsTrigger value="releases" className="gap-1.5 text-xs">
+              <Rocket className="h-3.5 w-3.5" />
+              版本
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -398,6 +404,9 @@ export default function ProjectDetailContent({
         </TabsContent>
         <TabsContent value="testing" className="flex-1 overflow-auto p-6">
           <TestCasesTab projectId={projectId} />
+        </TabsContent>
+        <TabsContent value="releases" className="flex-1 overflow-auto p-6">
+          <ReleasesTab projectId={projectId} canManage={canEditProject} />
         </TabsContent>
       </Tabs>
 

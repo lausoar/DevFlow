@@ -16,6 +16,7 @@ import com.devflow.service.AutomationRuleService;
 import com.devflow.service.PermissionService;
 import com.devflow.service.NotificationService;
 import com.devflow.service.ProjectAccessService;
+import com.devflow.service.WorkflowService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,9 @@ public class TestCaseController {
 
     private final TestCaseMapper testCaseMapper;
     private final TestExecutionMapper testExecutionMapper;
+    private final com.devflow.mapper.TestCycleCaseMapper cycleCaseMapper;
+    private final com.devflow.mapper.TestCaseVersionMapper testCaseVersionMapper;
+    private final WorkflowService workflowService;
     private final BugMapper bugMapper;
     private final com.devflow.mapper.ProjectMapper projectMapper;
     private final ProjectAccessService projectAccessService;
@@ -51,8 +55,20 @@ public class TestCaseController {
     @GetMapping("/projects/{projectId}/test-cases")
     public R<Map<String, Object>> list(@PathVariable String projectId,
                                        @RequestParam(required = false) String keyword,
+                                       @RequestParam(required = false) String cycleId,
                                        Authentication authentication) {
         requireProjectVisible(projectId, authentication);
+
+        // 指定轮次时只返回该轮次圈定的用例，否则返回项目全部用例
+        java.util.Set<String> cycleCaseIds = null;
+        boolean byCycle = cycleId != null && !cycleId.isBlank();
+        if (byCycle) {
+            cycleCaseIds = cycleCaseMapper.selectList(
+                            new LambdaQueryWrapper<com.devflow.entity.TestCycleCase>()
+                                    .eq(com.devflow.entity.TestCycleCase::getCycleId, cycleId))
+                    .stream().map(com.devflow.entity.TestCycleCase::getCaseId)
+                    .collect(Collectors.toSet());
+        }
 
         LambdaQueryWrapper<TestCase> wrapper = new LambdaQueryWrapper<TestCase>()
                 .eq(TestCase::getProjectId, projectId)
@@ -60,10 +76,24 @@ public class TestCaseController {
         if (keyword != null && !keyword.isBlank()) {
             wrapper.like(TestCase::getTitle, keyword.trim());
         }
+        if (byCycle) {
+            if (cycleCaseIds.isEmpty()) {
+                return R.ok(Map.of("cases", List.of(), "stats", emptyCaseStats()));
+            }
+            wrapper.in(TestCase::getId, cycleCaseIds);
+        }
         List<TestCase> cases = testCaseMapper.selectList(wrapper);
 
-        // 项目全部执行记录，取每个用例的最新一次
-        List<TestExecution> allExecs = testExecutionMapper.selectByProject(projectId);
+        // 执行记录：指定轮次时只看该轮次，否则看项目全部（取每个用例最新一次）
+        List<TestExecution> allExecs;
+        if (byCycle) {
+            allExecs = testExecutionMapper.selectList(new LambdaQueryWrapper<TestExecution>()
+                    .eq(TestExecution::getProjectId, projectId)
+                    .eq(TestExecution::getCycleId, cycleId)
+                    .orderByDesc(TestExecution::getCreatedAt));
+        } else {
+            allExecs = testExecutionMapper.selectByProject(projectId);
+        }
         Map<String, TestExecution> latest = new LinkedHashMap<>();
         for (TestExecution e : allExecs) { // 已按时间倒序
             latest.putIfAbsent(e.getCaseId(), e);
@@ -81,6 +111,8 @@ public class TestCaseController {
             m.put("expectedResult", c.getExpectedResult());
             m.put("priority", c.getPriority());
             m.put("requirementId", c.getRequirementId());
+            m.put("version", c.getVersion());
+            m.put("reviewStatus", c.getReviewStatus());
             m.put("createdAt", c.getCreatedAt());
             m.put("updatedAt", c.getUpdatedAt());
 
@@ -123,6 +155,10 @@ public class TestCaseController {
         testCase.setProjectId(projectId);
         testCase.setCreatorId(userId);
         testCase.setDeleted(0);
+        testCase.setVersion(1);
+        if (testCase.getReviewStatus() == null) {
+            testCase.setReviewStatus("DRAFT");
+        }
         normalizeSteps(testCase);
         testCaseMapper.insert(testCase);
         return R.ok(testCase);
@@ -140,6 +176,7 @@ public class TestCaseController {
 
     @Operation(summary = "更新测试用例")
     @PutMapping("/test-cases/{id}")
+    @org.springframework.transaction.annotation.Transactional
     public R<TestCase> update(@PathVariable String id,
                               @RequestBody TestCase testCase,
                               Authentication authentication) {
@@ -147,9 +184,56 @@ public class TestCaseController {
         testCase.setId(id);
         testCase.setProjectId(existing.getProjectId());
         testCase.setCreatorId(existing.getCreatorId());
+
+        // 编辑即快照上一版：执行记录带 case_version，失败盘点才能追溯"当时按哪版步骤执行"
+        int prevVersion = existing.getVersion() == null ? 1 : existing.getVersion();
+        com.devflow.entity.TestCaseVersion snapshot = new com.devflow.entity.TestCaseVersion();
+        snapshot.setCaseId(id);
+        snapshot.setVersion(prevVersion);
+        snapshot.setTitle(existing.getTitle());
+        snapshot.setPrecondition(existing.getPrecondition());
+        snapshot.setSteps(existing.getSteps());
+        snapshot.setExpectedResult(existing.getExpectedResult());
+        snapshot.setEditorId((String) authentication.getPrincipal());
+        testCaseVersionMapper.insert(snapshot);
+
+        testCase.setVersion(prevVersion + 1);
+        if (testCase.getReviewStatus() == null) {
+            testCase.setReviewStatus(existing.getReviewStatus());
+        }
         normalizeSteps(testCase);
         testCaseMapper.updateById(testCase);
-        return R.ok(testCase);
+        return R.ok(testCaseMapper.selectById(id));
+    }
+
+    /** 用例版本历史（快照列表） */
+    @Operation(summary = "获取用例版本历史")
+    @GetMapping("/test-cases/{id}/versions")
+    public R<List<com.devflow.entity.TestCaseVersion>> versions(@PathVariable String id,
+                                                               Authentication authentication) {
+        requireCaseVisible(id, authentication);
+        return R.ok(testCaseVersionMapper.selectList(
+                new LambdaQueryWrapper<com.devflow.entity.TestCaseVersion>()
+                        .eq(com.devflow.entity.TestCaseVersion::getCaseId, id)
+                        .orderByDesc(com.devflow.entity.TestCaseVersion::getVersion)));
+    }
+
+    /** 用例评审：DRAFT → PENDING → APPROVED / REJECTED */
+    @Operation(summary = "提交用例评审 / 评审结论")
+    @PutMapping("/test-cases/{id}/review")
+    public R<TestCase> review(@PathVariable String id,
+                              @RequestBody Map<String, String> body,
+                              Authentication authentication) {
+        requireCaseManageable(id, authentication);
+        String target = body.get("reviewStatus");
+        if (!List.of("DRAFT", "PENDING", "APPROVED", "REJECTED").contains(target)) {
+            throw new BusinessException(400, "无效的评审状态");
+        }
+        TestCase patch = new TestCase();
+        patch.setId(id);
+        patch.setReviewStatus(target);
+        testCaseMapper.updateById(patch);
+        return R.ok(testCaseMapper.selectById(id));
     }
 
     @Operation(summary = "删除测试用例（逻辑删除）")
@@ -175,6 +259,10 @@ public class TestCaseController {
         TestExecution exec = new TestExecution();
         exec.setCaseId(id);
         exec.setProjectId(testCase.getProjectId());
+        // 记录本次执行对应的用例版本与轮次，便于按轮次统计与失败追溯
+        exec.setCaseVersion(testCase.getVersion());
+        String cycleId = body.get("cycleId");
+        exec.setCycleId(cycleId != null && !cycleId.isBlank() ? cycleId : null);
         exec.setResult(result);
         exec.setNote(body.get("note") != null ? body.get("note").trim() : null);
         exec.setExecutorId((String) authentication.getPrincipal());
@@ -264,13 +352,15 @@ public class TestCaseController {
         desc.append("\n【预期结果】").append(
                 testCase.getExpectedResult() == null || testCase.getExpectedResult().isBlank()
                         ? "按步骤执行符合预期" : testCase.getExpectedResult());
-        desc.append("\n\n（由测试用例「").append(testCase.getTitle()).append("」一键转缺陷生成）");
+        desc.append("\n\n（由测试用例「").append(testCase.getTitle())
+                .append("」v").append(testCase.getVersion() == null ? 1 : testCase.getVersion())
+                .append(" 一键转缺陷生成）");
 
         Bug bug = new Bug();
         bug.setProjectId(testCase.getProjectId());
         bug.setTitle("【缺陷】" + testCase.getTitle());
         bug.setDescription(desc.toString());
-        bug.setStatus("NEW");
+        bug.setStatus(workflowService.initialStatus(testCase.getProjectId(), WorkflowService.TYPE_BUG));
         bug.setPriority("MEDIUM");
         bug.setSeverity("MAJOR");
         bug.setReporterId(userId);
@@ -318,6 +408,19 @@ public class TestCaseController {
         if (testCase.getPriority() == null || testCase.getPriority().isBlank()) {
             testCase.setPriority("MEDIUM");
         }
+    }
+
+    /** 轮次内没有任何用例时的空统计 */
+    private Map<String, Object> emptyCaseStats() {
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("total", 0);
+        stats.put("passed", 0);
+        stats.put("failed", 0);
+        stats.put("blocked", 0);
+        stats.put("skipped", 0);
+        stats.put("unexecuted", 0);
+        stats.put("passRate", 0);
+        return stats;
     }
 
     private void requireProjectVisible(String projectId, Authentication authentication) {

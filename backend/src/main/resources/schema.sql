@@ -805,3 +805,33 @@ ALTER TABLE activity_log ADD KEY idx_enterprise_created (enterprise_id, created_
 ALTER TABLE file_item ADD KEY idx_url (url(191));
 ALTER TABLE chat_message ADD KEY idx_channel_created (channel_id, created_at);
 ALTER TABLE document ADD KEY idx_parent (parent_id);
+
+-- ============================================
+-- 第 2 批地基改造（2026-11，见 docs/BATCH2_FOUNDATION.md）
+-- 新表的权威定义在 db/migration/V2__batch2_foundation.sql（幂等），这里补齐列级变更
+-- ============================================
+
+-- 工作项挂版本（fixVersion 语义）
+ALTER TABLE task ADD COLUMN fix_version_id VARCHAR(36) DEFAULT NULL COMMENT '修复版本（project_release.id）' AFTER sprint_id;
+ALTER TABLE bug ADD COLUMN fix_version_id VARCHAR(36) DEFAULT NULL COMMENT '修复版本（project_release.id）' AFTER environment;
+ALTER TABLE requirement ADD COLUMN fix_version_id VARCHAR(36) DEFAULT NULL COMMENT '交付版本（project_release.id）' AFTER estimated_hours;
+ALTER TABLE requirement ADD COLUMN assignee_id VARCHAR(36) DEFAULT NULL COMMENT '需求负责人' AFTER requester_id;
+
+-- 设计走查状态（NONE/DESIGNING/IN_REVIEW/CHANGES_REQUESTED/APPROVED）
+ALTER TABLE task ADD COLUMN design_status VARCHAR(20) DEFAULT NULL COMMENT '设计状态' AFTER status;
+ALTER TABLE requirement ADD COLUMN design_status VARCHAR(20) NOT NULL DEFAULT 'NONE' COMMENT '设计状态' AFTER status;
+
+-- 测试：用例版本与评审、执行记录挂轮次
+ALTER TABLE test_case ADD COLUMN version INT NOT NULL DEFAULT 1 COMMENT '用例版本号' AFTER expected_result;
+ALTER TABLE test_case ADD COLUMN review_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT' COMMENT '评审状态' AFTER version;
+ALTER TABLE test_execution ADD COLUMN cycle_id VARCHAR(36) DEFAULT NULL COMMENT '所属测试轮次' AFTER project_id;
+ALTER TABLE test_execution ADD COLUMN case_version INT DEFAULT NULL COMMENT '执行时的用例版本号' AFTER case_id;
+
+-- 高频索引
+CREATE INDEX idx_task_fix_version ON task (fix_version_id);
+CREATE INDEX idx_bug_fix_version ON bug (fix_version_id);
+CREATE INDEX idx_requirement_fix_version ON requirement (fix_version_id);
+CREATE INDEX idx_execution_cycle ON test_execution (cycle_id);
+CREATE INDEX idx_requirement_assignee ON requirement (assignee_id);
+ALTER TABLE design_asset ADD KEY idx_status (status);
+ALTER TABLE test_case ADD KEY idx_review_status (review_status);

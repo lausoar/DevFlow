@@ -38,6 +38,7 @@ public class TaskExtraController {
     private final TaskMapper taskMapper;
     private final ProjectAccessService projectAccessService;
     private final NotificationService notificationService;
+    private final com.devflow.service.WorkflowService workflowService;
 
     // ==================== 清单（子任务） ====================
 
@@ -203,10 +204,13 @@ public class TaskExtraController {
     @Operation(summary = "获取任务依赖")
     @GetMapping("/tasks/{taskId}/dependencies")
     public R<Map<String, Object>> dependencies(@PathVariable String taskId, Authentication authentication) {
-        requireTaskVisible(taskId, authentication);
+        Task task = requireTaskVisible(taskId, authentication);
 
         List<TaskDependency> deps = dependencyMapper.selectList(new LambdaQueryWrapper<TaskDependency>()
                 .eq(TaskDependency::getTaskId, taskId));
+        java.util.List<String> doneCodesForTask = workflowService.statusCodesInCategory(
+                task.getProjectId(), com.devflow.service.WorkflowService.TYPE_TASK,
+                com.devflow.entity.WorkflowStatus.CATEGORY_DONE);
         List<Map<String, Object>> blockedBy = deps.stream().map(d -> {
             Task pre = taskMapper.selectById(d.getDependsOnTaskId());
             Map<String, Object> m = new HashMap<>();
@@ -214,7 +218,7 @@ public class TaskExtraController {
             m.put("taskId", d.getDependsOnTaskId());
             m.put("title", pre != null ? pre.getTitle() : "(已删除)");
             m.put("status", pre != null ? pre.getStatus() : null);
-            m.put("done", pre != null && "DONE".equals(pre.getStatus()));
+            m.put("done", pre != null && doneCodesForTask.contains(pre.getStatus()));
             return m;
         }).collect(Collectors.toList());
 
@@ -338,7 +342,10 @@ public class TaskExtraController {
 
         // 未完成前置数
         Map<String, Integer> undone = new HashMap<>();
-        for (Map<String, Object> row : dependencyMapper.countUndoneBlockersByProject(projectId)) {
+        java.util.List<String> doneCodes = workflowService.statusCodesInCategory(
+                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
+                com.devflow.entity.WorkflowStatus.CATEGORY_DONE);
+        for (Map<String, Object> row : dependencyMapper.countUndoneBlockersByProject(projectId, doneCodes)) {
             Object taskId = row.get("taskId");
             Object cnt = row.get("undone");
             if (taskId != null && cnt != null) {
@@ -367,11 +374,13 @@ public class TaskExtraController {
 
     // ==================== 内部 ====================
 
-    private void requireTaskVisible(String taskId, Authentication authentication) {
+    /** 任务可见才放行，并返回任务实体（调用方常需要 projectId） */
+    private Task requireTaskVisible(String taskId, Authentication authentication) {
         Task task = taskMapper.selectById(taskId);
         if (task == null || !projectAccessService.canView(
                 (String) authentication.getPrincipal(), task.getProjectId())) {
             throw new BusinessException(404, "任务不存在或已被删除");
         }
+        return task;
     }
 }

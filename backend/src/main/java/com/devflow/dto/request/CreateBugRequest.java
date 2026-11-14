@@ -31,4 +31,7 @@ public class CreateBugRequest {
     /** 截图 JSON 数组字符串 */
     @Size(max = 20000, message = "截图数据过长")
     private String screenshots;
+
+    /** 修复版本（project_release.id，可空） */
+    private String fixVersionId;
 }

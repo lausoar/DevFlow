@@ -29,6 +29,12 @@ public class TestCase {
     /** 预期结果（整体） */
     private String expectedResult;
 
+    /** 用例版本号（每次编辑 +1，执行记录会记录当时版本） */
+    private Integer version;
+
+    /** 评审状态: DRAFT / PENDING / APPROVED / REJECTED */
+    private String reviewStatus;
+
     /** 优先级: HIGH / MEDIUM / LOW */
     private String priority;
 

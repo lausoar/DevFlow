@@ -26,11 +26,17 @@ public class Requirement {
     /** 需求提出人ID */
     private String requesterId;
 
+    /** 需求负责人（产品/研发） */
+    private String assigneeId;
+
     /** 当前审批人ID */
     private String approverId;
 
-    /** 状态: OPEN / COMPLETED / CLOSED */
+    /** 状态：取值来自项目工作流配置（默认 OPEN / COMPLETED / CLOSED） */
     private String status;
+
+    /** 设计状态: NONE/DESIGNING/IN_REVIEW/CHANGES_REQUESTED/APPROVED */
+    private String designStatus;
 
     /** 优先级: CRITICAL / HIGH / MEDIUM / LOW */
     private String priority;
@@ -43,6 +49,9 @@ public class Requirement {
 
     /** 预估工时（小时，支持小数） */
     private Double estimatedHours;
+
+    /** 交付版本（project_release.id） */
+    private String fixVersionId;
 
     /** 审批通过时间 */
     private LocalDateTime approvedAt;

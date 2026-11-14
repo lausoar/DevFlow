@@ -26,6 +26,7 @@ public class TaskServiceImpl implements TaskService {
 
     private final TaskMapper taskMapper;
     private final NotificationService notificationService;
+    private final com.devflow.service.WorkflowService workflowService;
 
     @Override
     public Page<Task> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
@@ -68,7 +69,9 @@ public class TaskServiceImpl implements TaskService {
     public Task create(String projectId, Task task, String reporterId) {
         task.setProjectId(projectId);
         task.setReporterId(reporterId);
-        task.setStatus("TODO");
+        if (!StringUtils.hasText(task.getStatus())) {
+            task.setStatus("TODO"); // 兜底：正常路径由 Controller 按工作流初始状态赋值
+        }
         taskMapper.insert(task);
 
         // 通知被指派的人
@@ -148,13 +151,11 @@ public class TaskServiceImpl implements TaskService {
         if (StringUtils.hasText(task.getReporterId())) notifyUsers.add(task.getReporterId());
         if (StringUtils.hasText(task.getAssigneeId())) notifyUsers.add(task.getAssigneeId());
 
-        String statusLabel = switch (status) {
-            case "TODO" -> "待办";
-            case "DOING" -> "进行中";
-            case "TESTING" -> "测试中";
-            case "DONE" -> "已完成";
-            default -> status;
-        };
+        // 状态展示名由工作流配置决定（支持自定义状态）
+        String statusLabel = workflowService != null
+                ? workflowService.labelOf(task.getProjectId(),
+                        com.devflow.service.WorkflowService.TYPE_TASK, status)
+                : status;
 
         notificationService.notifyMultiple(
             notifyUsers,

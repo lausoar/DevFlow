@@ -4,10 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.devflow.common.exception.BusinessException;
 import com.devflow.common.result.R;
 import com.devflow.service.ProjectAccessService;
+import com.devflow.service.WorkflowService;
 import com.devflow.dto.response.DashboardResponse;
 import com.devflow.entity.Bug;
 import com.devflow.entity.Sprint;
 import com.devflow.entity.Task;
+import com.devflow.entity.WorkflowStatus;
 import com.devflow.mapper.BugMapper;
 import com.devflow.mapper.SprintMapper;
 import com.devflow.mapper.TaskMapper;
@@ -32,6 +34,7 @@ public class DashboardController {
     private final SprintMapper sprintMapper;
     private final BugMapper bugMapper;
     private final ProjectAccessService projectAccessService;
+    private final WorkflowService workflowService;
 
     @Operation(summary = "获取项目 Dashboard 数据")
     @GetMapping
@@ -44,18 +47,24 @@ public class DashboardController {
             new LambdaQueryWrapper<Task>().eq(Task::getProjectId, projectId)
         );
 
+        // 按工作流分类聚合（自定义状态也正确计入）
+        java.util.Set<String> doneTaskCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, WorkflowService.TYPE_TASK, WorkflowStatus.CATEGORY_DONE));
+        java.util.Set<String> progTaskCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, WorkflowService.TYPE_TASK, WorkflowStatus.CATEGORY_IN_PROGRESS));
         int totalTasks = tasks.size();
-        int completedTasks = (int) tasks.stream().filter(t -> "DONE".equals(t.getStatus())).count();
-        int inProgressTasks = (int) tasks.stream().filter(t -> "DOING".equals(t.getStatus())).count();
-        int todoTasks = (int) tasks.stream().filter(t -> "TODO".equals(t.getStatus())).count();
+        int completedTasks = (int) tasks.stream().filter(t -> doneTaskCodes.contains(t.getStatus())).count();
+        int inProgressTasks = (int) tasks.stream().filter(t -> progTaskCodes.contains(t.getStatus())).count();
+        int todoTasks = totalTasks - completedTasks - inProgressTasks;
 
         // 统计 Bug
         List<Bug> bugs = bugMapper.selectList(
             new LambdaQueryWrapper<Bug>().eq(Bug::getProjectId, projectId)
         );
-        int openBugs = (int) bugs.stream()
-            .filter(b -> !"RESOLVED".equals(b.getStatus()) && !"CLOSED".equals(b.getStatus()))
-            .count();
+        java.util.Set<String> resolvedBugCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
+                projectId, WorkflowService.TYPE_BUG, WorkflowStatus.CATEGORY_DONE));
+        resolvedBugCodes.add("RESOLVED");
+        int openBugs = (int) bugs.stream().filter(b -> !resolvedBugCodes.contains(b.getStatus())).count();
         int criticalBugs = (int) bugs.stream()
             .filter(b -> "BLOCKER".equals(b.getSeverity()) || "CRITICAL".equals(b.getSeverity()))
             .count();
@@ -68,20 +77,31 @@ public class DashboardController {
                 .last("LIMIT 1")
         );
 
-        // 任务分布
+        // 任务分布：按项目工作流的实际状态码统计（前端按 label 渲染）
         Map<String, Integer> taskDist = new LinkedHashMap<>();
-        taskDist.put("TODO", todoTasks);
-        taskDist.put("DOING", inProgressTasks);
-        taskDist.put("TESTING", (int) tasks.stream().filter(t -> "TESTING".equals(t.getStatus())).count());
-        taskDist.put("DONE", completedTasks);
+        com.devflow.entity.Workflow taskWorkflow = workflowService.resolve(projectId, WorkflowService.TYPE_TASK);
+        if (taskWorkflow != null) {
+            for (WorkflowStatus st : workflowService.statuses(taskWorkflow.getId())) {
+                taskDist.put(st.getCode(), (int) tasks.stream()
+                        .filter(t -> st.getCode().equals(t.getStatus())).count());
+            }
+        }
+        tasks.stream()
+                .filter(t -> t.getStatus() != null && !taskDist.containsKey(t.getStatus()))
+                .forEach(t -> taskDist.merge(t.getStatus(), 1, Integer::sum));
 
-        // Bug 分布
+        // Bug 分布：同上，按缺陷工作流状态码
         Map<String, Integer> bugDist = new LinkedHashMap<>();
-        bugDist.put("NEW", (int) bugs.stream().filter(b -> "NEW".equals(b.getStatus())).count());
-        bugDist.put("ASSIGNED", (int) bugs.stream().filter(b -> "ASSIGNED".equals(b.getStatus())).count());
-        bugDist.put("DOING", (int) bugs.stream().filter(b -> "DOING".equals(b.getStatus())).count());
-        bugDist.put("RESOLVED", (int) bugs.stream().filter(b -> "RESOLVED".equals(b.getStatus())).count());
-        bugDist.put("CLOSED", (int) bugs.stream().filter(b -> "CLOSED".equals(b.getStatus())).count());
+        com.devflow.entity.Workflow bugWorkflow = workflowService.resolve(projectId, WorkflowService.TYPE_BUG);
+        if (bugWorkflow != null) {
+            for (WorkflowStatus st : workflowService.statuses(bugWorkflow.getId())) {
+                bugDist.put(st.getCode(), (int) bugs.stream()
+                        .filter(b -> st.getCode().equals(b.getStatus())).count());
+            }
+        }
+        bugs.stream()
+                .filter(b -> b.getStatus() != null && !bugDist.containsKey(b.getStatus()))
+                .forEach(b -> bugDist.merge(b.getStatus(), 1, Integer::sum));
 
         // 构建 Sprint 进度
         DashboardResponse.SprintProgress sprintProgress = null;
@@ -90,7 +110,7 @@ public class DashboardController {
                 .filter(t -> activeSprint.getId().equals(t.getSprintId()))
                 .count();
             int sprintCompleted = (int) tasks.stream()
-                .filter(t -> activeSprint.getId().equals(t.getSprintId()) && "DONE".equals(t.getStatus()))
+                .filter(t -> activeSprint.getId().equals(t.getSprintId()) && doneTaskCodes.contains(t.getStatus()))
                 .count();
 
             sprintProgress = DashboardResponse.SprintProgress.builder()

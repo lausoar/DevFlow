@@ -34,6 +34,8 @@ import { Progress } from '@/components/ui/progress';
 import { Plus, Search, GripVertical, Calendar, User, Zap, ChevronDown, ChevronRight, Pencil, Trash2, MessageSquare, X, Link2, Timer, Download } from 'lucide-react';
 import { downloadCsv } from '@/lib/csv';
 import { useProjectMembers } from '@/lib/hooks/use-projects';
+import { useWorkflow } from '@/lib/hooks/use-workflow';
+import type { WorkflowStatusDef } from '@/lib/api/workflow';
 import {
   DndContext,
   PointerSensor,
@@ -52,12 +54,20 @@ import { TaskCommentsPanel } from './task-comments-panel';
 // ============================================
 // 看板列定义
 // ============================================
-const COLUMNS: { status: TaskStatus; label: string; color: string }[] = [
-  { status: 'TODO', label: '待办', color: 'bg-slate-400' },
-  { status: 'DOING', label: '进行中', color: 'bg-blue-500' },
-  { status: 'TESTING', label: '测试中', color: 'bg-amber-500' },
-  { status: 'DONE', label: '已完成', color: 'bg-green-500' },
+/** 兜底列：工作流尚未配置 / 请求失败时使用，与后端内置默认流程一致 */
+const FALLBACK_COLUMNS: WorkflowStatusDef[] = [
+  { code: 'TODO', name: '待办', category: 'TODO', color: 'bg-slate-400', next: ['DOING'] },
+  { code: 'DOING', name: '进行中', category: 'IN_PROGRESS', color: 'bg-blue-500', next: ['TESTING', 'TODO'] },
+  { code: 'TESTING', name: '测试中', category: 'IN_PROGRESS', color: 'bg-amber-500', next: ['DONE', 'DOING'] },
+  { code: 'DONE', name: '已完成', category: 'DONE', color: 'bg-green-500', next: ['TESTING'] },
 ];
+
+/** 状态标签 → 判断是否"完成"（按工作流分类，而不是状态码） */
+const isDoneStatus = (columns: WorkflowStatusDef[], status: string) =>
+  columns.some((c) => c.code === status && c.category === 'DONE');
+
+const labelOf = (columns: WorkflowStatusDef[], status: string) =>
+  columns.find((c) => c.code === status)?.name || status;
 
 // 优先级配置
 const PRIORITY_CONFIG: Record<string, { label: string; color: string }> = {
@@ -78,6 +88,12 @@ export function TasksTab({ projectId }: { projectId: string }) {
   const [editTask, setEditTask] = useState<Task | null>(null);
 
   const { data: tasksRes, isLoading } = useTasks(projectId);
+  // 看板列由项目工作流决定（支持自定义状态）；未加载完成时用兜底列保证不空白
+  const { data: workflowRes } = useWorkflow(projectId, 'TASK');
+  const COLUMNS: WorkflowStatusDef[] =
+    workflowRes?.data?.statuses && workflowRes.data.statuses.length > 0
+      ? workflowRes.data.statuses
+      : FALLBACK_COLUMNS;
   const createTask = useCreateTask(projectId);
   const updateStatus = useUpdateTaskStatus(projectId);
   const updateTask = useUpdateTask(projectId);
@@ -119,7 +135,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
       ['标题', '状态', '优先级', '指派给', '所属迭代', '截止日期', '故事点'],
       filteredTasks.map((t) => [
         t.title,
-        COLUMNS.find((c) => c.status === t.status)?.label || t.status,
+        labelOf(COLUMNS, t.status),
         PRIORITY_CONFIG[t.priority]?.label || t.priority,
         t.assigneeId ? taskMemberMap[t.assigneeId] || '' : '',
         t.sprintId ? sprints.find((s) => s.id === t.sprintId)?.name || '' : '',
@@ -134,24 +150,25 @@ export function TasksTab({ projectId }: { projectId: string }) {
     ? tasks.filter((t) => t.title.toLowerCase().includes(search.toLowerCase()))
     : tasks;
 
-  // 按状态分组
-  const tasksByStatus: Record<TaskStatus, Task[]> = {
-    TODO: [],
-    DOING: [],
-    TESTING: [],
-    DONE: [],
-  };
+  // 按状态分组（列来自工作流配置）
+  const tasksByStatus: Record<string, Task[]> = {};
+  COLUMNS.forEach((c) => { tasksByStatus[c.code] = []; });
   filteredTasks.forEach((t) => {
-    if (tasksByStatus[t.status]) {
-      tasksByStatus[t.status].push(t);
+    // 未知状态（历史数据 / 已被删除的状态）单独归到"其他"，避免任务在看板上凭空消失
+    if (!tasksByStatus[t.status]) {
+      tasksByStatus[t.status] = [];
+      if (!COLUMNS.some((c) => c.code === t.status)) {
+        COLUMNS.push({ code: t.status, name: t.status, category: 'TODO', color: 'bg-muted', next: [] });
+      }
     }
+    tasksByStatus[t.status].push(t);
   });
 
   // 处理状态变更
   const handleStatusChange = (taskId: string, newStatus: string) => {
     // 软提醒：前置任务未完成时不阻止，但明确确认
     const undone = taskExtras?.undoneBlockers?.[taskId] || 0;
-    if (newStatus === 'DONE' && undone > 0) {
+    if (isDoneStatus(COLUMNS, newStatus) && undone > 0) {
       if (!confirm(`该任务还有 ${undone} 个前置任务未完成，确定要标记为完成吗？`)) return;
     }
     updateStatus.mutate({ id: taskId, status: newStatus });
@@ -170,8 +187,8 @@ export function TasksTab({ projectId }: { projectId: string }) {
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
     const overId = String(over.id);
-    const targetStatus = COLUMNS.some((c) => c.status === overId)
-      ? (overId as TaskStatus)
+    const targetStatus = COLUMNS.some((c) => c.code === overId)
+      ? overId
       : tasks.find((t) => t.id === overId)?.status;
     if (targetStatus && targetStatus !== task.status) {
       handleStatusChange(taskId, targetStatus);
@@ -485,16 +502,17 @@ export function TasksTab({ projectId }: { projectId: string }) {
           <div className="flex flex-col gap-4 overflow-y-auto pb-4 md:flex-row md:overflow-x-auto">
             {COLUMNS.map((col) => (
               <KanbanColumn
-                key={col.status}
-                status={col.status}
-                label={col.label}
-                color={col.color}
-                tasks={tasksByStatus[col.status]}
+                key={col.code}
+                status={col.code as TaskStatus}
+                label={col.name}
+                color={col.color || 'bg-slate-400'}
+                tasks={tasksByStatus[col.code] || []}
                 onStatusChange={handleStatusChange}
                 onEdit={setEditTask}
                 onDelete={handleDeleteTask}
                 extras={taskExtras}
                 memberNames={taskMemberMap}
+                columns={COLUMNS}
               />
             ))}
           </div>
@@ -719,8 +737,10 @@ function KanbanColumn({
   onDelete,
   extras,
   memberNames,
+  columns,
 }: {
   status: TaskStatus;
+  columns: WorkflowStatusDef[];
   label: string;
   color: string;
   tasks: Task[];
@@ -769,6 +789,7 @@ function KanbanColumn({
               onDelete={onDelete}
               extras={extras}
               memberNames={memberNames}
+              columns={columns}
             />
           ))
         )}
@@ -787,8 +808,10 @@ function TaskCard({
   onDelete,
   extras,
   memberNames,
+  columns,
 }: {
   task: Task;
+  columns: WorkflowStatusDef[];
   onStatusChange: (taskId: string, newStatus: string) => void;
   onEdit: (task: Task) => void;
   onDelete: (taskId: string) => void;
@@ -802,30 +825,12 @@ function TaskCard({
 }) {
   const priority = PRIORITY_CONFIG[task.priority] || PRIORITY_CONFIG.MEDIUM;
 
-  // 获取下一个状态
-  const getNextStatus = (): string | null => {
-    switch (task.status) {
-      case 'TODO': return 'DOING';
-      case 'DOING': return 'TESTING';
-      case 'TESTING': return 'DONE';
-      case 'DONE': return null;
-      default: return null;
-    }
-  };
-
-  // 获取上一个状态
-  const getPrevStatus = (): string | null => {
-    switch (task.status) {
-      case 'TODO': return null;
-      case 'DOING': return 'TODO';
-      case 'TESTING': return 'DOING';
-      case 'DONE': return 'TESTING';
-      default: return null;
-    }
-  };
-
-  const nextStatus = getNextStatus();
-  const prevStatus = getPrevStatus();
+  // 可流转目标由工作流配置决定（不再写死 TODO→DOING→TESTING→DONE）
+  const currentColumn = columns.find((c) => c.code === task.status);
+  const nextCandidates = (currentColumn?.next || []).filter((code) => code !== task.status);
+  const nextStatus = nextCandidates[0] ?? null;
+  const prevStatus = nextCandidates.length > 1 ? nextCandidates[nextCandidates.length - 1] : null;
+  const nextLabel = nextStatus ? labelOf(columns, nextStatus) : null;
 
   // 整卡可拖拽（PointerSensor 带 6px 激活距离，不影响点击按钮）
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: task.id });

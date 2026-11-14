@@ -27,4 +27,7 @@ public class UpdateTaskRequest {
 
     private Integer storyPoints;
     private LocalDateTime dueDate;
+
+    /** 修复版本（project_release.id，可空） */
+    private String fixVersionId;
 }

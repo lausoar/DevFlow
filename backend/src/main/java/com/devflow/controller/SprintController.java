@@ -32,6 +32,7 @@ public class SprintController {
     private final TaskMapper taskMapper;
     private final ProjectAccessService projectAccessService;
     private final AccessGuard guard;
+    private final com.devflow.service.WorkflowService workflowService;
 
     /** 按 ID 取迭代并校验项目可见性，不可见时与"不存在"同响应（不泄露存在性） */
     private Sprint requireVisible(String sprintId, Authentication authentication) {
@@ -121,14 +122,23 @@ public class SprintController {
         sprint.setStatus("COMPLETED");
         sprintMapper.updateById(sprint);
 
-        List<Task> unfinished = taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                .eq(Task::getSprintId, id)
-                .ne(Task::getStatus, "DONE"));
+        // "完成"按工作流分类判定，自定义终态同样算完成
+        java.util.List<String> doneCodes = workflowService.statusCodesInCategory(
+                sprint.getProjectId(), com.devflow.service.WorkflowService.TYPE_TASK,
+                com.devflow.entity.WorkflowStatus.CATEGORY_DONE);
+        LambdaQueryWrapper<Task> unfinishedWrapper = new LambdaQueryWrapper<Task>()
+                .eq(Task::getSprintId, id);
+        if (!doneCodes.isEmpty()) {
+            unfinishedWrapper.notIn(Task::getStatus, doneCodes);
+        }
+        List<Task> unfinished = taskMapper.selectList(unfinishedWrapper);
         if (!unfinished.isEmpty()) {
-            taskMapper.update(null, new LambdaUpdateWrapper<Task>()
-                    .eq(Task::getSprintId, id)
-                    .ne(Task::getStatus, "DONE")
-                    .set(Task::getSprintId, null));
+            LambdaUpdateWrapper<Task> move = new LambdaUpdateWrapper<Task>()
+                    .eq(Task::getSprintId, id);
+            if (!doneCodes.isEmpty()) {
+                move.notIn(Task::getStatus, doneCodes);
+            }
+            taskMapper.update(null, move.set(Task::getSprintId, null));
         }
         return R.ok(Map.of("sprint", sprint, "movedOut", unfinished.size()));
     }

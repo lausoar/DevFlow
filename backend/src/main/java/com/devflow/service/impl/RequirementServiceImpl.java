@@ -10,6 +10,7 @@ import com.devflow.dto.response.RequirementStatsResponse;
 import com.devflow.entity.*;
 import com.devflow.mapper.*;
 import com.devflow.service.RequirementService;
+import com.devflow.service.WorkflowService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +27,7 @@ import java.util.stream.Collectors;
 public class RequirementServiceImpl implements RequirementService {
 
     private final RequirementMapper requirementMapper;
+    private final WorkflowService workflowService;
     private final RequirementApprovalMapper approvalMapper;
     private final RequirementTaskMapper requirementTaskMapper;
     private final com.devflow.mapper.RequirementChangeLogMapper changeLogMapper;
@@ -48,8 +50,8 @@ public class RequirementServiceImpl implements RequirementService {
         requirement.setDescription(request.getDescription());
         requirement.setProjectId(projectId);
         requirement.setRequesterId(requesterId);
-        // 审批功能已移除：需求创建即生效
-        requirement.setStatus("OPEN");
+        // 审批功能已移除：需求创建即生效；初始状态由工作流决定
+        requirement.setStatus(workflowService.initialStatus(projectId, WorkflowService.TYPE_REQUIREMENT));
         requirement.setPriority(request.getPriority() != null ? request.getPriority() : "MEDIUM");
         requirement.setSource(request.getSource());
         requirement.setCategory(request.getCategory());
@@ -119,10 +121,10 @@ public class RequirementServiceImpl implements RequirementService {
         }
 
         // 审批功能已移除，需求创建即生效，可随时编辑
-        // 状态流转白名单
-        if (request.getStatus() != null
-                && !List.of("OPEN", "COMPLETED", "CLOSED").contains(request.getStatus())) {
-            throw new BusinessException(400, "非法的需求状态");
+        // 状态取值与流转由项目工作流决定
+        if (request.getStatus() != null && !request.getStatus().equals(requirement.getStatus())) {
+            workflowService.assertTransitionAllowed(requirement.getProjectId(),
+                    WorkflowService.TYPE_REQUIREMENT, requirement.getStatus(), request.getStatus());
         }
 
         // 记录字段级变更（值相等不记；文本截断 500 字符防日志膨胀）
@@ -261,8 +263,11 @@ public class RequirementServiceImpl implements RequirementService {
         );
 
         int total = requirements.size();
-        int open = (int) requirements.stream().filter(r -> "OPEN".equals(r.getStatus())).count();
-        int completed = (int) requirements.stream().filter(r -> "COMPLETED".equals(r.getStatus())).count();
+        // 按工作流分类聚合，而不是按状态码硬编码（自定义状态也能正确归类）
+        List<String> doneCodes = workflowService.statusCodesInCategory(
+                projectId, WorkflowService.TYPE_REQUIREMENT, WorkflowStatus.CATEGORY_DONE);
+        int completed = (int) requirements.stream().filter(r -> doneCodes.contains(r.getStatus())).count();
+        int open = total - completed;
         int closed = (int) requirements.stream().filter(r -> "CLOSED".equals(r.getStatus())).count();
 
         // 按优先级分布

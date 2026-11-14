@@ -11,6 +11,7 @@ import com.devflow.service.ProjectAccessService;
 import com.devflow.entity.Bug;
 import com.devflow.service.BugService;
 import com.devflow.service.PermissionService;
+import com.devflow.service.WorkflowService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -38,6 +39,7 @@ public class BugController {
     private final com.devflow.service.GuestService guestService;
     private final ProjectAccessService projectAccessService;
     private final AccessGuard guard;
+    private final WorkflowService workflowService;
 
     /** 按项目获取 Bug 列表（分页） */
     @Operation(summary = "获取项目的 Bug 列表")
@@ -85,6 +87,7 @@ public class BugController {
         bug.setSeverity(request.getSeverity() == null ? "MAJOR" : request.getSeverity());
         bug.setEnvironment(request.getEnvironment());
         bug.setScreenshots(request.getScreenshots());
+        bug.setFixVersionId(request.getFixVersionId());
         return R.ok(bugService.create(projectId, bug, reporterId));
     }
 
@@ -107,6 +110,7 @@ public class BugController {
         patch.setSeverity(request.getSeverity());
         patch.setEnvironment(request.getEnvironment());
         patch.setScreenshots(request.getScreenshots());
+        patch.setFixVersionId(request.getFixVersionId());
 
         Bug updated = bugService.update(id, patch);
         if (updated == null) {
@@ -122,11 +126,11 @@ public class BugController {
                                @RequestBody java.util.Map<String, String> body,
                                Authentication authentication) {
         String status = body.get("status");
-        if (!ALLOWED_STATUS.contains(status)) {
-            throw new BusinessException(400, "无效的 Bug 状态");
-        }
         String userId = guard.userId(authentication);
         Bug bug = requireBug(userId, id);
+        // 状态取值与流转由项目工作流决定
+        workflowService.assertTransitionAllowed(bug.getProjectId(), WorkflowService.TYPE_BUG,
+                bug.getStatus(), status);
         boolean isAssignee = userId.equals(bug.getAssigneeId());
         boolean isReporter = userId.equals(bug.getReporterId());
         if (!isAssignee && !isReporter) {
@@ -161,10 +165,6 @@ public class BugController {
     // ============================================
     // 权限
     // ============================================
-
-    /** 允许的 Bug 状态 */
-    private static final java.util.Set<String> ALLOWED_STATUS = java.util.Set.of(
-            "NEW", "ASSIGNED", "DOING", "RESOLVED", "REOPENED", "CLOSED");
 
     /** Bug 必须存在且所属项目对当前用户可见，否则 404（不泄露存在性） */
     private Bug requireBug(String userId, String bugId) {

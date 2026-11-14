@@ -18,11 +18,17 @@ public class Task {
     private String description;
     private String projectId;
     private String sprintId;
+
+    /** 修复版本（project_release.id） */
+    private String fixVersionId;
     private String assigneeId;
     private String reporterId;
 
-    /** 状态: TODO / DOING / TESTING / DONE */
+    /** 状态：取值来自项目工作流配置（默认 TODO / DOING / TESTING / DONE） */
     private String status;
+
+    /** 设计状态: NONE/DESIGNING/IN_REVIEW/CHANGES_REQUESTED/APPROVED */
+    private String designStatus;
 
     /** 优先级: CRITICAL / HIGH / MEDIUM / LOW */
     private String priority;

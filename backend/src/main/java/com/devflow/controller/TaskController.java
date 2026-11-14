@@ -9,12 +9,14 @@ import com.devflow.dto.request.UpdateTaskRequest;
 import com.devflow.security.AccessGuard;
 import com.devflow.service.ProjectAccessService;
 import com.devflow.entity.Sprint;
+import com.devflow.entity.WorkflowStatus;
 import com.devflow.entity.Task;
 import com.devflow.entity.TaskDependency;
 import com.devflow.mapper.SprintMapper;
 import com.devflow.mapper.TaskMapper;
 import com.devflow.service.AutomationRuleService;
 import com.devflow.service.TaskService;
+import com.devflow.service.WorkflowService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -48,9 +50,7 @@ public class TaskController {
     private final com.devflow.service.NotificationService notificationService;
     private final SprintMapper sprintMapper;
     private final AccessGuard guard;
-
-    /** 任务状态白名单（与看板四列 / 前端类型保持一致） */
-    private static final Set<String> ALLOWED_STATUS = Set.of("TODO", "DOING", "TESTING", "DONE");
+    private final WorkflowService workflowService;
 
     /** 按项目获取任务列表（分页） */
     @Operation(summary = "获取项目的任务列表")
@@ -111,6 +111,9 @@ public class TaskController {
         task.setPriority(request.getPriority() == null ? "MEDIUM" : request.getPriority());
         task.setStoryPoints(request.getStoryPoints());
         task.setDueDate(request.getDueDate());
+        task.setFixVersionId(request.getFixVersionId());
+        // 初始状态由工作流给定，而不是写死 TODO
+        task.setStatus(workflowService.initialStatus(projectId, WorkflowService.TYPE_TASK));
         return R.ok(taskService.create(projectId, task, reporterId));
     }
 
@@ -132,6 +135,7 @@ public class TaskController {
         patch.setPriority(request.getPriority());
         patch.setStoryPoints(request.getStoryPoints());
         patch.setDueDate(request.getDueDate());
+        patch.setFixVersionId(request.getFixVersionId());
 
         Task updated = taskService.update(id, patch);
         if (updated == null) {
@@ -147,14 +151,19 @@ public class TaskController {
                                 @RequestBody Map<String, String> body,
                                 Authentication authentication) {
         String status = body.get("status");
-        if (!ALLOWED_STATUS.contains(status)) {
-            throw new BusinessException(400, "无效的任务状态");
-        }
         TaskRef ref = requireTask(guard.userId(authentication), id);
         String projectId = ref.task().getProjectId();
         guard.requireProjectPermission(ref.userId(), projectId, PermissionCodes.TASK_MANAGE);
 
-        boolean becomingDone = "DONE".equals(status) && !"DONE".equals(ref.task().getStatus());
+        String from = ref.task().getStatus();
+        // 状态取值与流转合法性都由项目工作流决定（不再硬编码四态白名单）
+        workflowService.assertTransitionAllowed(projectId, WorkflowService.TYPE_TASK, from, status);
+
+        // "完成"按 status_category 判定：自定义的任意终态标签都算完成
+        String doneCategory = WorkflowService.TYPE_TASK;
+        boolean becomingDone = WorkflowStatus.CATEGORY_DONE.equals(
+                workflowService.categoryOf(projectId, doneCategory, status))
+                && !WorkflowStatus.CATEGORY_DONE.equals(workflowService.categoryOf(projectId, doneCategory, from));
         taskService.updateStatus(id, status);
 
         if (becomingDone) {

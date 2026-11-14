@@ -32,7 +32,7 @@ public class Bug {
     /** 游客提交待确认: 0-否 1-待确认 */
     private Integer pending;
 
-    /** 状态: NEW / ASSIGNED / DOING / RESOLVED / CLOSED */
+    /** 状态：取值来自项目工作流配置（默认 NEW/ASSIGNED/DOING/RESOLVED/REOPENED/CLOSED） */
     private String status;
 
     /** 优先级: CRITICAL / HIGH / MEDIUM / LOW */
@@ -43,6 +43,9 @@ public class Bug {
 
     private String environment;
     private String screenshots;
+
+    /** 修复版本（project_release.id） */
+    private String fixVersionId;
 
     @TableLogic
     private Integer deleted;
