@@ -5,6 +5,8 @@ import lombok.Data;
 
 /**
  * 角色-权限点映射（sys_role_permission）
+ * enterprise_id = '*' 表示全局默认模板；某企业首次调整矩阵时会复制一份本企业快照，
+ * 之后该企业只看自己的行，互不影响。
  */
 @Data
 @TableName("sys_role_permission")
@@ -12,6 +14,9 @@ public class SysRolePermission {
 
     @TableId(type = IdType.ASSIGN_UUID)
     private String id;
+
+    /** 企业 ID；'*' 为全局默认模板 */
+    private String enterpriseId;
 
     /** 作用域: ENTERPRISE / PROJECT */
     private String scope;

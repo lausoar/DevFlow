@@ -2,7 +2,7 @@
 AI 聊天接口 - 支持多轮对话、流式输出
 """
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from app.services.chat_service import ChatService
 
@@ -12,17 +12,17 @@ chat_service = ChatService()
 
 class ChatMessage(BaseModel):
     """聊天消息"""
-    role: str  # user / assistant / system
-    content: str
+    role: str = Field(pattern="^(user|assistant|system)$")
+    content: str = Field(max_length=100_000)
 
 
 class ChatRequest(BaseModel):
-    """聊天请求"""
-    messages: list[ChatMessage]
+    """聊天请求（参数带上限，避免单个请求打爆 LLM 额度）"""
+    messages: list[ChatMessage] = Field(min_length=1, max_length=200)
     model: Optional[str] = None
     provider: Optional[str] = None  # 指定厂商: openai/deepseek/qwen/kimi/volcano/glm，缺省用 AI_PROVIDER
-    temperature: float = 0.7
-    max_tokens: int = 2000
+    temperature: float = Field(default=0.7, ge=0, le=2)
+    max_tokens: int = Field(default=2000, ge=1, le=16000)
     stream: bool = False
     project_id: Optional[str] = None  # 关联项目上下文
 

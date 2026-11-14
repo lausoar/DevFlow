@@ -1,0 +1,35 @@
+package com.devflow.dto.request;
+
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+
+/**
+ * 更新 Bug 请求（白名单字段）。
+ * 不允许通过本接口改写 status / projectId / reporterId / reporterType / guestId /
+ * guestNickname / pending / deleted：
+ * 状态走 PUT /bugs/{id}/status，归属与来源字段只在创建时确定。
+ */
+@Data
+public class UpdateBugRequest {
+
+    @Size(max = 200, message = "Bug 标题不能超过 200 字")
+    private String title;
+
+    @Size(max = 20000, message = "Bug 描述过长")
+    private String description;
+
+    private String assigneeId;
+
+    /** 优先级: CRITICAL / HIGH / MEDIUM / LOW */
+    private String priority;
+
+    /** 严重程度: BLOCKER / CRITICAL / MAJOR / MINOR / TRIVIAL */
+    private String severity;
+
+    @Size(max = 200, message = "环境信息过长")
+    private String environment;
+
+    /** 截图 JSON 数组字符串 */
+    @Size(max = 20000, message = "截图数据过长")
+    private String screenshots;
+}

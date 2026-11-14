@@ -61,7 +61,9 @@ export default function LoginPage() {
         : '/workspace';
       router.push(target);
     } catch (err) {
-      setError('登录失败，请检查用户名和密码');
+      // 后端已按 HTTP 状态返回错误，优先展示服务端提示（如"账号已被锁定，请稍后再试"）
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setError(msg || '登录失败，请检查用户名和密码');
     } finally {
       setIsLoading(false);
     }

@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.devflow.common.PermissionCodes;
 import com.devflow.common.exception.BusinessException;
 import com.devflow.common.result.R;
+import com.devflow.dto.request.CreateProjectRequest;
+import com.devflow.dto.request.UpdateProjectRequest;
 import com.devflow.entity.ChatChannel;
 import com.devflow.entity.Enterprise;
 import com.devflow.entity.Project;
@@ -16,12 +18,15 @@ import com.devflow.mapper.EnterpriseMapper;
 import com.devflow.mapper.ProjectMapper;
 import com.devflow.mapper.ProjectMemberMapper;
 import com.devflow.mapper.UserMapper;
+import com.devflow.security.AccessGuard;
 import com.devflow.service.AuditService;
 import com.devflow.service.PermissionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,12 +34,15 @@ import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map;
 import java.util.Set;
 
 /**
  * 项目控制器
- * 已添加企业数据隔离：list 接口自动按当前用户所属企业过滤
+ *
+ * 鉴权口径：
+ * - 读：项目可见性（成员 ∪ 企业超管管理视野），不可见一律 404 不泄露存在性；
+ * - 写：在可见性之上叠加项目级权限点（project:edit / project:manage / member:manage）；
+ * - 请求体一律使用白名单 DTO，禁止把实体直接交给 updateById（防 mass assignment）。
  */
 @Tag(name = "项目管理", description = "项目的增删改查、成员管理")
 @RestController
@@ -50,6 +58,12 @@ public class ProjectController {
     private final EnterpriseMapper enterpriseMapper;
     private final PermissionService permissionService;
     private final AuditService auditService;
+    private final AccessGuard guard;
+
+    /** 可通过通用更新接口修改的状态值 */
+    private static final Set<String> ALLOWED_PROJECT_STATUS = Set.of("ACTIVE", "ARCHIVED", "PLANNING");
+    /** 可授予的项目角色（OWNER 只能由创建/转移产生，不允许通过成员接口授予） */
+    private static final Set<String> ASSIGNABLE_ROLES = Set.of("MANAGER", "MEMBER", "TESTER");
 
     // ============================================
     // 项目 CRUD
@@ -64,7 +78,7 @@ public class ProjectController {
             @RequestParam(required = false) String keyword,
             Authentication authentication) {
 
-        String userId = (String) authentication.getPrincipal();
+        String userId = guard.userId(authentication);
 
         Page<Project> pageParam = new Page<>(page, pageSize);
 
@@ -104,43 +118,50 @@ public class ProjectController {
             }
             records.forEach(p -> p.setMemberCount(countMap.getOrDefault(p.getId(), 0)));
         }
+        // 列表不返回 Webhook 密钥
+        records.forEach(p -> p.setGitWebhookSecret(null));
 
         return R.ok(result);
     }
 
-    /** 获取项目详情 */
+    /** 获取项目详情（Webhook 密钥仅对有项目编辑权的成员可见） */
     @Operation(summary = "获取项目详情")
     @GetMapping("/{id}")
     public R<Project> getById(@PathVariable String id, Authentication authentication) {
+        String userId = guard.userId(authentication);
         Project project = projectMapper.selectById(id);
-        if (project != null && !projectAccessService.canView((String) authentication.getPrincipal(), id)) {
+        if (project == null || !projectAccessService.canView(userId, id)) {
             // 与"不存在"同响应，不泄露项目存在性
-            project = null;
+            return R.ok(null);
+        }
+        // 用权限点集合判定（不触发 permission.denied 审计，避免普通成员每次看项目都刷审计表）
+        if (!permissionService.projectPermissions(userId, id).contains(PermissionCodes.PROJECT_EDIT)) {
+            project.setGitWebhookSecret(null);
         }
         return R.ok(project);
     }
 
-    /** 创建项目（自动设置企业 ID 实现数据隔离） */
+    /** 创建项目：企业归属一律取当前用户所属企业，忽略请求体中的 enterpriseId */
     @Operation(summary = "创建项目")
     @PostMapping
-    public R<Project> create(@RequestBody Project project, Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
-        project.setOwnerId(userId);
-        project.setStatus("ACTIVE");
-        project.setDeleted(0);
-
-        // 企业数据隔离：自动设置创建者所属企业
-        if (!StringUtils.hasText(project.getEnterpriseId())) {
-            User user = userMapper.selectById(userId);
-            if (user != null && StringUtils.hasText(user.getEnterpriseId())) {
-                project.setEnterpriseId(user.getEnterpriseId());
-            }
-        }
-        // enterprise_id 非空约束：无企业时给出业务提示，避免落库报 500
-        if (!StringUtils.hasText(project.getEnterpriseId())) {
+    @Transactional
+    public R<Project> create(@Valid @RequestBody CreateProjectRequest request, Authentication authentication) {
+        String userId = guard.userId(authentication);
+        User user = userMapper.selectById(userId);
+        if (user == null || !StringUtils.hasText(user.getEnterpriseId())) {
             throw new BusinessException(400, "请先创建或加入企业，再创建项目");
         }
 
+        Project project = new Project();
+        project.setName(request.getName());
+        project.setProjectKey(request.getProjectKey());
+        project.setDescription(request.getDescription());
+        project.setIcon(request.getIcon());
+        project.setGitRepoUrl(request.getGitRepoUrl());
+        project.setOwnerId(userId);
+        project.setStatus("ACTIVE");
+        project.setDeleted(0);
+        project.setEnterpriseId(user.getEnterpriseId());
         projectMapper.insert(project);
 
         // 自动将创建者添加为项目 OWNER
@@ -157,23 +178,49 @@ public class ProjectController {
         projectChannel.setProjectId(project.getId());
         chatChannelMapper.insert(projectChannel);
 
+        auditService.log(userId, project.getEnterpriseId(), project.getId(),
+                "project.create", "project", project.getId(), "创建项目: " + project.getName());
         return R.ok(project);
     }
 
-    /** 更新项目 */
+    /** 更新项目：仅 project:edit，字段白名单（企业/负责人/邀请码/密钥/删除标记不可改写） */
     @Operation(summary = "更新项目")
     @PutMapping("/{id}")
-    public R<Project> update(@PathVariable String id, @RequestBody Project project) {
-        project.setId(id);
-        projectMapper.updateById(project);
-        return R.ok(project);
+    public R<Project> update(@PathVariable String id,
+                             @Valid @RequestBody UpdateProjectRequest request,
+                             Authentication authentication) {
+        String userId = guard.userId(authentication);
+        Project existing = guard.requireProjectEdit(userId, id);
+
+        Project patch = new Project();
+        patch.setId(id);
+        patch.setName(request.getName());
+        patch.setProjectKey(request.getProjectKey());
+        patch.setDescription(request.getDescription());
+        patch.setIcon(request.getIcon());
+        patch.setGitRepoUrl(request.getGitRepoUrl());
+        if (request.getStatus() != null) {
+            if (!ALLOWED_PROJECT_STATUS.contains(request.getStatus())) {
+                throw new BusinessException(400, "无效的项目状态");
+            }
+            patch.setStatus(request.getStatus());
+        }
+        projectMapper.updateById(patch);
+
+        auditService.log(userId, existing.getEnterpriseId(), id,
+                "project.update", "project", id, "更新项目信息: " + existing.getName());
+        return R.ok(projectMapper.selectById(id));
     }
 
-    /** 删除项目 */
+    /** 删除项目（逻辑删除）：仅 project:manage（项目所有者） */
     @Operation(summary = "删除项目（逻辑删除）")
     @DeleteMapping("/{id}")
-    public R<Void> delete(@PathVariable String id) {
+    public R<Void> delete(@PathVariable String id, Authentication authentication) {
+        String userId = guard.userId(authentication);
+        Project project = guard.requireProjectManage(userId, id);
         projectMapper.deleteById(id);
+        auditService.log(userId, project.getEnterpriseId(), id,
+                "project.delete", "project", id, "删除项目: " + project.getName());
         return R.ok();
     }
 
@@ -185,34 +232,35 @@ public class ProjectController {
     @Operation(summary = "获取项目成员列表")
     @GetMapping("/{id}/members")
     public R<List<ProjectMember>> getMembers(@PathVariable String id, Authentication authentication) {
-        if (!projectAccessService.canView((String) authentication.getPrincipal(), id)) {
-            throw new BusinessException(404, "项目不存在或已被删除");
-        }
+        guard.requireView(guard.userId(authentication), id);
         return R.ok(projectMemberMapper.selectMembersWithUser(id));
     }
 
-    /** 添加项目成员（仅项目负责人/管理员） */
+    /** 添加项目成员（仅 OWNER/MANAGER；目标用户须同企业，角色须白名单） */
     @Operation(summary = "添加项目成员（仅 OWNER/MANAGER）")
     @PostMapping("/{id}/members")
     public R<ProjectMember> addMember(@PathVariable String id,
                                        @RequestBody Map<String, String> body,
                                        Authentication authentication) {
-        String userId = body.get("userId");
-        String role = body.getOrDefault("role", "MEMBER");
+        String operatorId = guard.userId(authentication);
+        Project project = guard.requireMemberManage(operatorId, id);
 
-        Project project = projectMapper.selectById(id);
-        if (project == null) {
-            throw new BusinessException(404, "项目不存在");
+        String userId = body.get("userId");
+        if (!StringUtils.hasText(userId)) {
+            throw new BusinessException(400, "请指定要添加的成员");
         }
-        // 成员管理仅限 OWNER/MANAGER
-        requireProjectManager(id, (String) authentication.getPrincipal());
+        String role = body.getOrDefault("role", "MEMBER");
+        if (!ASSIGNABLE_ROLES.contains(role)) {
+            throw new BusinessException(400, "无效的项目角色");
+        }
+        guard.requireSameEnterpriseUser(project, userId);
 
         // 检查是否已存在
         LambdaQueryWrapper<ProjectMember> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ProjectMember::getProjectId, id)
                .eq(ProjectMember::getUserId, userId);
         if (projectMemberMapper.selectCount(wrapper) > 0) {
-            return R.fail("该用户已是项目成员");
+            throw new BusinessException(409, "该用户已是项目成员");
         }
 
         ProjectMember member = new ProjectMember();
@@ -221,52 +269,57 @@ public class ProjectController {
         member.setRole(role);
         projectMemberMapper.insert(member);
         User addedUser = userMapper.selectById(userId);
-        auditService.log((String) authentication.getPrincipal(), project.getEnterpriseId(), id, "project.member.add",
+        auditService.log(operatorId, project.getEnterpriseId(), id, "project.member.add",
                 "user", userId, "添加项目成员: " + (addedUser != null ? addedUser.displayName() : userId) + "，角色: " + role);
         return R.ok(member);
     }
 
-    /** 更新成员角色（仅项目负责人/管理员，不可授予 OWNER） */
+    /** 更新成员角色（仅 OWNER/MANAGER，不可授予 OWNER；memberId 必须属于该项目） */
     @Operation(summary = "更新成员角色（仅 OWNER/MANAGER）")
     @PutMapping("/{id}/members/{memberId}")
     public R<Void> updateMemberRole(@PathVariable String id,
                                      @PathVariable String memberId,
                                      @RequestBody Map<String, String> body,
                                      Authentication authentication) {
-        requireProjectManager(id, (String) authentication.getPrincipal());
+        String operatorId = guard.userId(authentication);
+        Project project = guard.requireMemberManage(operatorId, id);
+        ProjectMember member = guard.requireMemberOfProject(id, memberId);
+
         String role = body.get("role");
-        if (!Set.of("MANAGER", "MEMBER", "TESTER").contains(role)) {
+        if (!ASSIGNABLE_ROLES.contains(role)) {
             throw new BusinessException(400, "无效的项目角色");
         }
-        ProjectMember member = new ProjectMember();
-        member.setId(memberId);
-        member.setRole(role);
-        projectMemberMapper.updateById(member);
-        Project proj = projectMapper.selectById(id);
-        auditService.log((String) authentication.getPrincipal(), proj != null ? proj.getEnterpriseId() : null, id,
+        // 不允许把项目所有者降级（避免项目失去 OWNER）
+        if ("OWNER".equals(member.getRole())) {
+            throw new BusinessException(403, "不能修改项目负责人的角色");
+        }
+
+        ProjectMember patch = new ProjectMember();
+        patch.setId(memberId);
+        patch.setRole(role);
+        projectMemberMapper.updateById(patch);
+        auditService.log(operatorId, project.getEnterpriseId(), id,
                 "project.member.role", "project_member", memberId, "调整项目成员角色: " + role);
         return R.ok();
     }
 
-    /** 移除项目成员（仅项目负责人/管理员） */
+    /** 移除项目成员（仅 OWNER/MANAGER；memberId 必须属于该项目，且不能移除 OWNER） */
     @Operation(summary = "移除项目成员（仅 OWNER/MANAGER）")
     @DeleteMapping("/{id}/members/{memberId}")
     public R<Void> removeMember(@PathVariable String id,
                                  @PathVariable String memberId,
                                  Authentication authentication) {
-        requireProjectManager(id, (String) authentication.getPrincipal());
-        Project proj = projectMapper.selectById(id);
+        String operatorId = guard.userId(authentication);
+        Project project = guard.requireMemberManage(operatorId, id);
+        ProjectMember member = guard.requireMemberOfProject(id, memberId);
+        if ("OWNER".equals(member.getRole())) {
+            throw new BusinessException(403, "不能移除项目负责人");
+        }
+
         projectMemberMapper.deleteById(memberId);
-        auditService.log((String) authentication.getPrincipal(), proj != null ? proj.getEnterpriseId() : null, id,
+        auditService.log(operatorId, project.getEnterpriseId(), id,
                 "project.member.remove", "project_member", memberId, "移除项目成员");
         return R.ok();
-    }
-
-    /** 校验操作者在项目上拥有成员管理权限点（映射 OWNER/MANAGER），否则拒绝 */
-    private void requireProjectManager(String projectId, String userId) {
-        if (!permissionService.hasProjectPermission(userId, projectId, PermissionCodes.MEMBER_MANAGE)) {
-            throw new BusinessException(403, "仅项目负责人或项目管理员可操作成员");
-        }
     }
 
     // ============================================
@@ -287,7 +340,7 @@ public class ProjectController {
         if (project == null) {
             throw new BusinessException(404, "项目不存在");
         }
-        User user = userMapper.selectById((String) authentication.getPrincipal());
+        User user = userMapper.selectById(guard.userId(authentication));
         requireSameEnterprise(project, user);
 
         if (!StringUtils.hasText(project.getInviteCode())) {
@@ -311,7 +364,7 @@ public class ProjectController {
             throw new BusinessException(404, "邀请链接无效或项目已删除");
         }
 
-        User user = userMapper.selectById((String) authentication.getPrincipal());
+        User user = userMapper.selectById(guard.userId(authentication));
         if (user == null || !StringUtils.hasText(user.getEnterpriseId())) {
             throw new BusinessException(403, "请先加入企业，再通过链接加入项目");
         }

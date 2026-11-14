@@ -2,6 +2,7 @@ package com.devflow.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.devflow.common.EnterpriseRoles;
+import com.devflow.common.PermissionCodes;
 import com.devflow.common.exception.BusinessException;
 import com.devflow.entity.AutomationRule;
 import com.devflow.entity.User;
@@ -9,6 +10,8 @@ import com.devflow.mapper.AutomationRuleMapper;
 import com.devflow.mapper.UserMapper;
 import com.devflow.service.AutomationRuleService;
 import com.devflow.service.NotificationService;
+import com.devflow.service.PermissionService;
+import com.devflow.service.ProjectAccessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,6 +34,8 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     private final AutomationRuleMapper automationRuleMapper;
     private final UserMapper userMapper;
     private final NotificationService notificationService;
+    private final PermissionService permissionService;
+    private final ProjectAccessService projectAccessService;
 
     @Override
     public List<AutomationRule> listByProject(String projectId) {
@@ -157,13 +162,16 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
 
     // ==================== 内部 ====================
 
+    /**
+     * 规则管理权限：项目可见 + 项目级 testcase:manage（TESTER/OWNER/MANAGER）。
+     * 不再允许"任意企业超管跨租户读写别的企业项目规则"——企业边界由可见性判定兜住。
+     */
     private void requireManager(String projectId, String userId) {
-        User operator = userMapper.selectById(userId);
-        boolean enterpriseSuper = operator != null
-                && EnterpriseRoles.SUPER_ADMIN.equals(operator.getRole())
-                && projectId != null;
-        if (!enterpriseSuper) {
-            throw new BusinessException(403, "仅超级管理员可管理自动化规则");
+        if (!projectAccessService.canView(userId, projectId)) {
+            throw new BusinessException(404, "项目不存在或已被删除");
+        }
+        if (!permissionService.hasProjectPermission(userId, projectId, PermissionCodes.TESTCASE_MANAGE)) {
+            throw new BusinessException(403, "仅测试人员或项目管理员可管理自动化规则");
         }
     }
 

@@ -16,13 +16,17 @@ AVAILABLE_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_knowledge_base",
-            "description": "搜索企业知识库，获取相关文档内容",
+            "description": "在指定项目的知识库中搜索相关文档（必须提供 project_id）",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
                         "description": "搜索关键词",
+                    },
+                    "project_id": {
+                        "type": "string",
+                        "description": "项目 ID（知识库按项目隔离，缺省时使用本次对话绑定的项目）",
                     },
                     "top_k": {
                         "type": "integer",
@@ -169,8 +173,11 @@ class AgentService:
         # 处理工具调用
         tool_results = []
         if response.tool_calls:
+            # 知识库检索的隔离范围：Agent 请求带 project_id 时按其过滤，
+            # 不带时退化为"无知识库检索"（工具返回明确错误），绝不全局检索
+            scope_project_id = getattr(request, "project_id", None)
             for tool_call in response.tool_calls:
-                result = await self._execute_tool(tool_call, token)
+                result = await self._execute_tool(tool_call, token, scope_project_id)
                 tool_results.append({
                     "tool": tool_call.name,
                     "args": tool_call.arguments,
@@ -204,16 +211,20 @@ class AgentService:
             "model": response.model,
         }
 
-    async def _execute_tool(self, tool_call, token: Optional[str] = None) -> dict:
-        """执行工具调用"""
+    async def _execute_tool(self, tool_call, token: Optional[str] = None,
+                            project_id: Optional[str] = None) -> dict:
+        """执行工具调用（project_id 为知识库检索的隔离范围）"""
         args = tool_call.arguments
 
         if tool_call.name == "search_knowledge_base":
-            # 搜索知识库
+            # 知识库检索必须带项目范围，否则拒绝（跨项目检索属于数据泄露）
+            target_project = args.get("project_id") or project_id
+            if not target_project:
+                return {"error": "知识库检索需要指定项目上下文（project_id），请在提问时选择项目"}
             results = await self.rag_service.search(
                 type("SearchReq", (), {
                     "query": args.get("query", ""),
-                    "project_id": None,
+                    "project_id": target_project,
                     "top_k": args.get("top_k", 3),
                     "doc_type": None,
                 })()

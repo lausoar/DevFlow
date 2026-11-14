@@ -752,3 +752,56 @@ CREATE TABLE IF NOT EXISTS git_commit (
     UNIQUE KEY uk_project_sha (project_id, sha),
     KEY idx_project (project_id)
 ) ENGINE=InnoDB COMMENT='Git 提交记录';
+
+-- ============================================
+-- 安全加固迁移（2026-11，见 docs/AUDIT_REPORT_2026-11.md 第 0 批）
+-- ============================================
+
+-- 权限矩阵按企业隔离：enterprise_id='*' 为全局默认模板；企业首次调整矩阵时复制成本企业快照
+ALTER TABLE sys_role_permission ADD COLUMN enterprise_id VARCHAR(36) NOT NULL DEFAULT '*' COMMENT '企业ID，* 为全局默认模板' AFTER id;
+ALTER TABLE sys_role_permission DROP INDEX uk_role_perm;
+ALTER TABLE sys_role_permission ADD UNIQUE KEY uk_role_perm (enterprise_id, scope, role, permission_code);
+
+-- 新增项目级权限点（业务权限从"仅成员可见"升级为"按权限点可配置"）
+REPLACE INTO sys_permission (code, name, scope, description, sort) VALUES
+('project:edit', '编辑项目信息', 'PROJECT', '修改项目名称/标识/描述/仓库地址/状态', 5),
+('task:manage', '任务管理', 'PROJECT', '任务新建/编辑/删除/状态流转/依赖/清单/工时', 70),
+('requirement:manage', '需求管理', 'PROJECT', '需求新建/编辑/删除/关联任务', 80),
+('document:manage', '文档编辑', 'PROJECT', '文档新建/编辑/版本恢复/评论', 90),
+('document:delete', '删除文档', 'PROJECT', '删除项目文档', 100),
+('file:manage', '文件管理', 'PROJECT', '项目文件上传/删除', 110),
+('sprint:manage', '迭代管理', 'PROJECT', '迭代创建/编辑/激活/完成/删除', 120);
+
+INSERT IGNORE INTO sys_role_permission (id, scope, role, permission_code) VALUES
+(REPLACE(UUID(),'-',''), 'PROJECT', 'OWNER', 'project:edit'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MANAGER', 'project:edit'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'OWNER', 'task:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MANAGER', 'task:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'TESTER', 'task:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MEMBER', 'task:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'OWNER', 'requirement:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MANAGER', 'requirement:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'TESTER', 'requirement:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MEMBER', 'requirement:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'OWNER', 'document:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MANAGER', 'document:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'TESTER', 'document:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MEMBER', 'document:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'OWNER', 'document:delete'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MANAGER', 'document:delete'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'OWNER', 'file:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MANAGER', 'file:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'TESTER', 'file:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MEMBER', 'file:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'OWNER', 'sprint:manage'),
+(REPLACE(UUID(),'-',''), 'PROJECT', 'MANAGER', 'sprint:manage');
+
+-- 高频查询复合索引（安全审计报告 §D3 的索引缺口，低风险、可幂等重跑）
+ALTER TABLE chat_channel ADD KEY idx_project (project_id);
+ALTER TABLE bug ADD KEY idx_assignee (assignee_id);
+ALTER TABLE department_member ADD KEY idx_enterprise (enterprise_id);
+ALTER TABLE notification ADD KEY idx_user_read_created (user_id, is_read, created_at);
+ALTER TABLE activity_log ADD KEY idx_enterprise_created (enterprise_id, created_at);
+ALTER TABLE file_item ADD KEY idx_url (url(191));
+ALTER TABLE chat_message ADD KEY idx_channel_created (channel_id, created_at);
+ALTER TABLE document ADD KEY idx_parent (parent_id);

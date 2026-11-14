@@ -64,7 +64,8 @@ export default function RegisterPage() {
       setAuth(res.data.user, res.data.accessToken);
       router.push('/workspace');
     } catch (err) {
-      setError('注册失败，请稍后重试');
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setError(msg || '注册失败，请稍后重试');
     } finally {
       setIsLoading(false);
     }

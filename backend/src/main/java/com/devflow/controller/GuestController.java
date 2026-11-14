@@ -34,6 +34,10 @@ public class GuestController {
     private final PermissionService permissionService;
     private final ProjectMemberMapper projectMemberMapper;
 
+    /** 是否信任 X-Forwarded-For（仅当服务部署在可信反向代理之后时才可开启） */
+    @org.springframework.beans.factory.annotation.Value("${devflow.security.trust-proxy:false}")
+    private boolean trustProxy;
+
     // ============================================
     // 管理端（需登录）
     // ============================================
@@ -189,10 +193,17 @@ public class GuestController {
         }
     }
 
+    /**
+     * 客户端 IP：默认只信任 TCP 对端地址。
+     * X-Forwarded-For 完全由客户端控制，直接采信等于限流可被任意伪造头绕过；
+     * 仅当明确部署在可信反向代理之后（DEVFLOW_TRUST_PROXY=true）才取 XFF 的第一跳。
+     */
     private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
+        if (trustProxy) {
+            String forwarded = request.getHeader("X-Forwarded-For");
+            if (forwarded != null && !forwarded.isBlank()) {
+                return forwarded.split(",")[0].trim();
+            }
         }
         return request.getRemoteAddr();
     }

@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.devflow.common.exception.BusinessException;
 import com.devflow.common.result.R;
 import com.devflow.service.ProjectAccessService;
+import com.devflow.common.PermissionCodes;
+import com.devflow.security.AccessGuard;
 import com.devflow.dto.request.CreateRequirementRequest;
 import com.devflow.dto.request.UpdateRequirementRequest;
 import com.devflow.dto.response.RequirementResponse;
@@ -37,6 +39,7 @@ public class RequirementController {
     private final RequirementService requirementService;
     private final ProjectAccessService projectAccessService;
     private final RequirementMapper requirementMapper;
+    private final AccessGuard guard;
     private final RequirementChangeLogMapper changeLogMapper;
     private final UserMapper userMapper;
 
@@ -111,7 +114,8 @@ public class RequirementController {
             @Valid @RequestBody CreateRequirementRequest request,
             Authentication authentication) {
 
-        String requesterId = (String) authentication.getPrincipal();
+        String requesterId = guard.userId(authentication);
+        guard.requireProjectPermission(requesterId, projectId, PermissionCodes.REQUIREMENT_MANAGE);
         Requirement result = requirementService.createRequirement(projectId, request, requesterId);
         return R.ok(result);
     }
@@ -126,7 +130,10 @@ public class RequirementController {
             @RequestBody UpdateRequirementRequest request,
             Authentication authentication) {
 
-        String userId = (String) authentication.getPrincipal();
+        String userId = guard.userId(authentication);
+        requireRequirementVisible(id, authentication);
+        RequirementResponse detail = requirementService.getRequirementDetail(id);
+        guard.requireProjectPermission(userId, detail.getProjectId(), PermissionCodes.REQUIREMENT_MANAGE);
         Requirement result = requirementService.updateRequirement(id, request, userId);
         return R.ok(result);
     }
@@ -140,7 +147,10 @@ public class RequirementController {
             @PathVariable String id,
             Authentication authentication) {
 
-        String userId = (String) authentication.getPrincipal();
+        String userId = guard.userId(authentication);
+        requireRequirementVisible(id, authentication);
+        RequirementResponse detail = requirementService.getRequirementDetail(id);
+        guard.requireProjectPermission(userId, detail.getProjectId(), PermissionCodes.REQUIREMENT_MANAGE);
         requirementService.deleteRequirement(id, userId);
         return R.ok();
     }
@@ -155,6 +165,9 @@ public class RequirementController {
             @PathVariable String taskId,
             Authentication authentication) {
         requireRequirementVisible(id, authentication);
+        RequirementResponse detail = requirementService.getRequirementDetail(id);
+        guard.requireProjectPermission(guard.userId(authentication), detail.getProjectId(),
+                PermissionCodes.REQUIREMENT_MANAGE);
         requirementService.linkTask(id, taskId);
         return R.ok();
     }
@@ -169,6 +182,9 @@ public class RequirementController {
             @PathVariable String taskId,
             Authentication authentication) {
         requireRequirementVisible(id, authentication);
+        RequirementResponse detail = requirementService.getRequirementDetail(id);
+        guard.requireProjectPermission(guard.userId(authentication), detail.getProjectId(),
+                PermissionCodes.REQUIREMENT_MANAGE);
         requirementService.unlinkTask(id, taskId);
         return R.ok();
     }
@@ -178,7 +194,8 @@ public class RequirementController {
      */
     @Operation(summary = "获取项目需求统计")
     @GetMapping("/stats")
-    public R<RequirementStatsResponse> stats(@PathVariable String projectId) {
+    public R<RequirementStatsResponse> stats(@PathVariable String projectId, Authentication authentication) {
+        guard.requireView(guard.userId(authentication), projectId);
         RequirementStatsResponse result = requirementService.getStats(projectId);
         return R.ok(result);
     }

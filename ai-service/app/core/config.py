@@ -64,8 +64,14 @@ class Settings(BaseSettings):
     # Java 后端地址
     backend_api_url: str = "http://localhost:8080/api/v1"
 
-    # JWT 密钥
+    # JWT 密钥（与 backend/src/main/resources/application.yml 的 jwt.secret 保持一致）
     jwt_secret: str = ""
+
+    # 服务间调用令牌（Java 后端同步知识库时放在 X-Service-Token 头）
+    ai_service_token: str = ""
+
+    # 允许的跨域来源（逗号分隔；仅前端地址，不再使用 "*"）
+    cors_allow_origins: str = "http://localhost:3000,http://localhost:3001"
 
     # 应用配置
     app_name: str = "DevFlow AI Service"

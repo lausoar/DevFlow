@@ -13,6 +13,7 @@ import com.devflow.mapper.TaskMapper;
 import com.devflow.mapper.UserMapper;
 import com.devflow.service.ProjectAccessService;
 import com.devflow.service.StatisticsService;
+import com.devflow.security.AccessGuard;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -44,6 +45,7 @@ public class StatisticsController {
     private final ProjectMemberMapper projectMemberMapper;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
+    private final AccessGuard guard;
 
     // ============================================
     // 企业级统计
@@ -53,7 +55,7 @@ public class StatisticsController {
     // 报表口径拍板（2026-10-26）：企业统计为企业级管理视角，全员可见（不做成员级过滤）；
     // 项目级端点（health/workload/burndown/gantt）按项目可见性收口。
     public R<EnterpriseStatsResponse> getEnterpriseStats(Authentication authentication) {
-        String userId = authentication.getName();
+        String userId = guard.userId(authentication);
         User user = userMapper.selectById(userId);
         if (user == null || user.getEnterpriseId() == null) {
             return R.fail("用户未关联企业");
@@ -129,10 +131,13 @@ public class StatisticsController {
     @GetMapping("/projects/{projectId}/export/excel")
     public void exportProjectExcel(
         @PathVariable String projectId,
+        Authentication authentication,
         HttpServletResponse response
     ) throws IOException {
+        // 导出同样走项目可见性口径，避免凭 projectId 跨企业导出报表
         Project project = projectMapper.selectById(projectId);
-        if (project == null) {
+        if (project == null
+                || !projectAccessService.canView(guard.userId(authentication), projectId)) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return;
         }
@@ -175,10 +180,12 @@ public class StatisticsController {
     @GetMapping("/projects/{projectId}/export/workload")
     public void exportWorkloadExcel(
         @PathVariable String projectId,
+        Authentication authentication,
         HttpServletResponse response
     ) throws IOException {
         Project project = projectMapper.selectById(projectId);
-        if (project == null) {
+        if (project == null
+                || !projectAccessService.canView(guard.userId(authentication), projectId)) {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return;
         }

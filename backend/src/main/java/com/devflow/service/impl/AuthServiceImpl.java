@@ -38,8 +38,9 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponse login(LoginRequest request) {
-        // 登录防爆破：按用户名限流，15 分钟内失败 5 次即临时锁定（无论密码对错）
-        String bruteKey = request.getUsername() == null ? "" : request.getUsername().toLowerCase();
+        // 登录防爆破：按账号限流，15 分钟内失败 5 次即临时锁定（无论密码对错）。
+        // trim 后再小写：否则 " admin" 与 "admin" 是两个 key，加空格即可绕过锁定
+        String bruteKey = request.getUsername() == null ? "" : request.getUsername().trim().toLowerCase();
         checkLoginLock(bruteKey);
 
         // 查询用户：账号含 @ 按邮箱匹配，否则按用户名匹配（支持两种登录方式）
@@ -187,6 +188,8 @@ public class AuthServiceImpl implements AuthService {
     /** 15 分钟窗口内最大失败次数 */
     private static final int MAX_LOGIN_FAILED = 5;
     private static final long LOGIN_WINDOW_MS = 15 * 60_000L;
+    /** 追踪账号数上限（超出时按过期时间淘汰，不做全量清空） */
+    private static final int MAX_TRACKED_ACCOUNTS = 10_000;
     /** key = 用户名（小写）→ 窗口内失败时间戳队列 */
     private final Map<String, Deque<Long>> failedLogins = new ConcurrentHashMap<>();
 
@@ -211,8 +214,40 @@ public class AuthServiceImpl implements AuthService {
         synchronized (queue) {
             queue.addLast(System.currentTimeMillis());
         }
-        if (failedLogins.size() > 10_000) {
-            failedLogins.clear();
+        evictExpiredEntries();
+    }
+
+    /**
+     * 容量保护：只淘汰"窗口已过期"的条目，绝不 clear()。
+     * 原实现的 clear() 会让攻击者用一万个随机用户名把所有人的锁定状态一并清空。
+     */
+    private void evictExpiredEntries() {
+        if (failedLogins.size() <= MAX_TRACKED_ACCOUNTS) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        failedLogins.entrySet().removeIf(e -> {
+            Deque<Long> q = e.getValue();
+            synchronized (q) {
+                while (!q.isEmpty() && now - q.peekFirst() > LOGIN_WINDOW_MS) {
+                    q.pollFirst();
+                }
+                return q.isEmpty();
+            }
+        });
+        // 仍超限：说明确有大量账号在窗口内反复失败，按最旧记录淘汰，保留锁定语义
+        if (failedLogins.size() > MAX_TRACKED_ACCOUNTS) {
+            failedLogins.entrySet().stream()
+                    .sorted(java.util.Comparator.comparingLong(e -> {
+                        Deque<Long> q = e.getValue();
+                        synchronized (q) {
+                            return q.isEmpty() ? Long.MAX_VALUE : q.peekFirst();
+                        }
+                    }))
+                    .limit(failedLogins.size() - MAX_TRACKED_ACCOUNTS)
+                    .map(Map.Entry::getKey)
+                    .toList()
+                    .forEach(failedLogins::remove);
         }
     }
 }

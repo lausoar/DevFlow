@@ -2,7 +2,7 @@
 AI 助手接口 - 日报、总结、代码审查、任务生成等
 """
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from app.services.assistant_service import AssistantService
 
@@ -20,28 +20,28 @@ class DailyReportRequest(BaseModel):
 
 class SummaryRequest(BaseModel):
     """内容总结请求"""
-    content: str
+    content: str = Field(max_length=200_000)
     summary_type: str = "general"  # general / meeting / sprint / project
 
 
 class TaskGenerateRequest(BaseModel):
     """AI 生成任务请求"""
-    description: str
+    description: str = Field(max_length=20_000)
     project_id: Optional[str] = None
 
 
 class CodeReviewRequest(BaseModel):
     """AI 代码审查请求"""
-    code: str
+    code: str = Field(max_length=200_000)
     language: str = "typescript"
     context: Optional[str] = None
 
 
 class BugAnalysisRequest(BaseModel):
     """AI 分析 Bug 请求"""
-    title: str
-    description: str
-    logs: Optional[str] = None
+    title: str = Field(max_length=300)
+    description: str = Field(max_length=20_000)
+    logs: Optional[str] = Field(default=None, max_length=200_000)
     environment: Optional[str] = None
 
 

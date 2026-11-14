@@ -1,6 +1,7 @@
 package com.devflow.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import java.time.LocalDateTime;
 
@@ -23,7 +24,8 @@ public class User {
     /** 邮箱 */
     private String email;
 
-    /** 密码（BCrypt 加密） */
+    /** 密码（BCrypt 加密）——绝不序列化出网，避免哈希被离线爆破 */
+    @JsonIgnore
     private String password;
 
     /** 头像 URL */

@@ -1,25 +1,36 @@
 package com.devflow.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.devflow.common.PermissionCodes;
 import com.devflow.common.exception.BusinessException;
 import com.devflow.common.result.R;
+import com.devflow.dto.request.CreateDocumentRequest;
+import com.devflow.dto.request.UpdateDocumentRequest;
+import com.devflow.security.AccessGuard;
 import com.devflow.service.ProjectAccessService;
 import com.devflow.entity.Document;
 import com.devflow.mapper.DocumentMapper;
 import com.devflow.service.AiKnowledgeSyncService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
  * 文档控制器
+ *
+ * 鉴权：
+ * - 读：项目文档按项目可见性；全局文档按同企业；
+ * - 写：项目文档需 document:manage，删除需 document:delete；
+ * - 请求体为白名单 DTO，归属字段（projectId/authorId/enterpriseId/version）不可由客户端改写。
  */
 @Tag(name = "文档管理", description = "文档 CRUD、Wiki 树形结构")
 @RestController
@@ -33,6 +44,8 @@ public class DocumentController {
     private final com.devflow.mapper.DocumentVersionMapper documentVersionMapper;
     private final com.devflow.mapper.DocumentCommentMapper documentCommentMapper;
     private final com.devflow.mapper.UserMapper userMapper;
+    private final com.devflow.service.PermissionService permissionService;
+    private final AccessGuard guard;
 
     @Operation(summary = "获取文档列表")
     @GetMapping
@@ -41,9 +54,11 @@ public class DocumentController {
             @RequestParam(required = false) String type,
             Authentication authentication) {
 
+        String userId = guard.userId(authentication);
+
         // 带项目维度查询时按项目可见性收口
         if (projectId != null && !projectId.isBlank()
-                && !projectAccessService.canView((String) authentication.getPrincipal(), projectId)) {
+                && !projectAccessService.canView(userId, projectId)) {
             throw new BusinessException(404, "项目不存在或已被删除");
         }
 
@@ -53,8 +68,7 @@ public class DocumentController {
             wrapper.eq(Document::getProjectId, projectId);
         } else {
             // 全局文档（无项目归属）按企业隔离：仅本企业的全局文档可见；无企业用户看不到全局文档
-            com.devflow.entity.User requester = userMapper.selectById((String) authentication.getPrincipal());
-            String myEnterpriseId = requester != null ? requester.getEnterpriseId() : null;
+            String myEnterpriseId = guard.enterpriseIdOf(userId);
             if (myEnterpriseId == null || myEnterpriseId.isBlank()) {
                 return R.ok(List.of());
             }
@@ -71,32 +85,35 @@ public class DocumentController {
     @Operation(summary = "获取文档详情")
     @GetMapping("/{id}")
     public R<Document> getById(@PathVariable String id, Authentication authentication) {
-        Document doc = documentMapper.selectById(id);
-        if (doc == null || !docVisible(doc, authentication)) {
-            throw new BusinessException(404, "文档不存在或已被删除");
-        }
-        return R.ok(doc);
+        return R.ok(requireVisibleDoc(guard.userId(authentication), id));
     }
 
     @Operation(summary = "创建文档")
     @PostMapping
-    public R<Document> create(@RequestBody Document document, Authentication authentication) {
-        String userId = (String) authentication.getPrincipal();
+    public R<Document> create(@Valid @RequestBody CreateDocumentRequest request, Authentication authentication) {
+        String userId = guard.userId(authentication);
+
+        // 项目文档：需项目可见 + document:manage；全局文档：需属于某企业
+        if (StringUtils.hasText(request.getProjectId())) {
+            guard.requireProjectPermission(userId, request.getProjectId(), PermissionCodes.DOCUMENT_MANAGE);
+        }
+        String enterpriseId = guard.enterpriseIdOf(userId);
+        if (!StringUtils.hasText(request.getProjectId()) && !StringUtils.hasText(enterpriseId)) {
+            throw new BusinessException(400, "请先加入企业，再创建全局文档");
+        }
+
+        Document document = new Document();
+        document.setTitle(request.getTitle());
+        document.setContent(request.getContent());
+        document.setProjectId(StringUtils.hasText(request.getProjectId()) ? request.getProjectId() : null);
+        document.setParentId(request.getParentId());
+        document.setType(request.getType() == null ? "DOC" : request.getType());
+        document.setSort(request.getSort() == null ? 0 : request.getSort());
+        document.setIsPublished(0);
         document.setAuthorId(userId);
         // 记录创建企业：全局文档按企业隔离的依据
-        com.devflow.entity.User creator = userMapper.selectById(userId);
-        if (creator != null) {
-            document.setEnterpriseId(creator.getEnterpriseId());
-        }
-        if (document.getType() == null) {
-            document.setType("DOC");
-        }
-        if (document.getSort() == null) {
-            document.setSort(0);
-        }
-        if (document.getIsPublished() == null) {
-            document.setIsPublished(0);
-        }
+        document.setEnterpriseId(enterpriseId);
+        document.setVersion(1);
         document.setDeleted(0);
         documentMapper.insert(document);
         aiKnowledgeSyncService.indexDocument(document);
@@ -105,12 +122,13 @@ public class DocumentController {
 
     @Operation(summary = "更新文档")
     @PutMapping("/{id}")
-    public R<Document> update(@PathVariable String id, @RequestBody Document document,
+    @Transactional
+    public R<Document> update(@PathVariable String id,
+                              @Valid @RequestBody UpdateDocumentRequest request,
                               Authentication authentication) {
-        Document old = documentMapper.selectById(id);
-        if (old == null || !docVisible(old, authentication)) {
-            throw new BusinessException(404, "文档不存在或已被删除");
-        }
+        String userId = guard.userId(authentication);
+        Document old = requireVisibleDoc(userId, id);
+        requireDocPermission(userId, old, PermissionCodes.DOCUMENT_MANAGE);
 
         // 保存前对旧内容做版本快照（快照版本号 = 旧文档版本号，新版本号 = 旧 + 1）
         int prevVersion = old.getVersion() == null ? 1 : old.getVersion();
@@ -119,12 +137,21 @@ public class DocumentController {
         snapshot.setVersion(prevVersion);
         snapshot.setTitle(old.getTitle());
         snapshot.setContent(old.getContent());
-        snapshot.setEditorId((String) authentication.getPrincipal());
+        snapshot.setEditorId(userId);
         documentVersionMapper.insert(snapshot);
 
-        document.setId(id);
-        document.setVersion(prevVersion + 1);
-        documentMapper.updateById(document);
+        // 只允许改标题/内容/类型/排序/父节点/发布状态
+        Document patch = new Document();
+        patch.setId(id);
+        patch.setTitle(request.getTitle());
+        patch.setContent(request.getContent());
+        patch.setType(request.getType());
+        patch.setSort(request.getSort());
+        patch.setParentId(request.getParentId());
+        patch.setIsPublished(request.getIsPublished());
+        patch.setVersion(prevVersion + 1);
+        documentMapper.updateById(patch);
+
         // 重新读取合并后的文档（更新请求可能只携带部分字段）再同步知识库
         Document merged = documentMapper.selectById(id);
         aiKnowledgeSyncService.indexDocument(merged);
@@ -137,10 +164,7 @@ public class DocumentController {
     @Operation(summary = "获取文档版本列表")
     @GetMapping("/{id}/versions")
     public R<List<Map<String, Object>>> versions(@PathVariable String id, Authentication authentication) {
-        Document doc = documentMapper.selectById(id);
-        if (doc == null || !docVisible(doc, authentication)) {
-            throw new BusinessException(404, "文档不存在或已被删除");
-        }
+        requireVisibleDoc(guard.userId(authentication), id);
         return R.ok(documentVersionMapper.selectVersionList(id));
     }
 
@@ -150,10 +174,7 @@ public class DocumentController {
     public R<com.devflow.entity.DocumentVersion> versionDetail(@PathVariable String id,
                                                                @PathVariable String versionId,
                                                                Authentication authentication) {
-        Document doc = documentMapper.selectById(id);
-        if (doc == null || !docVisible(doc, authentication)) {
-            throw new BusinessException(404, "文档不存在或已被删除");
-        }
+        requireVisibleDoc(guard.userId(authentication), id);
         com.devflow.entity.DocumentVersion v = documentVersionMapper.selectById(versionId);
         if (v == null || !v.getDocumentId().equals(id)) {
             throw new BusinessException(404, "版本不存在");
@@ -164,13 +185,14 @@ public class DocumentController {
     /** 恢复版本：先快照当前内容，再用所选版本覆盖（标题+内容），版本号继续递增 */
     @Operation(summary = "恢复到指定版本")
     @PostMapping("/{id}/versions/{versionId}/restore")
+    @Transactional
     public R<Document> restoreVersion(@PathVariable String id,
                                       @PathVariable String versionId,
                                       Authentication authentication) {
-        Document doc = documentMapper.selectById(id);
-        if (doc == null || !docVisible(doc, authentication)) {
-            throw new BusinessException(404, "文档不存在或已被删除");
-        }
+        String userId = guard.userId(authentication);
+        Document doc = requireVisibleDoc(userId, id);
+        requireDocPermission(userId, doc, PermissionCodes.DOCUMENT_MANAGE);
+
         com.devflow.entity.DocumentVersion v = documentVersionMapper.selectById(versionId);
         if (v == null || !v.getDocumentId().equals(id)) {
             throw new BusinessException(404, "版本不存在");
@@ -182,15 +204,18 @@ public class DocumentController {
         snapshot.setVersion(prevVersion);
         snapshot.setTitle(doc.getTitle());
         snapshot.setContent(doc.getContent());
-        snapshot.setEditorId((String) authentication.getPrincipal());
+        snapshot.setEditorId(userId);
         documentVersionMapper.insert(snapshot);
 
-        doc.setTitle(v.getTitle());
-        doc.setContent(v.getContent());
-        doc.setVersion(prevVersion + 1);
-        documentMapper.updateById(doc);
-        aiKnowledgeSyncService.indexDocument(doc);
-        return R.ok(doc);
+        Document patch = new Document();
+        patch.setId(id);
+        patch.setTitle(v.getTitle());
+        patch.setContent(v.getContent());
+        patch.setVersion(prevVersion + 1);
+        documentMapper.updateById(patch);
+        Document merged = documentMapper.selectById(id);
+        aiKnowledgeSyncService.indexDocument(merged);
+        return R.ok(merged);
     }
 
     // ==================== 文档评论 ====================
@@ -198,10 +223,7 @@ public class DocumentController {
     @Operation(summary = "获取文档评论")
     @GetMapping("/{id}/comments")
     public R<List<Map<String, Object>>> comments(@PathVariable String id, Authentication authentication) {
-        Document doc = documentMapper.selectById(id);
-        if (doc == null || !docVisible(doc, authentication)) {
-            throw new BusinessException(404, "文档不存在或已被删除");
-        }
+        requireVisibleDoc(guard.userId(authentication), id);
         return R.ok(documentCommentMapper.selectCommentList(id));
     }
 
@@ -210,10 +232,10 @@ public class DocumentController {
     public R<Map<String, Object>> addComment(@PathVariable String id,
                                              @RequestBody Map<String, String> body,
                                              Authentication authentication) {
-        Document doc = documentMapper.selectById(id);
-        if (doc == null || !docVisible(doc, authentication)) {
-            throw new BusinessException(404, "文档不存在或已被删除");
-        }
+        String userId = guard.userId(authentication);
+        Document doc = requireVisibleDoc(userId, id);
+        requireDocPermission(userId, doc, PermissionCodes.DOCUMENT_MANAGE);
+
         String content = body.getOrDefault("content", "").trim();
         if (content.isEmpty()) {
             throw new BusinessException(400, "评论内容不能为空");
@@ -223,7 +245,7 @@ public class DocumentController {
         }
         com.devflow.entity.DocumentComment comment = new com.devflow.entity.DocumentComment();
         comment.setDocumentId(id);
-        comment.setUserId((String) authentication.getPrincipal());
+        comment.setUserId(userId);
         comment.setContent(content);
         documentCommentMapper.insert(comment);
 
@@ -243,15 +265,13 @@ public class DocumentController {
     public R<Void> deleteComment(@PathVariable String id,
                                  @PathVariable String commentId,
                                  Authentication authentication) {
-        Document doc = documentMapper.selectById(id);
-        if (doc == null || !docVisible(doc, authentication)) {
-            throw new BusinessException(404, "文档不存在或已被删除");
-        }
+        String userId = guard.userId(authentication);
+        requireVisibleDoc(userId, id);
         com.devflow.entity.DocumentComment comment = documentCommentMapper.selectById(commentId);
         if (comment == null || !comment.getDocumentId().equals(id)) {
             throw new BusinessException(404, "评论不存在");
         }
-        if (!comment.getUserId().equals(authentication.getPrincipal())) {
+        if (!comment.getUserId().equals(userId)) {
             throw new BusinessException(403, "只能删除自己的评论");
         }
         documentCommentMapper.deleteById(commentId);
@@ -260,7 +280,10 @@ public class DocumentController {
 
     @Operation(summary = "删除文档")
     @DeleteMapping("/{id}")
-    public R<Void> delete(@PathVariable String id) {
+    public R<Void> delete(@PathVariable String id, Authentication authentication) {
+        String userId = guard.userId(authentication);
+        Document doc = requireVisibleDoc(userId, id);
+        requireDocPermission(userId, doc, PermissionCodes.DOCUMENT_DELETE);
         documentMapper.deleteById(id);
         aiKnowledgeSyncService.deleteDocument(id);
         return R.ok();
@@ -273,9 +296,7 @@ public class DocumentController {
     @Operation(summary = "获取项目 Wiki 树形结构")
     @GetMapping("/wiki/tree")
     public R<List<WikiTreeNode>> wikiTree(@RequestParam String projectId, Authentication authentication) {
-        if (!projectAccessService.canView((String) authentication.getPrincipal(), projectId)) {
-            throw new BusinessException(404, "项目不存在或已被删除");
-        }
+        guard.requireView(guard.userId(authentication), projectId);
         List<Document> docs = documentMapper.selectList(
             new LambdaQueryWrapper<Document>()
                 .eq(Document::getProjectId, projectId)
@@ -292,19 +313,33 @@ public class DocumentController {
     // 内部方法
     // ============================================
 
-// ==================== 内部 ====================
-
-    /** 文档可见性：项目归属文档按项目成员判定；全局文档仅作者同企业可见 */
-    private boolean docVisible(Document doc, Authentication authentication) {
-        String pid = doc.getProjectId();
-        if (pid != null && !pid.isBlank()) {
-            return projectAccessService.canView((String) authentication.getPrincipal(), pid);
+    /** 文档必须存在且对当前用户可见，否则 404（不泄露存在性） */
+    private Document requireVisibleDoc(String userId, String documentId) {
+        Document doc = documentMapper.selectById(documentId);
+        if (doc == null || !docVisible(doc, userId)) {
+            throw new BusinessException(404, "文档不存在或已被删除");
         }
-        com.devflow.entity.User user = userMapper.selectById((String) authentication.getPrincipal());
-        String myEnterpriseId = user != null ? user.getEnterpriseId() : null;
-        return myEnterpriseId != null && myEnterpriseId.equals(doc.getEnterpriseId());
+        return doc;
     }
 
+    /** 项目文档按项目权限点判定；全局文档仅要求同企业（由可见性已保证） */
+    private void requireDocPermission(String userId, Document doc, String permissionCode) {
+        if (StringUtils.hasText(doc.getProjectId())) {
+            if (!permissionService.hasProjectPermission(userId, doc.getProjectId(), permissionCode)) {
+                throw new BusinessException(403, "无权对该文档执行此操作");
+            }
+        }
+    }
+
+    /** 文档可见性：项目归属文档按项目成员判定；全局文档仅作者同企业可见 */
+    private boolean docVisible(Document doc, String userId) {
+        String pid = doc.getProjectId();
+        if (pid != null && !pid.isBlank()) {
+            return projectAccessService.canView(userId, pid);
+        }
+        String myEnterpriseId = guard.enterpriseIdOf(userId);
+        return myEnterpriseId != null && myEnterpriseId.equals(doc.getEnterpriseId());
+    }
 
     private List<WikiTreeNode> buildWikiTree(List<Document> docs, String parentId) {
         return docs.stream()

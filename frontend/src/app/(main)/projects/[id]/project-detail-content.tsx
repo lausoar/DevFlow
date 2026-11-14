@@ -173,7 +173,11 @@ export default function ProjectDetailContent({
   // 项目级角色管理：统一问权限接口（member:manage 映射 OWNER/MANAGER）
   const { user: currentUser } = useAuthStore();
   const myPerms = useMyPermissions(projectId);
-  const canManageProjectRoles = !!myPerms.data?.data?.project?.includes('member:manage');
+  const projectPerms = myPerms.data?.data?.project || [];
+  const canManageProjectRoles = projectPerms.includes('member:manage');
+  // 与后端权限点一一对应：编辑信息/归档 vs 删除项目
+  const canEditProject = projectPerms.includes('project:edit');
+  const canDeleteProject = projectPerms.includes('project:manage');
   const queryClient = useQueryClient();
   const roleUpdate = useMutation({
     mutationFn: ({ memberId, role }: { memberId: string; role: string }) =>
@@ -280,11 +284,13 @@ export default function ProjectDetailContent({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {/* 设置按钮 — 打开项目设置弹窗 */}
-          <Button variant="outline" size="sm" onClick={openSettings}>
-            <Settings className="mr-1.5 h-3.5 w-3.5" />
-            设置
-          </Button>
+          {/* 设置按钮 — 打开项目设置弹窗（仅 project:edit） */}
+          {canEditProject && (
+            <Button variant="outline" size="sm" onClick={openSettings}>
+              <Settings className="mr-1.5 h-3.5 w-3.5" />
+              设置
+            </Button>
+          )}
 
           {/* 成员管理 — 打开成员弹窗 */}
           <Button variant="outline" size="sm" onClick={() => setMemberDialogOpen(true)}>
@@ -314,7 +320,7 @@ export default function ProjectDetailContent({
               <MoreHorizontal className="h-4 w-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {currentUser?.role === 'SUPER_ADMIN' && (
+              {canManageProjectRoles && (
                 <DropdownMenuItem onClick={() => setAutomationOpen(true)}>
                   <Zap className="mr-1.5 h-3.5 w-3.5 text-amber-500" /> 自动化规则
                 </DropdownMenuItem>
@@ -322,17 +328,23 @@ export default function ProjectDetailContent({
               <DropdownMenuItem onClick={() => setRecycleBinOpen(true)}>
                 <Undo2 className="mr-1.5 h-3.5 w-3.5" /> 回收站
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleToggleArchive}>
-                {project.status === 'ARCHIVED' ? (
-                  <><ArchiveRestore className="mr-1.5 h-3.5 w-3.5" /> 恢复项目</>
-                ) : (
-                  <><Archive className="mr-1.5 h-3.5 w-3.5" /> 归档项目</>
-                )}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" /> 删除项目
-              </DropdownMenuItem>
+              {canEditProject && (
+                <DropdownMenuItem onClick={handleToggleArchive}>
+                  {project.status === 'ARCHIVED' ? (
+                    <><ArchiveRestore className="mr-1.5 h-3.5 w-3.5" /> 恢复项目</>
+                  ) : (
+                    <><Archive className="mr-1.5 h-3.5 w-3.5" /> 归档项目</>
+                  )}
+                </DropdownMenuItem>
+              )}
+              {canDeleteProject && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" /> 删除项目
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

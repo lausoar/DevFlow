@@ -708,6 +708,8 @@ export interface PermissionDef {
 
 export interface RolePermissionRow {
   id: string;
+  /** 企业 ID；'*' 为全局默认模板 */
+  enterpriseId?: string;
   scope: string;
   role: string;
   permissionCode: string;
@@ -718,6 +720,8 @@ export interface PermissionMatrix {
   enterpriseRoles: string[];
   projectRoles: string[];
   mapping: RolePermissionRow[];
+  /** 本企业是否已保存过自定义映射（false 时 mapping 为全局默认模板） */
+  customized?: boolean;
 }
 
 export interface MePermissions {

@@ -58,6 +58,8 @@ public class GuestServiceImpl implements GuestService {
     /** 单 token+IP 每小时提交上限 */
     private static final int RATE_LIMIT = 10;
     private static final long RATE_WINDOW_MS = 3600_000L;
+    /** 限流 key 追踪上限（超出时按过期时间淘汰，不做全量清空） */
+    private static final int MAX_TRACKED_KEYS = 10_000;
     /** key = tokenHash:ip → 提交时间戳队列 */
     private final Map<String, Deque<Long>> rateMap = new ConcurrentHashMap<>();
 
@@ -422,9 +424,26 @@ public class GuestServiceImpl implements GuestService {
             }
             queue.addLast(now);
         }
-        if (rateMap.size() > 10000) {
-            rateMap.clear();
+        evictExpiredRateKeys(now);
+    }
+
+    /**
+     * 容量保护：只淘汰窗口已过期的 key，不做全量 clear。
+     * 原实现一旦超过 10000 条就清空，攻击者可用伪造 IP 批量灌 key 把所有人的配额复位。
+     */
+    private void evictExpiredRateKeys(long now) {
+        if (rateMap.size() <= MAX_TRACKED_KEYS) {
+            return;
         }
+        rateMap.entrySet().removeIf(e -> {
+            Deque<Long> q = e.getValue();
+            synchronized (q) {
+                while (!q.isEmpty() && now - q.peekFirst() > RATE_WINDOW_MS) {
+                    q.pollFirst();
+                }
+                return q.isEmpty();
+            }
+        });
     }
 
     private String sha256(String input) {

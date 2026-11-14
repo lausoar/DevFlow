@@ -14,7 +14,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -29,18 +31,28 @@ public class ProjectAccessServiceImpl implements ProjectAccessService {
         if (!StringUtils.hasText(userId)) {
             return List.of();
         }
-        List<String> ids = new ArrayList<>(projectMemberMapper.selectList(
+        List<String> memberProjectIds = projectMemberMapper.selectList(
                         new LambdaQueryWrapper<ProjectMember>().eq(ProjectMember::getUserId, userId))
-                .stream().map(ProjectMember::getProjectId).distinct().toList());
+                .stream().map(ProjectMember::getProjectId).distinct().toList();
 
-        // 企业超管：追加本企业全部项目（管理视野）
+        List<String> ids = new ArrayList<>();
+        if (!memberProjectIds.isEmpty()) {
+            // 只保留未删除的项目：project_member 行在项目逻辑删除后仍然存在，
+            // 不过滤会让"已删除项目"的成员继续读写该项目下全部子资源（任务/缺陷/文档/频道）
+            List<Project> alive = projectMapper.selectList(new LambdaQueryWrapper<Project>()
+                    .in(Project::getId, memberProjectIds));
+            ids.addAll(alive.stream().map(Project::getId).distinct().toList());
+        }
+
+        // 企业超管：追加本企业全部项目（管理视野；selectList 已自动跳过逻辑删除行）
         User user = userMapper.selectById(userId);
         if (user != null && EnterpriseRoles.SUPER_ADMIN.equals(user.getRole())
                 && StringUtils.hasText(user.getEnterpriseId())) {
+            Set<String> existing = new HashSet<>(ids);
             projectMapper.selectList(new LambdaQueryWrapper<Project>()
                             .eq(Project::getEnterpriseId, user.getEnterpriseId()))
                     .stream().map(Project::getId)
-                    .filter(id -> !ids.contains(id))
+                    .filter(id -> !existing.contains(id))
                     .forEach(ids::add);
         }
         return ids;

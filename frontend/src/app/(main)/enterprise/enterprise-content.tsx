@@ -1069,7 +1069,8 @@ export default function EnterpriseContent() {
             <CardHeader>
               <CardTitle className="text-base">角色权限</CardTitle>
               <CardDescription>
-                全局权限配置（影响所有企业），勾选即授予角色对应权限点，保存后即时生效
+                本企业权限配置：勾选即授予角色对应权限点，保存后即时生效，不影响其他企业
+                {matrixQuery.data?.data?.customized === false && '（当前展示全局默认模板，首次保存后生成本企业独立配置）'}
               </CardDescription>
             </CardHeader>
             <CardContent>
