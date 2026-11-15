@@ -209,7 +209,7 @@ public class TaskController {
     public R<Void> delete(@PathVariable String id, Authentication authentication) {
         TaskRef ref = requireTask(guard.userId(authentication), id);
         guard.requireProjectPermission(ref.userId(), ref.task().getProjectId(), PermissionCodes.TASK_MANAGE);
-        taskService.delete(id);
+        taskService.delete(id, ref.userId());
         return R.ok();
     }
 

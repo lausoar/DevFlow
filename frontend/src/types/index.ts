@@ -210,6 +210,13 @@ export interface Task {
   dueDate?: string;
   tags: string[];
   checklist: ChecklistItem[];
+  /** 乐观锁版本号（服务端维护，编辑时回传 expectedVersion） */
+  version?: number;
+  /** 完成时间（进入 DONE 分类时写入，燃尽图用） */
+  completedAt?: string;
+  /** 删除时间/删除人（仅在回收站里有值） */
+  deletedAt?: string;
+  deletedBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -260,6 +267,11 @@ export interface Bug {
   guestNickname?: string;
   /** 游客提交待确认: 0-否 1-待确认（确认前不进入正常流转） */
   pending?: number;
+  /** 乐观锁版本号（服务端维护，编辑时回传 expectedVersion） */
+  version?: number;
+  /** 删除时间/删除人（仅在回收站里有值） */
+  deletedAt?: string;
+  deletedBy?: string;
   createdAt: string;
   updatedAt: string;
 }

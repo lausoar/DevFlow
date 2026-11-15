@@ -65,6 +65,7 @@ class TaskServiceImplTest {
     @DisplayName("进入 DONE 分类时写入 completed_at")
     void enteringDoneSetsCompletedAt() {
         when(taskMapper.selectById("t1")).thenReturn(task);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
         when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "DONE"))
                 .thenReturn("DONE");
         when(workflowService.labelOf(anyString(), anyString(), anyString())).thenReturn("完成");
@@ -83,6 +84,7 @@ class TaskServiceImplTest {
         task.setStatus("DONE");
         task.setCompletedAt(LocalDateTime.now().minusDays(3));
         when(taskMapper.selectById("t1")).thenReturn(task);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
         when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "TODO"))
                 .thenReturn("TODO");
         when(workflowService.labelOf(anyString(), anyString(), anyString())).thenReturn("待办");
@@ -102,6 +104,7 @@ class TaskServiceImplTest {
         task.setStatus("DONE");
         task.setCompletedAt(original);
         when(taskMapper.selectById("t1")).thenReturn(task);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
         when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "DONE"))
                 .thenReturn("DONE");
         when(workflowService.labelOf(anyString(), anyString(), anyString())).thenReturn("完成");
@@ -118,6 +121,7 @@ class TaskServiceImplTest {
     @DisplayName("非 DONE 状态不写 completed_at")
     void nonDoneStatusLeavesCompletedAtNull() {
         when(taskMapper.selectById("t1")).thenReturn(task);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
         when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "DOING"))
                 .thenReturn("IN_PROGRESS");
         when(workflowService.labelOf(anyString(), anyString(), anyString())).thenReturn("进行中");
@@ -134,6 +138,7 @@ class TaskServiceImplTest {
     @DisplayName("工作流查不到分类时不抛异常（回落为字面 DONE 判断）")
     void workflowFailureFallsBackGracefully() {
         when(taskMapper.selectById("t1")).thenReturn(task);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
         when(workflowService.categoryOf(anyString(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("工作流配置损坏"));
         when(workflowService.labelOf(anyString(), anyString(), anyString())).thenReturn("完成");
@@ -169,7 +174,7 @@ class TaskServiceImplTest {
     void nullVersionSkipsTheCheck() {
         task.setVersion(3);
         when(taskMapper.selectById("t1")).thenReturn(task);
-        when(taskMapper.selectById("t1")).thenReturn(task);
+        when(taskMapper.updateById(any(Task.class))).thenReturn(1);
 
         Task patch = new Task();
         patch.setId("t1");
@@ -184,9 +189,10 @@ class TaskServiceImplTest {
     @Test
     @DisplayName("删除任务时清理双向依赖")
     void deleteCleansDependencies() {
-        service.delete("t1");
+        service.delete("t1", "u-operator");
 
         verify(taskDependencyMapper).delete(any());
-        verify(taskMapper).deleteById("t1");
+        // 改用带审计的软删除后，不再是 deleteById
+        verify(taskMapper).softDelete("t1", "u-operator");
     }
 }

@@ -22,7 +22,11 @@ export const bugApi = {
     request<Bug>('POST', `/projects/${projectId}/bugs`, data),
 
   /** 更新 Bug */
-  update: (id: string, data: Partial<Bug>) =>
+  /**
+   * 更新 Bug。
+   * expectedVersion 是乐观锁版本号：服务端版本不一致时返回 409 而不是覆盖。
+   */
+  update: (id: string, data: Partial<Bug> & { expectedVersion?: number }) =>
     request<Bug>('PUT', `/bugs/${id}`, data),
 
   /** 删除 Bug */

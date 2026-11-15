@@ -24,5 +24,5 @@ public interface TaskService {
 
     void updateStatus(String id, String status, String operatorId);
 
-    void delete(String id);
+    void delete(String id, String operatorId);
 }

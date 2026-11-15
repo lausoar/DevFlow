@@ -204,7 +204,8 @@ public class RequirementServiceImpl implements RequirementService {
             throw new BusinessException(403, "仅需求创建人、企业管理员或项目负责人可删除");
         }
 
-        requirementMapper.deleteById(requirementId);
+        // 带审计的软删除（回收站需要真实删除时间与删除人）
+        requirementMapper.softDelete(requirementId, userId);
 
         // 删除关联的审批记录
         approvalMapper.delete(new LambdaQueryWrapper<RequirementApproval>()

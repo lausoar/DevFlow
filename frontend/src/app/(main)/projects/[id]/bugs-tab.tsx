@@ -129,6 +129,9 @@ export function BugsTab({ projectId }: { projectId: string }) {
   const canEditBugs = !!myPerms.data?.data?.project?.includes('bug:create');
 
   const bugs = bugsRes?.data?.records || [];
+  // 后端分页默认 pageSize=100；超出部分不会返回，必须让用户知道
+  const bugTotal = bugsRes?.data?.total ?? bugs.length;
+  const hiddenBugCount = Math.max(0, bugTotal - bugs.length);
 
   // 批量操作（仅 bug:edit 可用）：多选后批量指派/批量优先级
   const queryClient = useQueryClient();
@@ -403,6 +406,12 @@ export function BugsTab({ projectId }: { projectId: string }) {
           >
             <X className="h-3 w-3" /> 取消选择
           </Button>
+        </div>
+      )}
+
+      {hiddenBugCount > 0 && (
+        <div className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+          当前只显示前 {bugs.length} 条 Bug，另有 {hiddenBugCount} 条未加载（共 {bugTotal} 条）。
         </div>
       )}
 
@@ -872,7 +881,8 @@ function BugEditDialog({
 
   const handleSave = async () => {
     if (!form.title.trim()) return;
-    await updateBug.mutateAsync({
+    try {
+      await updateBug.mutateAsync({
       id: bug.id,
       data: {
         title: form.title,
@@ -882,9 +892,15 @@ function BugEditDialog({
         environment: form.environment || undefined,
         // 空串表示取消指派（后端会置 NULL）
         assigneeId: form.assigneeId,
-      },
-    });
-    onOpenChange(false);
+        // 乐观锁：版本不一致时服务端返回 409，不静默覆盖他人修改
+        expectedVersion: bug.version,
+        },
+      });
+      onOpenChange(false);
+    } catch (e) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      alert(msg || '保存失败，请重试');
+    }
   };
 
   return (

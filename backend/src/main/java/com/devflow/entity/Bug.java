@@ -54,6 +54,15 @@ public class Bug {
     @TableLogic
     private Integer deleted;
 
+    /**
+     * 删除时间 / 删除人（deleted=1 时才有值）。
+     *
+     * 之前只有 deleted 一个布尔标记，回收站只能拿 updated_at 冒充"删除于"——
+     * 那条记录删除前如果被改过标题，显示的就是改标题的时间。
+     */
+    private LocalDateTime deletedAt;
+    private String deletedBy;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

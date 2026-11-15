@@ -187,7 +187,12 @@ public class BugServiceImpl implements BugService {
 
         String oldStatus = bug.getStatus();
         bug.setStatus(status);
-        bugMapper.updateById(bug);
+        // 与任务一致：乐观锁冲突（影响 0 行）时返回 409，而不是静默失败
+        int updatedRows = bugMapper.updateById(bug);
+        if (updatedRows == 0) {
+            throw new com.devflow.common.exception.BusinessException(409,
+                    "Bug 状态已被他人修改，请刷新后重试");
+        }
 
         // 状态变更通知对方：负责人改了通知报告人，报告人改了通知负责人
         String notifyUserId = null;
@@ -222,7 +227,8 @@ public class BugServiceImpl implements BugService {
     }
 
     @Override
-    public void delete(String id) {
-        bugMapper.deleteById(id);
+    public void delete(String id, String operatorId) {
+        // 带审计的软删除（回收站需要真实删除时间与删除人）
+        bugMapper.softDelete(id, operatorId);
     }
 }

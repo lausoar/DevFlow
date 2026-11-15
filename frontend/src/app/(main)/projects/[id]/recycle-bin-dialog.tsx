@@ -18,6 +18,24 @@ import {
 } from '@/lib/hooks/use-recycle-bin';
 import { AlertTriangle, ListTodo, Bug as BugIcon, FileText, RotateCcw } from 'lucide-react';
 
+/**
+ * "删除于 …"文案。
+ *
+ * 之前显示的是 updatedAt —— 那是最后一次修改时间，不是删除时间。
+ * 一条任务在删除前被改过标题，回收站就会显示成改标题的时刻。
+ * 第 11 批给三类工作项加了 deleted_at/deleted_by，这里优先用它；
+ * 老数据没有值时退回到 updatedAt 并标注"约"。
+ */
+function formatDeletedAt(item: { deletedAt?: string; updatedAt?: string }): string {
+  if (item.deletedAt) {
+    return ` · 删除于 ${new Date(item.deletedAt).toLocaleString('zh-CN')}`;
+  }
+  if (item.updatedAt) {
+    return ` · 约于 ${new Date(item.updatedAt).toLocaleString('zh-CN')} 删除`;
+  }
+  return '';
+}
+
 // ============================================
 // 回收站弹窗：项目内已删除任务/Bug/需求的查看与恢复
 // ============================================
@@ -89,7 +107,8 @@ export function RecycleBinDialog({
                         <p className="truncate text-xs font-medium">{item.title}</p>
                         <p className="text-[11px] text-muted-foreground">
                           #{item.id.slice(-8)}
-                          {item.updatedAt && ` · 删除于 ${new Date(item.updatedAt).toLocaleString('zh-CN')}`}
+                          {/* 用 deletedAt（真实删除时间），不是 updatedAt —— 后者是最后修改时间 */}
+                          {formatDeletedAt(item)}
                         </p>
                       </div>
                       <Button

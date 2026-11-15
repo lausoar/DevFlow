@@ -25,8 +25,12 @@ export const taskApi = {
   create: (projectId: string, data: Partial<Task>) =>
     request<Task>('POST', `/projects/${projectId}/tasks`, data),
 
-  /** 更新任务 */
-  update: (id: string, data: Partial<Task>) =>
+  /**
+   * 更新任务。
+   * expectedVersion 是乐观锁版本号：服务端版本不一致时返回 409 而不是覆盖。
+   * 不传则保持旧行为（后端不做冲突检测）。
+   */
+  update: (id: string, data: Partial<Task> & { expectedVersion?: number }) =>
     request<Task>('PUT', `/tasks/${id}`, data),
 
   /** 更新任务状态 */

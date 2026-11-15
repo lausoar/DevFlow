@@ -32,7 +32,7 @@ export function useUpdateBug(projectId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<Bug> }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<Bug> & { expectedVersion?: number } }) =>
       bugApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bugs', projectId] });

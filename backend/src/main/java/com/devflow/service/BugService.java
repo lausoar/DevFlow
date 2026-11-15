@@ -21,5 +21,5 @@ public interface BugService {
     /** 仅负责人/报告人可调用：变更 Bug 状态并通知对方 */
     Bug changeStatus(String id, String status, String operatorId);
 
-    void delete(String id);
+    void delete(String id, String operatorId);
 }

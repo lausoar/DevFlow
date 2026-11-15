@@ -183,9 +183,9 @@ fi
 
 # 3a. 迁移历史：4 个版本全部成功
 VERSIONS=$(mysql_exec -N -e "SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM \`$DB_NAME\`.flyway_schema_history WHERE success=1 AND version IS NOT NULL;")
-[ "$VERSIONS" = "1,2,3,4" ] \
+[ "$VERSIONS" = "1,2,3,4,5" ] \
     && ok "Flyway 迁移历史完整（版本 $VERSIONS）" \
-    || bad "Flyway 迁移版本是 [$VERSIONS]（期望 1,2,3,4）"
+    || bad "Flyway 迁移版本是 [$VERSIONS]（期望 1,2,3,4,5）"
 
 N_FAILED=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schema_history WHERE success = 0;")
 [ "${N_FAILED:-1}" = "0" ] && ok "无失败的迁移" || bad "有 $N_FAILED 条迁移失败"
@@ -768,6 +768,102 @@ if [ -n "$DEP_T1" ] && [ -n "$DEP_T2" ]; then
         bad "依赖关系未建立（无法验证清理）"
     fi
 fi
+
+# ============================================
+# 第 11 批：删除审计 / 并发闭环 / 唯一键冲突
+# ============================================
+
+# 1) 删除任务必须写入 deleted_at / deleted_by
+DEL_TASK=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/tasks" -H "$AUTH" \
+           -H "Content-Type: application/json" -d '{"title":"ci-soft-delete"}' \
+           | json_field "['data']['id']")
+if [ -n "$DEL_TASK" ]; then
+    curl -s -m 10 -X DELETE "$BASE/tasks/$DEL_TASK" -H "$AUTH" >/dev/null
+    ROW=$(mysql_exec -N -e "SELECT CONCAT(IFNULL(deleted_at,'NULL'),'|',IFNULL(deleted_by,'NULL')) FROM \`$DB_NAME\`.task WHERE id='$DEL_TASK';")
+    case "$ROW" in
+        "NULL|"*|*"|NULL")
+            bad "任务软删除未写入审计字段（$ROW）" ;;
+        *)
+            ok "任务软删除写入 deleted_at 与 deleted_by" ;;
+    esac
+    # 回收站里能看到它，且带删除时间
+    IN_BIN=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/recycle-bin" -H "$AUTH" \
+             | json_field "['data']['tasks'].__len__()")
+    [ "${IN_BIN:-0}" -ge 1 ] && ok "删除的任务出现在回收站（$IN_BIN 条）" || bad "回收站看不到已删任务"
+
+    # 恢复后审计字段必须清空（否则还在回收站口径里）
+    curl -s -m 10 -X POST "$BASE/recycle-bin/tasks/$DEL_TASK/restore" -H "$AUTH" >/dev/null
+    ROW2=$(mysql_exec -N -e "SELECT CONCAT(deleted, '|', IFNULL(deleted_at,'NULL')) FROM \`$DB_NAME\`.task WHERE id='$DEL_TASK';")
+    [ "$ROW2" = "0|NULL" ] \
+        && ok "恢复后清除删除审计字段（$ROW2）" \
+        || bad "恢复后审计字段未清空：$ROW2（期望 0|NULL）"
+fi
+
+# 2) Bug 与需求同样写审计字段
+DEL_BUG=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/bugs" -H "$AUTH" \
+          -H "Content-Type: application/json" -d '{"title":"ci-soft-delete-bug","description":"x","severity":"MAJOR"}' \
+          | json_field "['data']['id']")
+if [ -n "$DEL_BUG" ]; then
+    curl -s -m 10 -X DELETE "$BASE/bugs/$DEL_BUG" -H "$AUTH" >/dev/null
+    BROW=$(mysql_exec -N -e "SELECT CONCAT(IFNULL(deleted_at,'NULL'),'|',IFNULL(deleted_by,'NULL')) FROM \`$DB_NAME\`.bug WHERE id='$DEL_BUG';")
+    case "$BROW" in
+        "NULL|"*|*"|NULL") bad "Bug 软删除未写入审计字段（$BROW）" ;;
+        *) ok "Bug 软删除写入删除审计" ;;
+    esac
+fi
+
+# 3) 状态变更的乐观锁：过期版本号必须 409
+TASK_ST=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/tasks" -H "$AUTH" \
+          -H "Content-Type: application/json" -d '{"title":"ci-status-lock"}' | json_field "['data']['id']")
+if [ -n "$TASK_ST" ]; then
+    # 用正确版本改一次 → 200
+    V_ST=$(curl -s -m 10 "$BASE/tasks/$TASK_ST" -H "$AUTH" | json_field "['data']['version']")
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/tasks/$TASK_ST/status" -H "$AUTH" \
+           -H "Content-Type: application/json" -d '{"status":"DOING"}')
+    [ "$CODE" = "200" ] && ok "状态变更成功（版本 v${V_ST}）" || bad "状态变更返回 $CODE"
+
+    # 版本已经 +1，用旧版本再改 → 409（前端会带上旧 expectedVersion 的场景）
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/tasks/$TASK_ST" -H "$AUTH" \
+           -H "Content-Type: application/json" \
+           -d "{\"title\":\"stale\",\"expectedVersion\":$V_ST}")
+    [ "$CODE" = "409" ] && ok "字段编辑的过期版本被拒绝（409）" || bad "过期版本返回 $CODE（期望 409）"
+fi
+
+# 4) 唯一键冲突必须是 409 而不是 500
+#    用项目标识重复（uk_project_key）来触发，这是普通用户能触发的路径
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X POST "$BASE/projects" -H "$AUTH" \
+       -H "Content-Type: application/json" -d '{"name":"dup-key-proj","projectKey":"CIP"}')
+[ "$CODE" = "409" ] \
+    && ok "唯一键冲突映射为 409（不是 500）" \
+    || bad "唯一键冲突返回 $CODE（期望 409；500 说明缺 DuplicateKeyException handler）"
+
+# 5) 列表分页：total 必须真实反映总量（前端据此提示"还有多少未显示"）
+LIST_TOTAL=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/tasks?page=1&pageSize=1" -H "$AUTH" | json_field "['data']['total']")
+N_REAL=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.task WHERE project_id='$PROJ_ID' AND deleted=0;")
+[ "${LIST_TOTAL:-0}" = "${N_REAL:-1}" ] \
+    && ok "分页 total 与实际条数一致（$LIST_TOTAL）" \
+    || bad "分页 total=$LIST_TOTAL 但实际 $N_REAL 条（前端提示会算错）"
+
+# 6) 回收站按删除时间倒序（而不是 updated_at）
+mysql_exec "$DB_NAME" -e "
+INSERT INTO task (id,title,project_id,reporter_id,status,deleted,deleted_at,updated_at) VALUES
+  ('bin-old','bin-old','$PROJ_ID','u1','TODO',1,'2020-01-01 00:00:00','2030-01-01 00:00:00'),
+  ('bin-new','bin-new','$PROJ_ID','u1','TODO',1,'2026-11-15 00:00:00','2020-01-01 00:00:00');
+" 2>/dev/null
+# 只比较两条的相对顺序：库里还有别的已删任务，断言"首条是谁"会误报。
+ORDER=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/recycle-bin" -H "$AUTH" \
+        | python -c "
+import sys, json
+d = json.load(sys.stdin)
+ids = [t['id'] for t in d['data']['tasks']]
+if 'bin-new' in ids and 'bin-old' in ids:
+    print('ok' if ids.index('bin-new') < ids.index('bin-old') else 'reversed')
+else:
+    print('missing')
+" 2>/dev/null)
+[ "$ORDER" = "ok" ] \
+    && ok "回收站按删除时间倒序（bin-new 排在 bin-old 前）" \
+    || bad "回收站排序错误：$ORDER（deleted_at 较新的应排前面）"
 
 # ============================================
 # 汇总

@@ -132,7 +132,13 @@ public class TaskServiceImpl implements TaskService {
             task.setSprintId(null);
         }
 
-        taskMapper.updateById(task);
+        // 乐观锁插件会把 version 加进 WHERE：上面的显式校验与这里之间有窗口，
+        // 影响行数为 0 说明被抢改了。原实现忽略返回值，表现为静默覆盖。
+        int updatedRows = taskMapper.updateById(task);
+        if (updatedRows == 0) {
+            throw new com.devflow.common.exception.BusinessException(409,
+                    "任务已被他人修改，请刷新后再保存");
+        }
 
         if (clearAssignee || clearSprint) {
             LambdaUpdateWrapper<Task> clear = new LambdaUpdateWrapper<Task>().eq(Task::getId, id);
@@ -183,7 +189,12 @@ public class TaskServiceImpl implements TaskService {
         } else if (!becomingDone) {
             task.setCompletedAt(null);
         }
-        taskMapper.updateById(task);
+        // 乐观锁冲突时影响行数为 0，必须显式报错 —— 否则前端看到的是"点了没反应"
+        int statusRows = taskMapper.updateById(task);
+        if (statusRows == 0) {
+            throw new com.devflow.common.exception.BusinessException(409,
+                    "任务状态已被他人修改，请刷新后重试");
+        }
 
         // 通知任务相关人员（报告人和被指派人）∪ 关注该任务的人
         List<String> explicit = new ArrayList<>();
@@ -229,11 +240,12 @@ public class TaskServiceImpl implements TaskService {
      */
     @Override
     @org.springframework.transaction.annotation.Transactional
-    public void delete(String id) {
+    public void delete(String id, String operatorId) {
         taskDependencyMapper.delete(new LambdaQueryWrapper<TaskDependency>()
                 .eq(TaskDependency::getTaskId, id)
                 .or()
                 .eq(TaskDependency::getDependsOnTaskId, id));
-        taskMapper.deleteById(id);
+        // 带审计的软删除：记录删除时间与删除人，回收站才能显示真实删除时间
+        taskMapper.softDelete(id, operatorId);
     }
 }

@@ -125,6 +125,10 @@ export function TasksTab({ projectId }: { projectId: string }) {
   };
 
   const tasks = tasksRes?.data?.records || [];
+  // 后端分页默认 pageSize=100，前端从不翻页 —— 超过 100 条会被静默截断。
+  // 完整改造（虚拟滚动/加载更多）不在本批范围，但必须让用户知道"还有多少没显示"。
+  const taskTotal = tasksRes?.data?.total ?? tasks.length;
+  const hiddenTaskCount = Math.max(0, taskTotal - tasks.length);
 
   // 成员名解析（导出列用）
   const { data: taskMembersRes } = useProjectMembers(projectId);
@@ -543,6 +547,14 @@ export function TasksTab({ projectId }: { projectId: string }) {
         )}
       </div>
 
+      {/* 分页提示：后端默认 pageSize=100，超出的任务不会显示 */}
+      {hiddenTaskCount > 0 && (
+        <div className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+          当前只显示前 {tasks.length} 条任务，另有 {hiddenTaskCount} 条未加载（共 {taskTotal} 条）。
+          请用筛选/视图缩小范围后再操作，避免误判任务总数。
+        </div>
+      )}
+
       {/* 看板 */}
       {isLoading ? (
         <div className="flex flex-1 items-center justify-center">
@@ -642,7 +654,8 @@ function TaskEditDialog({
 
   const handleSave = async () => {
     if (!form.title.trim()) return;
-    await updateTask.mutateAsync({
+    try {
+      await updateTask.mutateAsync({
       id: task.id,
       data: {
         title: form.title,
@@ -652,9 +665,17 @@ function TaskEditDialog({
         // 空串表示"清除"：后端会把空串解释为置空，而不是跳过
         assigneeId: form.assigneeId,
         sprintId: form.sprintId,
-      },
-    });
-    onOpenChange(false);
+        // 乐观锁：带上打开弹窗时的版本号。别人先改了 → 服务端返回 409，
+        // 而不是让我们的旧表单静默覆盖他的修改。
+        expectedVersion: task.version,
+        },
+      });
+      onOpenChange(false);
+    } catch (e) {
+      // 409 = 别人先改了：把服务端的说明原样给用户，并让他知道要刷新
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      alert(msg || '保存失败，请重试');
+    }
   };
 
   return (

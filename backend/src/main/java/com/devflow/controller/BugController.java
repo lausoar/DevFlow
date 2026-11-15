@@ -158,7 +158,7 @@ public class BugController {
         String userId = guard.userId(authentication);
         Bug existing = requireBug(userId, id);
         requireBugPermission(existing.getProjectId(), userId, PermissionCodes.BUG_DELETE);
-        bugService.delete(id);
+        bugService.delete(id, userId);
         return R.ok();
     }
 
