@@ -150,7 +150,7 @@ export function NotificationPreferencesCard() {
               </Button>
             </div>
             {msg && (
-              <p className={`text-xs ${msg.ok ? 'text-green-600' : 'text-destructive'}`}>{msg.text}</p>
+              <p className={`text-xs ${msg.ok ? 'text-success' : 'text-destructive'}`}>{msg.text}</p>
             )}
           </>
         )}

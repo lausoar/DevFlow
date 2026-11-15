@@ -97,10 +97,10 @@ export default function BurndownTab() {
                 <Badge
                   className={`mt-1 text-[10px] ${
                     burndown.sprintStatus === 'ACTIVE'
-                      ? 'bg-blue-500/10 text-blue-600'
+                      ? 'bg-info/10 text-info'
                       : burndown.sprintStatus === 'COMPLETED'
-                      ? 'bg-green-500/10 text-green-600'
-                      : 'bg-gray-500/10 text-gray-600'
+                      ? 'bg-success/10 text-success'
+                      : 'bg-surface-4/10 text-ink-subtle'
                   }`}
                 >
                   {burndown.sprintStatus === 'ACTIVE' ? '进行中' : burndown.sprintStatus === 'COMPLETED' ? '已完成' : '规划中'}
@@ -132,8 +132,8 @@ export default function BurndownTab() {
                 <Badge
                   className={`mt-1 text-[10px] ${
                     burndown.onTrack
-                      ? 'bg-green-500/10 text-green-600'
-                      : 'bg-amber-500/10 text-amber-600'
+                      ? 'bg-success/10 text-success'
+                      : 'bg-warning/10 text-warning'
                   }`}
                 >
                   {burndown.onTrack ? '进度正常' : '可能延期'}
@@ -208,7 +208,7 @@ export default function BurndownTab() {
                     <div key={point.date} className="flex items-center gap-4 text-sm">
                       <span className="w-20 text-muted-foreground">{point.date.slice(5)}</span>
                       <div className="flex items-center gap-2 flex-1">
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <CheckCircle2 className="h-4 w-4 text-success" />
                         <span>
                           完成 <strong>{point.completedTasks}</strong> 个任务，
                           <strong>{point.completedPoints}</strong> 个故事点

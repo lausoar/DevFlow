@@ -75,7 +75,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-6 w-6 animate-spin text-brand" />
-          <p className="text-sm text-muted-foreground">正在连接服务...</p>
+          <p className="text-[13px] text-ink-subtle">正在连接服务...</p>
         </div>
       </div>
     );

@@ -22,16 +22,16 @@ import {
 // 项目反馈标签页（站内成员查看，处理需 bug:edit / 转 Bug 需 bug:create）
 // ============================================
 const TYPE_CONFIG: Record<FeedbackType, { label: string; icon: React.ElementType; cls: string }> = {
-  SUGGESTION: { label: '功能建议', icon: Lightbulb, cls: 'text-amber-600 bg-amber-500/10' },
-  IMPROVEMENT: { label: '体验改进', icon: Wrench, cls: 'text-blue-600 bg-blue-500/10' },
+  SUGGESTION: { label: '功能建议', icon: Lightbulb, cls: 'text-warning bg-warning/10' },
+  IMPROVEMENT: { label: '体验改进', icon: Wrench, cls: 'text-info bg-info/10' },
   OTHER: { label: '其他', icon: CircleEllipsis, cls: 'text-muted-foreground bg-muted' },
 };
 
 const STATUS_CONFIG: Record<FeedbackStatus, { label: string; cls: string }> = {
-  OPEN: { label: '待处理', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-  ACCEPTED: { label: '已接受', cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-  REJECTED: { label: '已拒绝', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
-  CONVERTED: { label: '已转 Bug', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+  OPEN: { label: '待处理', cls: 'bg-warning-muted text-warning ' },
+  ACCEPTED: { label: '已接受', cls: 'bg-success-muted text-success ' },
+  REJECTED: { label: '已拒绝', cls: 'bg-surface-2 text-ink-subtle ' },
+  CONVERTED: { label: '已转 Bug', cls: 'bg-info-muted text-info ' },
 };
 
 function errMsg(e: unknown, fallback: string): string {
@@ -122,7 +122,7 @@ export function FeedbackTab({ projectId }: { projectId: string }) {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 gap-1 text-xs text-green-600 hover:text-green-700"
+                          className="h-7 gap-1 text-xs text-success hover:text-success"
                           disabled={updateStatus.isPending}
                           onClick={() =>
                             updateStatus.mutate(

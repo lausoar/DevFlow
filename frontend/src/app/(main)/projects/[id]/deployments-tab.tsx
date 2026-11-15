@@ -104,7 +104,7 @@ export function DeploymentsTab({ projectId, canManage }: { projectId: string; ca
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
-            <Activity className="h-4 w-4 text-primary" />
+            <Activity className="h-4 w-4 text-brand" />
             DORA 交付效能（近 30 天）
           </CardTitle>
         </CardHeader>
@@ -144,7 +144,7 @@ export function DeploymentsTab({ projectId, canManage }: { projectId: string; ca
                   hint="失败到下次成功的间隔"
                 />
               </div>
-              {dora.note && <p className="mt-3 text-[11px] text-amber-600">{dora.note}</p>}
+              {dora.note && <p className="mt-3 text-[11px] text-warning">{dora.note}</p>}
             </>
           )}
         </CardContent>
@@ -229,7 +229,7 @@ export function DeploymentsTab({ projectId, canManage }: { projectId: string; ca
                 <Badge variant="outline" className="text-[10px]">{env.type}</Badge>
                 {env.requiresApproval === 1 && (
                   <span title="需要审批">
-                    <ShieldCheck className="h-3 w-3 text-amber-500" />
+                    <ShieldCheck className="h-3 w-3 text-warning" />
                   </span>
                 )}
               </div>
@@ -244,7 +244,7 @@ export function DeploymentsTab({ projectId, canManage }: { projectId: string; ca
           <h3 className="text-sm font-medium">部署记录</h3>
           {canManage && environments.length > 0 && (
             <Dialog open={deployOpen} onOpenChange={setDeployOpen}>
-              <DialogTrigger className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+              <DialogTrigger className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-brand/90">
                 <Rocket className="h-3.5 w-3.5" />
                 发起部署
               </DialogTrigger>
@@ -345,20 +345,20 @@ function MetricCard({
   return (
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`text-xl font-semibold ${warn ? 'text-red-600' : ''}`}>{value}</p>
+      <p className={`text-xl font-semibold ${warn ? 'text-danger' : ''}`}>{value}</p>
       {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
     </div>
   );
 }
 
 const STATUS_CONFIG: Record<DeploymentStatus, { label: string; className: string }> = {
-  PENDING_APPROVAL: { label: '待审批', className: 'bg-amber-100 text-amber-700' },
-  APPROVED: { label: '已批准', className: 'bg-blue-100 text-blue-700' },
-  DEPLOYING: { label: '部署中', className: 'bg-blue-100 text-blue-700' },
-  SUCCEEDED: { label: '成功', className: 'bg-green-100 text-green-700' },
-  FAILED: { label: '失败', className: 'bg-red-100 text-red-700' },
+  PENDING_APPROVAL: { label: '待审批', className: 'bg-warning-muted text-warning' },
+  APPROVED: { label: '已批准', className: 'bg-info-muted text-info' },
+  DEPLOYING: { label: '部署中', className: 'bg-info-muted text-info' },
+  SUCCEEDED: { label: '成功', className: 'bg-success-muted text-success' },
+  FAILED: { label: '失败', className: 'bg-danger-muted text-danger' },
   ROLLED_BACK: { label: '已回滚', className: 'bg-orange-100 text-orange-700' },
-  CANCELLED: { label: '已取消', className: 'bg-slate-100 text-slate-600' },
+  CANCELLED: { label: '已取消', className: 'bg-surface-2 text-ink-subtle' },
 };
 
 function DeploymentRow({

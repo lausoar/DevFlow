@@ -200,7 +200,7 @@ function FieldControl({
                     onChange(on ? selected.filter((x) => x !== o) : [...selected, o])
                   }
                   className={`rounded px-2 py-0.5 text-xs transition-colors ${
-                    on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                    on ? 'bg-brand text-primary-foreground' : 'bg-muted text-muted-foreground'
                   } ${editable ? '' : 'opacity-60'}`}
                 >
                   {o}

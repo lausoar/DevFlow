@@ -27,10 +27,10 @@ import {
 // 状态配置
 // ============================================
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
-  TODO: { label: '待办', color: 'text-slate-600', bg: 'bg-slate-200' },
-  DOING: { label: '进行中', color: 'text-blue-600', bg: 'bg-blue-400' },
-  TESTING: { label: '测试中', color: 'text-amber-600', bg: 'bg-amber-400' },
-  DONE: { label: '已完成', color: 'text-green-600', bg: 'bg-green-400' },
+  TODO: { label: '待办', color: 'text-ink-subtle', bg: 'bg-surface-3' },
+  DOING: { label: '进行中', color: 'text-info', bg: 'bg-info' },
+  TESTING: { label: '测试中', color: 'text-warning', bg: 'bg-warning' },
+  DONE: { label: '已完成', color: 'text-success', bg: 'bg-success' },
 };
 
 const fmtDate = (d: string) =>
@@ -150,7 +150,7 @@ export default function GanttTab() {
             <Card>
               <CardContent className="p-4">
                 <p className="text-xs text-muted-foreground">延期任务</p>
-                <p className="text-2xl font-bold text-red-500">
+                <p className="text-2xl font-bold text-danger">
                   {gantt.tasks.filter((t) => t.overdue).length}
                 </p>
               </CardContent>
@@ -174,7 +174,7 @@ export default function GanttTab() {
                     <div key={task.id} className="rounded-lg border p-3">
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate text-sm font-medium">{task.title}</span>
-                        {task.overdue && <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />}
+                        {task.overdue && <AlertCircle className="h-4 w-4 shrink-0 text-danger" />}
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                         <span>{task.assigneeName}</span>
@@ -239,10 +239,10 @@ export default function GanttTab() {
                             <Badge
                               className={
                                 sprint.status === 'ACTIVE'
-                                  ? 'bg-blue-500/10 text-blue-600'
+                                  ? 'bg-info/10 text-info'
                                   : sprint.status === 'COMPLETED'
-                                  ? 'bg-green-500/10 text-green-600'
-                                  : 'bg-gray-500/10 text-gray-600'
+                                  ? 'bg-success/10 text-success'
+                                  : 'bg-surface-4/10 text-ink-subtle'
                               }
                             >
                               {sprint.name}
@@ -270,7 +270,7 @@ export default function GanttTab() {
                                       {task.title}
                                     </span>
                                     {task.overdue && (
-                                      <AlertCircle className="h-3 w-3 text-red-500 shrink-0" />
+                                      <AlertCircle className="h-3 w-3 text-danger shrink-0" />
                                     )}
                                   </div>
 

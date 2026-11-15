@@ -114,7 +114,7 @@ export function AutomationRulesDialog({
       <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-1.5">
-            <Zap className="h-4 w-4 text-amber-500" /> 自动化规则
+            <Zap className="h-4 w-4 text-warning" /> 自动化规则
           </DialogTitle>
           <DialogDescription>
             当触发事件发生时，自动通知指定成员（新 Bug 场景还可自动指派）
@@ -131,7 +131,7 @@ export function AutomationRulesDialog({
           ) : (
             rules.map((rule) => (
               <div key={rule.id} className="flex items-center gap-2 rounded-md border p-2.5">
-                <Zap className={`h-3.5 w-3.5 shrink-0 ${rule.enabled === 1 ? 'text-amber-500' : 'text-muted-foreground'}`} />
+                <Zap className={`h-3.5 w-3.5 shrink-0 ${rule.enabled === 1 ? 'text-warning' : 'text-muted-foreground'}`} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium">{rule.name}</p>
                   <p className="text-[11px] text-muted-foreground">

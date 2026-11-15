@@ -245,10 +245,10 @@ export default function EnterpriseStatsTab() {
                         variant="secondary"
                         className={
                           project.status === 'ACTIVE'
-                            ? 'bg-green-500/10 text-green-600'
+                            ? 'bg-success/10 text-success'
                             : project.status === 'PLANNING'
-                            ? 'bg-amber-500/10 text-amber-600'
-                            : 'bg-gray-500/10 text-gray-500'
+                            ? 'bg-warning/10 text-warning'
+                            : 'bg-surface-4/10 text-ink-tertiary'
                         }
                       >
                         {project.status === 'ACTIVE' ? '进行中' : project.status === 'PLANNING' ? '规划中' : '已归档'}

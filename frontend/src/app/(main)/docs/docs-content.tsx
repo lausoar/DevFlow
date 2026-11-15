@@ -75,13 +75,13 @@ export default function DocsContent() {
       {/* 头部 */}
       <div className="flex flex-wrap items-center gap-3 border-b px-4 py-4 sm:px-6">
         <div className="flex items-center gap-2">
-          <BookOpen className="h-5 w-5 text-primary" />
+          <BookOpen className="h-5 w-5 text-brand" />
           <h1 className="text-lg font-semibold">文档中心</h1>
         </div>
 
         <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 sm:w-auto">
+            <DialogTrigger className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-brand/90 sm:w-auto">
               <Plus className="h-4 w-4" />
               新建文档
             </DialogTrigger>
@@ -130,7 +130,7 @@ export default function DocsContent() {
               onClick={() => setTypeFilter(t.value)}
               className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                 typeFilter === t.value
-                  ? 'bg-primary text-primary-foreground'
+                  ? 'bg-brand text-primary-foreground'
                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
               }`}
             >
@@ -195,8 +195,8 @@ function DocCard({ doc, onEdit }: { doc: Document; onEdit: () => void }) {
     <Card className="group cursor-pointer hover:shadow-md transition-shadow" onClick={onEdit}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-            <FileText className="h-4.5 w-4.5 text-primary" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand/10">
+            <FileText className="h-4.5 w-4.5 text-brand" />
           </div>
           <Badge variant="outline" className="text-[10px]">
             {typeLabels[doc.type] || doc.type}
@@ -274,7 +274,7 @@ function DocEditor({ doc, onClose }: { doc: Document; onClose: () => void }) {
           <Button variant="outline" size="sm" onClick={onClose}>
             关闭
           </Button>
-          {saved && <span className="text-xs text-green-600">已保存</span>}
+          {saved && <span className="text-xs text-success">已保存</span>}
           <Button size="sm" onClick={handleSave} disabled={saving}>
             {saving ? '保存中...' : '保存'}
           </Button>

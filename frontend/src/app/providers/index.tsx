@@ -70,8 +70,11 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <NextThemesProvider
       attribute="class"
-      defaultTheme="system"
-      enableSystem
+      // 主题类名必须是 light / dark：globals.css 里两套 token 分别挂在
+      // `:root, .dark` 与 `.light` 上。显式写死，避免以后换成别的类名导致浅色主题静默失效。
+      value={{ light: 'light', dark: 'dark' }}
+      defaultTheme="dark"
+      enableSystem={false}
       disableTransitionOnChange
     >
       <QueryClientProvider client={queryClient}>

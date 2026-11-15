@@ -66,7 +66,7 @@ export default function FilesContent() {
       {/* 头部 */}
       <div className="flex items-center gap-4 border-b px-6 py-4">
         <div className="flex items-center gap-2">
-          <FolderOpen className="h-5 w-5 text-primary" />
+          <FolderOpen className="h-5 w-5 text-brand" />
           <h1 className="text-lg font-semibold">文件中心</h1>
         </div>
         <span className="text-xs text-muted-foreground">
@@ -168,7 +168,7 @@ function FileCard({ file, onDelete, onDownload }: { file: FileItem; onDelete: ()
           <Button
             variant="outline"
             size="icon"
-            className="h-6 w-6 text-red-500 hover:text-red-600"
+            className="h-6 w-6 text-danger hover:text-danger"
             title="删除"
             onClick={(e) => {
               e.stopPropagation();
@@ -191,19 +191,19 @@ function getFileIcon(mimeType: string): React.ReactNode {
   if (!mimeType) return <File className="h-8 w-8 text-muted-foreground" />;
 
   if (mimeType.startsWith('image/')) {
-    return <Image className="h-8 w-8 text-green-500" />;
+    return <Image className="h-8 w-8 text-success" />;
   }
   if (mimeType.includes('pdf')) {
-    return <FileText className="h-8 w-8 text-red-500" />;
+    return <FileText className="h-8 w-8 text-danger" />;
   }
   if (mimeType.includes('json') || mimeType.includes('javascript') || mimeType.includes('typescript')) {
-    return <FileCode className="h-8 w-8 text-blue-500" />;
+    return <FileCode className="h-8 w-8 text-info" />;
   }
   if (mimeType.includes('word') || mimeType.includes('document')) {
-    return <FileText className="h-8 w-8 text-blue-600" />;
+    return <FileText className="h-8 w-8 text-info" />;
   }
   if (mimeType.includes('sheet') || mimeType.includes('excel')) {
-    return <FileText className="h-8 w-8 text-green-600" />;
+    return <FileText className="h-8 w-8 text-success" />;
   }
 
   return <File className="h-8 w-8 text-muted-foreground" />;

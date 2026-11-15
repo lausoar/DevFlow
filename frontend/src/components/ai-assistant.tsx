@@ -48,7 +48,7 @@ export function AiAssistant() {
       <SheetContent side="right" className="w-full sm:max-w-md">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
-            <Bot className="h-4 w-4 text-primary" />
+            <Bot className="h-4 w-4 text-brand" />
             AI 助手
           </SheetTitle>
         </SheetHeader>
@@ -56,7 +56,7 @@ export function AiAssistant() {
           <ScrollArea className="flex-1 px-4 py-3">
             {messages.length === 0 ? (
               <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center text-muted-foreground">
-                <Bot className="h-10 w-10 text-primary/40" />
+                <Bot className="h-10 w-10 text-brand/40" />
                 <p className="text-sm">我是你的 AI 助手，有什么可以帮你的？</p>
               </div>
             ) : (
@@ -69,7 +69,7 @@ export function AiAssistant() {
                     <div
                       className={`max-w-[80%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm ${
                         m.role === 'user'
-                          ? 'bg-primary text-primary-foreground'
+                          ? 'bg-brand text-primary-foreground'
                           : 'bg-muted'
                       }`}
                     >

@@ -26,8 +26,8 @@ export default function SettingsPage() {
     <MainLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">设置</h1>
-          <p className="text-sm text-muted-foreground">管理个人信息和安全设置</p>
+          <h1 className="text-headline text-ink">设置</h1>
+          <p className="text-[13px] text-ink-subtle">管理个人信息和安全设置</p>
         </div>
 
         <div className="grid gap-6 max-w-2xl">
@@ -170,12 +170,12 @@ function ProfileCard({ user, setUser }: {
             保存修改
           </Button>
           {success && (
-            <span className="flex items-center gap-1 text-sm text-green-600">
+            <span className="flex items-center gap-1 text-sm text-success">
               <CheckCircle2 className="h-4 w-4" /> 保存成功
             </span>
           )}
           {error && (
-            <span className="flex items-center gap-1 text-sm text-red-600">
+            <span className="flex items-center gap-1 text-sm text-danger">
               <XCircle className="h-4 w-4" /> {error}
             </span>
           )}
@@ -240,7 +240,7 @@ function PasswordCard() {
     <Card>
       <CardHeader>
         {mustChange && (
-          <div className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+          <div className="mb-2 rounded-md border border-warning/30 bg-warning-muted px-3 py-2 text-xs text-warning ">
             当前使用的是临时密码或管理员重置的密码，请先修改为新密码。
           </div>
         )}
@@ -299,12 +299,12 @@ function PasswordCard() {
             修改密码
           </Button>
           {success && (
-            <span className="flex items-center gap-1 text-sm text-green-600">
+            <span className="flex items-center gap-1 text-sm text-success">
               <CheckCircle2 className="h-4 w-4" /> 密码修改成功
             </span>
           )}
           {error && (
-            <span className="flex items-center gap-1 text-sm text-red-600">
+            <span className="flex items-center gap-1 text-sm text-danger">
               <XCircle className="h-4 w-4" /> {error}
             </span>
           )}

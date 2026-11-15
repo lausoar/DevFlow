@@ -79,8 +79,8 @@ export default function RegisterPage() {
           <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-brand text-white shadow-lg">
             <Zap className="h-7 w-7" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">DevFlow</h1>
-          <p className="mt-1 text-sm text-muted-foreground">创建您的企业账号</p>
+          <h1 className="text-headline text-ink">DevFlow</h1>
+          <p className="mt-1 text-[13px] text-ink-subtle">创建您的企业账号</p>
         </div>
 
         <Card className="shadow-xl">

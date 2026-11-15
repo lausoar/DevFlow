@@ -51,11 +51,11 @@ import type { TestCase, TestCaseView, TestCaseStep } from '@/types';
 // ============================================
 
 const RESULT_CONFIG: Record<string, { label: string; cls: string }> = {
-  PASS: { label: '通过', cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-  FAIL: { label: '失败', cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
-  BLOCKED: { label: '阻塞', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-  SKIP: { label: '跳过', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
-  UNEXECUTED: { label: '未执行', cls: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-500' },
+  PASS: { label: '通过', cls: 'bg-success-muted text-success ' },
+  FAIL: { label: '失败', cls: 'bg-danger-muted text-danger ' },
+  BLOCKED: { label: '阻塞', cls: 'bg-warning-muted text-warning ' },
+  SKIP: { label: '跳过', cls: 'bg-surface-2 text-ink-subtle ' },
+  UNEXECUTED: { label: '未执行', cls: 'bg-surface-2 text-ink-tertiary ' },
 };
 
 const PRIORITY_LABELS: Record<string, string> = { HIGH: '高', MEDIUM: '中', LOW: '低' };
@@ -110,11 +110,11 @@ export function TestCasesTab({ projectId }: { projectId: string }) {
         <div className="mb-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
           {[
             { label: '总用例', value: stats.total, cls: 'text-foreground' },
-            { label: '通过', value: stats.passed, cls: 'text-green-600' },
-            { label: '失败', value: stats.failed, cls: 'text-red-600' },
-            { label: '阻塞', value: stats.blocked, cls: 'text-amber-600' },
+            { label: '通过', value: stats.passed, cls: 'text-success' },
+            { label: '失败', value: stats.failed, cls: 'text-danger' },
+            { label: '阻塞', value: stats.blocked, cls: 'text-warning' },
             { label: '未执行', value: stats.unexecuted, cls: 'text-muted-foreground' },
-            { label: '通过率', value: `${stats.passRate}%`, cls: 'text-blue-600' },
+            { label: '通过率', value: `${stats.passRate}%`, cls: 'text-info' },
           ].map((s) => (
             <Card key={s.label} className="p-3">
               <p className="text-xs text-muted-foreground">{s.label}</p>
@@ -325,7 +325,7 @@ function CaseRow({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-red-500 hover:text-red-600"
+              className="h-7 w-7 text-danger hover:text-danger"
               title="删除"
               onClick={onDelete}
             >
@@ -620,7 +620,7 @@ function ExecuteDialog({
             </p>
           )}
           {lastFailNote && c?.latestResult === 'FAIL' && (
-            <p className="text-xs text-red-500">当前状态为失败，建议填写备注并转缺陷跟进</p>
+            <p className="text-xs text-danger">当前状态为失败，建议填写备注并转缺陷跟进</p>
           )}
         </div>
 
@@ -630,7 +630,7 @@ function ExecuteDialog({
               key={r}
               onClick={() => setResult(r)}
               className={`flex-1 rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
-                result === r ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted/50'
+                result === r ? 'border-primary bg-brand/10 text-brand' : 'hover:bg-muted/50'
               }`}
             >
               {RESULT_CONFIG[r].label}

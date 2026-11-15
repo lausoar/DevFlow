@@ -81,7 +81,7 @@ export function RecycleBinDialog({
       <DialogContent className="max-h-[80vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-1.5">
-            <AlertTriangle className="h-4 w-4 text-amber-500" /> 回收站
+            <AlertTriangle className="h-4 w-4 text-warning" /> 回收站
           </DialogTitle>
           <DialogDescription>
             项目内已删除的任务、Bug 和需求会保留在这里，可随时恢复

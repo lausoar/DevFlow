@@ -61,10 +61,10 @@ import { queryApi } from '@/lib/api/query';
 // ============================================
 /** 兜底列：工作流尚未配置 / 请求失败时使用，与后端内置默认流程一致 */
 const FALLBACK_COLUMNS: WorkflowStatusDef[] = [
-  { code: 'TODO', name: '待办', category: 'TODO', color: 'bg-slate-400', next: ['DOING'] },
-  { code: 'DOING', name: '进行中', category: 'IN_PROGRESS', color: 'bg-blue-500', next: ['TESTING', 'TODO'] },
-  { code: 'TESTING', name: '测试中', category: 'IN_PROGRESS', color: 'bg-amber-500', next: ['DONE', 'DOING'] },
-  { code: 'DONE', name: '已完成', category: 'DONE', color: 'bg-green-500', next: ['TESTING'] },
+  { code: 'TODO', name: '待办', category: 'TODO', color: 'bg-surface-4', next: ['DOING'] },
+  { code: 'DOING', name: '进行中', category: 'IN_PROGRESS', color: 'bg-info', next: ['TESTING', 'TODO'] },
+  { code: 'TESTING', name: '测试中', category: 'IN_PROGRESS', color: 'bg-warning', next: ['DONE', 'DOING'] },
+  { code: 'DONE', name: '已完成', category: 'DONE', color: 'bg-success', next: ['TESTING'] },
 ];
 
 /** 状态标签 → 判断是否"完成"（按工作流分类，而不是状态码） */
@@ -76,10 +76,10 @@ const labelOf = (columns: WorkflowStatusDef[], status: string) =>
 
 // 优先级配置
 const PRIORITY_CONFIG: Record<string, { label: string; color: string }> = {
-  CRITICAL: { label: '紧急', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
-  HIGH: { label: '高', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
-  MEDIUM: { label: '中', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-  LOW: { label: '低', color: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
+  CRITICAL: { label: '紧急', color: 'bg-danger-muted text-danger ' },
+  HIGH: { label: '高', color: 'bg-orange-100 text-orange-700 ' },
+  MEDIUM: { label: '中', color: 'bg-info-muted text-info ' },
+  LOW: { label: '低', color: 'bg-surface-2 text-ink-subtle ' },
 };
 
 // ============================================
@@ -298,7 +298,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
             if (open) setNewTask((prev) => ({ ...prev, sprintId: prev.sprintId || defaultSprintId }));
           }}
         >
-          <DialogTrigger className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+          <DialogTrigger className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-brand/90">
             <Plus className="h-4 w-4" />
             新建任务
           </DialogTrigger>
@@ -382,7 +382,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
 
       {/* 当前生效的视图 */}
       {viewIds && (
-        <div className="mb-3 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs">
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-primary/30 bg-brand/5 px-3 py-1.5 text-xs">
           <span className="font-medium">视图生效</span>
           <code className="flex-1 truncate text-muted-foreground">{viewLabel}</code>
           <Button
@@ -405,7 +405,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
           ) : (
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           )}
-          <Zap className="h-4 w-4 text-primary" />
+          <Zap className="h-4 w-4 text-brand" />
           <span className="text-sm font-medium">迭代管理</span>
           {activeSprint && (
             <Badge variant="default" className="ml-2 text-[10px]">
@@ -421,7 +421,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
           <div className="border-t px-4 py-3">
             {/* 活跃 Sprint 进度 */}
             {activeSprint && (
-              <div className="mb-3 rounded-lg bg-primary/5 p-3">
+              <div className="mb-3 rounded-lg bg-brand/5 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-medium">{activeSprint.name}</span>
                   <div className="flex items-center gap-2">
@@ -474,10 +474,10 @@ export function TasksTab({ projectId }: { projectId: string }) {
                   <span
                     className={`h-2 w-2 rounded-full ${
                       sprint.status === 'ACTIVE'
-                        ? 'bg-green-500'
+                        ? 'bg-success'
                         : sprint.status === 'COMPLETED'
-                        ? 'bg-slate-400'
-                        : 'bg-blue-400'
+                        ? 'bg-surface-4'
+                        : 'bg-info'
                     }`}
                   />
                   <span className="flex-1 text-sm">{sprint.name}</span>
@@ -549,7 +549,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
 
       {/* 分页提示：后端默认 pageSize=100，超出的任务不会显示 */}
       {hiddenTaskCount > 0 && (
-        <div className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+        <div className="rounded-md border border-warning/30/60 bg-warning-muted px-3 py-2 text-xs text-warning ">
           当前只显示前 {tasks.length} 条任务，另有 {hiddenTaskCount} 条未加载（共 {taskTotal} 条）。
           请用筛选/视图缩小范围后再操作，避免误判任务总数。
         </div>
@@ -568,7 +568,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
                 key={col.code}
                 status={col.code as TaskStatus}
                 label={col.name}
-                color={col.color || 'bg-slate-400'}
+                color={col.color || 'bg-surface-4'}
                 tasks={tasksByStatus[col.code] || []}
                 onStatusChange={handleStatusChange}
                 onEdit={setEditTask}
@@ -967,7 +967,7 @@ function TaskCard({
             <Button
               variant="ghost"
               size="icon"
-              className="h-5 w-5 text-red-500 hover:text-red-600"
+              className="h-5 w-5 text-danger hover:text-danger"
               onClick={() => onDelete(task.id)}
               title="删除"
             >
@@ -989,20 +989,20 @@ function TaskCard({
             <div className="mt-1.5 flex items-center gap-2">
               {cl && cl.total > 0 && (
                 <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
-                  cl.done === cl.total ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'
+                  cl.done === cl.total ? 'bg-success-muted text-success' : 'bg-muted text-muted-foreground'
                 }`}>
                   ☑ {cl.done}/{cl.total}
                 </span>
               )}
               {blockers > 0 && (
-                <span className="inline-flex items-center gap-1 rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-600">
+                <span className="inline-flex items-center gap-1 rounded bg-danger-muted px-1.5 py-0.5 text-[10px] text-danger">
                   ⛔ {blockers} 个前置未完成
                 </span>
               )}
               {(() => {
                 const h = extras.worklogHours?.[task.id];
                 return h && h > 0 ? (
-                  <span className="inline-flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-600">
+                  <span className="inline-flex items-center gap-1 rounded bg-info-muted px-1.5 py-0.5 text-[10px] text-info">
                     ⏱ {h}h
                   </span>
                 ) : null;
@@ -1063,14 +1063,14 @@ function TaskChecklistSection({ taskId }: { taskId: string }) {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label>清单（子任务）</Label>
-        <span className={`text-xs ${items.length > 0 && doneCount === items.length ? 'text-green-600' : 'text-muted-foreground'}`}>
+        <span className={`text-xs ${items.length > 0 && doneCount === items.length ? 'text-success' : 'text-muted-foreground'}`}>
           {items.length > 0 ? `${doneCount}/${items.length} 完成` : '拆解为可勾选的步骤'}
         </span>
       </div>
 
       {items.length > 0 && (
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${percent}%` }} />
+          <div className="h-full rounded-full bg-success transition-all" style={{ width: `${percent}%` }} />
         </div>
       )}
 
@@ -1149,7 +1149,7 @@ function TaskDependenciesSection({ taskId, projectId }: { taskId: string; projec
           {blockedBy.map((b) => (
             <div key={b.dependencyId} className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50">
               <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
-                b.done ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
+                b.done ? 'bg-success-muted text-success' : 'bg-danger-muted text-danger'
               }`}>
                 {b.done ? '✓ 已完成' : '⏳ 未完成'}
               </span>

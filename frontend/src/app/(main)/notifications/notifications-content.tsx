@@ -26,13 +26,13 @@ import type { Notification, NotificationType } from '@/types';
 // 通知类型配置
 // ============================================
 const TYPE_CONFIG: Record<NotificationType, { label: string; icon: React.ReactNode; color: string }> = {
-  COMMENT: { label: '评论', icon: <MessageSquare className="h-3.5 w-3.5" />, color: 'text-blue-500' },
+  COMMENT: { label: '评论', icon: <MessageSquare className="h-3.5 w-3.5" />, color: 'text-info' },
   MENTION: { label: '@提及', icon: <AtSign className="h-3.5 w-3.5" />, color: 'text-purple-500' },
-  TASK_UPDATE: { label: '任务', icon: <ListTodo className="h-3.5 w-3.5" />, color: 'text-green-500' },
-  BUG_UPDATE: { label: 'Bug', icon: <Bug className="h-3.5 w-3.5" />, color: 'text-red-500' },
-  SPRINT_UPDATE: { label: '迭代', icon: <Zap className="h-3.5 w-3.5" />, color: 'text-amber-500' },
-  SYSTEM: { label: '系统', icon: <Info className="h-3.5 w-3.5" />, color: 'text-slate-500' },
-  AI: { label: 'AI', icon: <Bot className="h-3.5 w-3.5" />, color: 'text-indigo-500' },
+  TASK_UPDATE: { label: '任务', icon: <ListTodo className="h-3.5 w-3.5" />, color: 'text-success' },
+  BUG_UPDATE: { label: 'Bug', icon: <Bug className="h-3.5 w-3.5" />, color: 'text-danger' },
+  SPRINT_UPDATE: { label: '迭代', icon: <Zap className="h-3.5 w-3.5" />, color: 'text-warning' },
+  SYSTEM: { label: '系统', icon: <Info className="h-3.5 w-3.5" />, color: 'text-ink-tertiary' },
+  AI: { label: 'AI', icon: <Bot className="h-3.5 w-3.5" />, color: 'text-info' },
 };
 
 // ============================================
@@ -65,7 +65,7 @@ export default function NotificationsContent() {
       {/* 头部 */}
       <div className="flex flex-wrap items-center gap-3 border-b px-4 py-4 sm:px-6">
         <div className="flex items-center gap-2">
-          <Bell className="h-5 w-5 text-primary" />
+          <Bell className="h-5 w-5 text-brand" />
           <h1 className="text-lg font-semibold">通知中心</h1>
           {unreadCount > 0 && (
             <Badge variant="default" className="text-[10px]">
@@ -97,7 +97,7 @@ export default function NotificationsContent() {
                 onClick={() => setTypeFilter(type)}
                 className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                   typeFilter === type
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'bg-brand text-primary-foreground'
                     : 'bg-muted text-muted-foreground hover:bg-muted/80'
                 }`}
               >
@@ -111,7 +111,7 @@ export default function NotificationsContent() {
             onClick={() => setUnreadOnly(!unreadOnly)}
             className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
               unreadOnly
-                ? 'bg-primary text-primary-foreground'
+                ? 'bg-brand text-primary-foreground'
                 : 'bg-muted text-muted-foreground hover:bg-muted/80'
             }`}
           >
@@ -170,7 +170,7 @@ function NotificationItem({
       onClick={clickable ? () => onOpen(notification) : undefined}
       title={clickable ? '点击查看' : undefined}
       className={`flex items-start gap-3 px-6 py-3.5 transition-colors hover:bg-muted/50 ${
-        isUnread ? 'bg-primary/[0.03]' : ''
+        isUnread ? 'bg-brand/[0.03]' : ''
       } ${clickable ? 'cursor-pointer' : ''}`}
     >
       {/* 类型图标 */}
@@ -185,7 +185,7 @@ function NotificationItem({
             {notification.title}
           </h3>
           {isUnread && (
-            <span className="h-2 w-2 rounded-full bg-primary" />
+            <span className="h-2 w-2 rounded-full bg-brand" />
           )}
         </div>
         {notification.content && (

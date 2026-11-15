@@ -43,9 +43,9 @@ import { projectApi } from '@/lib/api/project';
 import type { Project } from '@/types';
 
 const statusColors = {
-  ACTIVE: 'bg-green-500/10 text-green-600',
-  PLANNING: 'bg-amber-500/10 text-amber-600',
-  ARCHIVED: 'bg-gray-500/10 text-gray-500',
+  ACTIVE: 'bg-success/10 text-success',
+  PLANNING: 'bg-warning/10 text-warning',
+  ARCHIVED: 'bg-surface-4/10 text-ink-tertiary',
 };
 
 const statusLabels = {
@@ -182,8 +182,8 @@ export default function ProjectsContent() {
       {/* 页面头部 */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">项目中心</h1>
-          <p className="text-sm text-muted-foreground">管理和浏览所有项目</p>
+          <h1 className="text-headline text-ink">项目中心</h1>
+          <p className="text-[13px] text-ink-subtle">管理和浏览所有项目</p>
         </div>
         <Button className="gap-2" onClick={openCreateDialog}>
           <Plus className="h-4 w-4" />
@@ -206,7 +206,7 @@ export default function ProjectsContent() {
           <Button variant="outline" size="sm" className="gap-1">
             <Filter className="h-3 w-3" /> 筛选
           </Button>
-          <div className="flex rounded-lg border border-border">
+          <div className="flex rounded-lg border border-hairline">
             <Button
               variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
               size="icon"

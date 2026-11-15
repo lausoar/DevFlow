@@ -189,27 +189,27 @@ export function DashboardTab({ projectId }: { projectId: string }) {
         <StatCard
           title="总任务"
           value={stats.totalTasks}
-          icon={<ListTodo className="h-4 w-4 text-blue-500" />}
+          icon={<ListTodo className="h-4 w-4 text-info" />}
           color="blue"
         />
         <StatCard
           title="已完成"
           value={stats.completedTasks}
           subtitle={`${stats.completionRate.toFixed(0)}%`}
-          icon={<CheckCircle2 className="h-4 w-4 text-green-500" />}
+          icon={<CheckCircle2 className="h-4 w-4 text-success" />}
           color="green"
         />
         <StatCard
           title="进行中"
           value={stats.inProgressTasks}
-          icon={<Clock className="h-4 w-4 text-amber-500" />}
+          icon={<Clock className="h-4 w-4 text-warning" />}
           color="amber"
         />
         <StatCard
           title="待处理 Bug"
           value={stats.openBugs}
           subtitle={stats.criticalBugs > 0 ? `${stats.criticalBugs} 个严重` : undefined}
-          icon={<AlertTriangle className="h-4 w-4 text-red-500" />}
+          icon={<AlertTriangle className="h-4 w-4 text-danger" />}
           color="red"
         />
       </div>
@@ -220,7 +220,7 @@ export function DashboardTab({ projectId }: { projectId: string }) {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-sm font-medium">
-              <Zap className="h-4 w-4 text-primary" />
+              <Zap className="h-4 w-4 text-brand" />
               当前迭代
             </CardTitle>
           </CardHeader>
@@ -256,7 +256,7 @@ export function DashboardTab({ projectId }: { projectId: string }) {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-sm font-medium">
-              <TrendingUp className="h-4 w-4 text-primary" />
+              <TrendingUp className="h-4 w-4 text-brand" />
               任务分布
             </CardTitle>
           </CardHeader>
@@ -486,7 +486,7 @@ function TrendChart({ tasks, bugs }: { tasks: Task[]; bugs: Bug[] }) {
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          <BarChart3 className="h-4 w-4 text-blue-500" />
+          <BarChart3 className="h-4 w-4 text-info" />
           任务/Bug 趋势（近 14 天）
         </CardTitle>
       </CardHeader>
@@ -722,7 +722,7 @@ function GanttChart({ tasks }: { tasks: Task[] }) {
                         {/* 延期标记 */}
                         {overdue && (
                           <AlertTriangle
-                            className="absolute top-0.5 h-3.5 w-3.5 text-red-500"
+                            className="absolute top-0.5 h-3.5 w-3.5 text-danger"
                             style={{ left: `${left + Math.max(8, width) + 2}px` }}
                           />
                         )}
@@ -863,7 +863,7 @@ function ActivityTimeline({
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          <Activity className="h-4 w-4 text-primary" />
+          <Activity className="h-4 w-4 text-brand" />
           最近动态
         </CardTitle>
       </CardHeader>
@@ -877,10 +877,10 @@ function ActivityTimeline({
                   <div
                     className={`z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
                       activity.type === 'bug'
-                        ? 'bg-red-500/10 text-red-500'
+                        ? 'bg-danger/10 text-danger'
                         : activity.action.includes('完成')
-                        ? 'bg-green-500/10 text-green-500'
-                        : 'bg-blue-500/10 text-blue-500'
+                        ? 'bg-success/10 text-success'
+                        : 'bg-info/10 text-info'
                     }`}
                   >
                     {activity.type === 'bug' ? (
@@ -937,10 +937,10 @@ function StatCard({
   color: string;
 }) {
   const bgMap: Record<string, string> = {
-    blue: 'bg-blue-50 dark:bg-blue-950/30',
-    green: 'bg-green-50 dark:bg-green-950/30',
-    amber: 'bg-amber-50 dark:bg-amber-950/30',
-    red: 'bg-red-50 dark:bg-red-950/30',
+    blue: 'bg-info-muted ',
+    green: 'bg-success-muted ',
+    amber: 'bg-warning-muted ',
+    red: 'bg-danger-muted ',
   };
 
   return (
@@ -982,10 +982,10 @@ function TaskDistribution({
   }, [data, tasks]);
 
   const statusLabels: Record<string, { label: string; color: string }> = {
-    TODO: { label: '待办', color: 'bg-slate-400' },
-    DOING: { label: '进行中', color: 'bg-blue-500' },
-    TESTING: { label: '测试中', color: 'bg-amber-500' },
-    DONE: { label: '已完成', color: 'bg-green-500' },
+    TODO: { label: '待办', color: 'bg-surface-4' },
+    DOING: { label: '进行中', color: 'bg-info' },
+    TESTING: { label: '测试中', color: 'bg-warning' },
+    DONE: { label: '已完成', color: 'bg-success' },
   };
 
   const total = Object.values(distribution).reduce((a, b) => a + b, 0);
@@ -997,7 +997,7 @@ function TaskDistribution({
   return (
     <div className="space-y-3">
       {Object.entries(distribution).map(([status, count]) => {
-        const meta = statusLabels[status] || { label: status, color: 'bg-slate-400' };
+        const meta = statusLabels[status] || { label: status, color: 'bg-surface-4' };
         const pct = (count / total) * 100;
 
         return (

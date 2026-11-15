@@ -118,7 +118,7 @@ export function WalkthroughPanel({
               <span className="text-[11px] text-muted-foreground">
                 {w.checked}/{w.total} 已检查
               </span>
-              <span className={`text-[11px] ${w.passRate < 100 ? 'text-amber-600' : 'text-green-600'}`}>
+              <span className={`text-[11px] ${w.passRate < 100 ? 'text-warning' : 'text-success'}`}>
                 通过率 {w.passRate}%
               </span>
             </button>
@@ -169,10 +169,10 @@ function WalkthroughDetailDialog({
   };
 
   const RESULT_META: Record<WalkthroughResult, { label: string; className: string }> = {
-    PENDING: { label: '待检查', className: 'bg-slate-100 text-slate-600' },
-    PASS: { label: '通过', className: 'bg-green-100 text-green-700' },
-    FAIL: { label: '不通过', className: 'bg-red-100 text-red-700' },
-    NA: { label: '不适用', className: 'bg-slate-100 text-slate-500' },
+    PENDING: { label: '待检查', className: 'bg-surface-2 text-ink-subtle' },
+    PASS: { label: '通过', className: 'bg-success-muted text-success' },
+    FAIL: { label: '不通过', className: 'bg-danger-muted text-danger' },
+    NA: { label: '不适用', className: 'bg-surface-2 text-ink-tertiary' },
   };
 
   return (
@@ -229,13 +229,13 @@ function WalkthroughDetailDialog({
                           variant="ghost" size="icon" className="h-6 w-6" title="通过"
                           onClick={() => setResult.mutate({ itemId: item.id, result: 'PASS' })}
                         >
-                          <CheckCircle2 className="h-3 w-3 text-green-600" />
+                          <CheckCircle2 className="h-3 w-3 text-success" />
                         </Button>
                         <Button
                           variant="ghost" size="icon" className="h-6 w-6" title="不通过"
                           onClick={() => setResult.mutate({ itemId: item.id, result: 'FAIL' })}
                         >
-                          <XCircle className="h-3 w-3 text-red-600" />
+                          <XCircle className="h-3 w-3 text-danger" />
                         </Button>
                         <Button
                           variant="ghost" size="icon" className="h-6 w-6" title="不适用"
@@ -248,7 +248,7 @@ function WalkthroughDetailDialog({
                             variant="ghost" size="icon" className="h-6 w-6" title="转缺陷"
                             onClick={() => toBug.mutate({ itemId: item.id })}
                           >
-                            <BugIcon className="h-3 w-3 text-amber-600" />
+                            <BugIcon className="h-3 w-3 text-warning" />
                           </Button>
                         )}
                       </div>

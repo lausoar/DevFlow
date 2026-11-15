@@ -22,7 +22,6 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
@@ -103,8 +102,8 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'fixed left-0 top-0 z-40 h-screen border-r border-border bg-sidebar transition-all duration-200 ease-in-out',
-        sidebarCollapsed ? 'w-16' : 'w-60'
+        'fixed left-0 top-0 z-40 h-screen border-r border-hairline bg-sidebar transition-all duration-200 ease-in-out',
+        sidebarCollapsed ? 'w-14' : 'w-56'
       )}
     >
       <div className="flex h-full flex-col">
@@ -112,10 +111,10 @@ export function Sidebar() {
         <div className="flex h-14 items-center justify-between px-4">
           {!sidebarCollapsed && (
             <Link href="/workspace" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-white">
+              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-brand-foreground">
                 <Zap className="h-4 w-4" />
               </div>
-              <span className="text-lg font-bold text-foreground">DevFlow</span>
+              <span className="text-[15px] font-semibold tracking-tight text-ink">DevFlow</span>
             </Link>
           )}
           {sidebarCollapsed && (
@@ -135,10 +134,8 @@ export function Sidebar() {
           </Button>
         </div>
 
-        <Separator />
-
         {/* 导航区域 */}
-        <nav className="flex-1 space-y-1 overflow-y-auto p-2">
+        <nav className="flex-1 space-y-0.5 overflow-y-auto border-t border-hairline p-2 pt-2.5">
           {navItems.map((item) => {
             const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
             const Icon = item.icon;
@@ -148,19 +145,19 @@ export function Sidebar() {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-devflow',
+                  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-devflow',
                   isActive
-                    ? 'bg-sidebar-accent text-sidebar-primary'
-                    : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground',
+                    ? 'bg-sidebar-accent text-ink'
+                    : 'text-ink-subtle hover:bg-sidebar-accent/60 hover:text-ink',
                   sidebarCollapsed && 'justify-center px-2'
                 )}
               >
-                <Icon className="h-4.5 w-4.5 shrink-0" />
+                <Icon className={cn('h-4 w-4 shrink-0', isActive && 'text-brand')} />
                 {!sidebarCollapsed && (
                   <>
                     <span className="flex-1">{item.title}</span>
                     {'badgeKey' in item && item.badgeKey && badgeMap[item.badgeKey] > 0 && (
-                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1.5 text-xs text-white">
+                      <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-muted px-1.5 text-[10px] font-semibold text-brand">
                         {badgeMap[item.badgeKey]}
                       </span>
                     )}
@@ -185,22 +182,20 @@ export function Sidebar() {
           })}
         </nav>
 
-        <Separator />
-
         {/* 底部区域 */}
-        <div className="p-2">
+        <div className="border-t border-hairline p-2">
           {!sidebarCollapsed ? (
             <>
               <Link
                 href="/settings"
                 className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-devflow',
+                  'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-devflow',
                   pathname === '/settings'
-                    ? 'bg-sidebar-accent text-sidebar-primary'
-                    : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground'
+                    ? 'bg-sidebar-accent text-ink'
+                    : 'text-ink-subtle hover:bg-sidebar-accent/60 hover:text-ink'
                 )}
               >
-                <Settings className="h-4.5 w-4.5" />
+                <Settings className={cn('h-4 w-4', pathname === '/settings' && 'text-brand')} />
                 <span>设置</span>
               </Link>
             </>

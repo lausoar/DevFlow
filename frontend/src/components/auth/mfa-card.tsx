@@ -77,7 +77,7 @@ export function MfaCard() {
           <ShieldCheck className="h-4 w-4" />
           双因素认证
           {!isLoading && status && (
-            <Badge variant="outline" className={`text-[10px] ${status.enabled ? 'text-green-600' : 'text-muted-foreground'}`}>
+            <Badge variant="outline" className={`text-[10px] ${status.enabled ? 'text-success' : 'text-muted-foreground'}`}>
               {status.enabled ? '已启用' : '未启用'}
             </Badge>
           )}
@@ -165,7 +165,7 @@ export function MfaCard() {
         )}
 
         {msg && (
-          <p className={`text-xs ${msg.ok ? 'text-green-600' : 'text-destructive'}`}>{msg.text}</p>
+          <p className={`text-xs ${msg.ok ? 'text-success' : 'text-destructive'}`}>{msg.text}</p>
         )}
       </CardContent>
     </Card>

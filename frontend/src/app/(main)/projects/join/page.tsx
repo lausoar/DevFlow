@@ -56,13 +56,13 @@ export default function ProjectJoinPage() {
     <div className="flex h-full items-center justify-center p-6">
       <Card className="w-full max-w-md text-center">
         <CardHeader>
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-brand/10">
             {status === 'success' ? (
-              <CheckCircle2 className="h-6 w-6 text-green-500" />
+              <CheckCircle2 className="h-6 w-6 text-success" />
             ) : status === 'error' ? (
               <XCircle className="h-6 w-6 text-destructive" />
             ) : (
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <Loader2 className="h-6 w-6 animate-spin text-brand" />
             )}
           </div>
           <CardTitle>

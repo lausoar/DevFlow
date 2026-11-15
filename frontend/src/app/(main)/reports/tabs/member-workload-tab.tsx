@@ -39,9 +39,9 @@ import { statisticsApi } from '@/lib/api/statistics';
 // 负载等级配置
 // ============================================
 const LOAD_CONFIG = {
-  HIGH: { label: '高', color: 'text-red-600', bg: 'bg-red-500/10' },
-  MEDIUM: { label: '中', color: 'text-amber-600', bg: 'bg-amber-500/10' },
-  LOW: { label: '低', color: 'text-green-600', bg: 'bg-green-500/10' },
+  HIGH: { label: '高', color: 'text-danger', bg: 'bg-danger/10' },
+  MEDIUM: { label: '中', color: 'text-warning', bg: 'bg-warning/10' },
+  LOW: { label: '低', color: 'text-success', bg: 'bg-success/10' },
 };
 
 // ============================================
@@ -125,9 +125,9 @@ export default function MemberWorkloadTab() {
                 <div className="flex items-center gap-2">
                   <p className="text-xs text-muted-foreground">负载均衡</p>
                   {workload.summary.balanced ? (
-                    <Badge className="bg-green-500/10 text-green-600 text-[10px]">均衡</Badge>
+                    <Badge className="bg-success/10 text-success text-[10px]">均衡</Badge>
                   ) : (
-                    <Badge className="bg-amber-500/10 text-amber-600 text-[10px]">
+                    <Badge className="bg-warning/10 text-warning text-[10px]">
                       <AlertTriangle className="mr-1 h-3 w-3" />
                       不均衡
                     </Badge>
@@ -208,7 +208,7 @@ export default function MemberWorkloadTab() {
                                 {loadConfig.label}负载
                               </Badge>
                               {member.overdueTasks > 0 && (
-                                <Badge className="bg-red-500/10 text-red-600 text-[10px]">
+                                <Badge className="bg-danger/10 text-danger text-[10px]">
                                   {member.overdueTasks} 延期
                                 </Badge>
                               )}

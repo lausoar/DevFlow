@@ -841,22 +841,22 @@ function getStatusConfig(status: RequirementStatus) {
       return {
         icon: CircleDot,
         label: '开放',
-        color: 'text-blue-600',
-        bgColor: 'bg-blue-100',
+        color: 'text-info',
+        bgColor: 'bg-info-muted',
       };
     case 'COMPLETED':
       return {
         icon: CheckCircle2,
         label: '已完成',
-        color: 'text-green-600',
-        bgColor: 'bg-green-100',
+        color: 'text-success',
+        bgColor: 'bg-success-muted',
       };
     case 'CLOSED':
       return {
         icon: CircleOff,
         label: '已关闭',
-        color: 'text-gray-500',
-        bgColor: 'bg-gray-100',
+        color: 'text-ink-tertiary',
+        bgColor: 'bg-surface-2',
       };
     default:
       return {
@@ -871,13 +871,13 @@ function getStatusConfig(status: RequirementStatus) {
 function getPriorityConfig(priority: Priority) {
   switch (priority) {
     case 'CRITICAL':
-      return { label: '紧急', color: 'text-red-600 border-red-200 bg-red-50' };
+      return { label: '紧急', color: 'text-danger border-danger/30 bg-danger-muted' };
     case 'HIGH':
       return { label: '高', color: 'text-orange-600 border-orange-200 bg-orange-50' };
     case 'MEDIUM':
-      return { label: '中', color: 'text-blue-600 border-blue-200 bg-blue-50' };
+      return { label: '中', color: 'text-info border-info/30 bg-info-muted' };
     case 'LOW':
-      return { label: '低', color: 'text-gray-600 border-gray-200 bg-gray-50' };
+      return { label: '低', color: 'text-ink-subtle border-hairline bg-surface-2' };
     default:
       return { label: priority, color: '' };
   }

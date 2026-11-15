@@ -30,19 +30,19 @@ import {
 type Panel = 'bug' | 'suggestion' | 'submissions';
 
 const FEEDBACK_STATUS: Record<string, { label: string; cls: string }> = {
-  OPEN: { label: '待处理', cls: 'bg-amber-100 text-amber-700' },
-  ACCEPTED: { label: '已接受', cls: 'bg-green-100 text-green-700' },
-  REJECTED: { label: '已拒绝', cls: 'bg-slate-100 text-slate-600' },
-  CONVERTED: { label: '已转 Bug', cls: 'bg-blue-100 text-blue-700' },
+  OPEN: { label: '待处理', cls: 'bg-warning-muted text-warning' },
+  ACCEPTED: { label: '已接受', cls: 'bg-success-muted text-success' },
+  REJECTED: { label: '已拒绝', cls: 'bg-surface-2 text-ink-subtle' },
+  CONVERTED: { label: '已转 Bug', cls: 'bg-info-muted text-info' },
 };
 
 const BUG_STATUS: Record<string, { label: string; cls: string }> = {
-  NEW: { label: '新提出', cls: 'bg-blue-100 text-blue-700' },
-  ASSIGNED: { label: '已分配', cls: 'bg-indigo-100 text-indigo-700' },
-  DOING: { label: '解决中', cls: 'bg-amber-100 text-amber-700' },
-  RESOLVED: { label: '已解决', cls: 'bg-green-100 text-green-700' },
+  NEW: { label: '新提出', cls: 'bg-info-muted text-info' },
+  ASSIGNED: { label: '已分配', cls: 'bg-info-muted text-info' },
+  DOING: { label: '解决中', cls: 'bg-warning-muted text-warning' },
+  RESOLVED: { label: '已解决', cls: 'bg-success-muted text-success' },
   REOPENED: { label: '重新打开', cls: 'bg-purple-100 text-purple-700' },
-  CLOSED: { label: '已关闭', cls: 'bg-slate-100 text-slate-600' },
+  CLOSED: { label: '已关闭', cls: 'bg-surface-2 text-ink-subtle' },
 };
 
 /** 从 axios 错误里取后端业务文案 */
@@ -175,14 +175,14 @@ export default function GuestPage() {
       <div className="mx-auto max-w-2xl px-4 py-8">
         {/* 头部 */}
         <div className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-          <LinkIcon className="h-4 w-4 text-primary" />
+          <LinkIcon className="h-4 w-4 text-brand" />
           游客反馈通道 · 无需登录
         </div>
 
         {/* 项目信息卡片 */}
         <div className="rounded-xl border bg-card p-6 shadow-sm">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-lg font-bold text-primary">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-lg font-bold text-brand">
               {(info?.project?.name || '?').charAt(0)}
             </div>
             <div className="min-w-0">
@@ -202,13 +202,13 @@ export default function GuestPage() {
           {requirements.length > 0 && (
             <div className="mt-5 border-t pt-4">
               <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-foreground">
-                <FileText className="h-3.5 w-3.5 text-primary" />
+                <FileText className="h-3.5 w-3.5 text-brand" />
                 最新需求
               </p>
               <ul className="space-y-1.5">
                 {requirements.map((r, i) => (
                   <li key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <CheckCircle2 className="h-3 w-3 shrink-0 text-green-500" />
+                    <CheckCircle2 className="h-3 w-3 shrink-0 text-success" />
                     <span className="truncate text-foreground/80">{r.title}</span>
                     <span className="ml-auto shrink-0">
                       {new Date(r.createdAt).toLocaleDateString('zh-CN')}
@@ -265,7 +265,7 @@ export default function GuestPage() {
               onClick={() => setPanel(key)}
               className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 panel === key
-                  ? 'bg-primary text-primary-foreground'
+                  ? 'bg-brand text-primary-foreground'
                   : 'bg-muted text-muted-foreground hover:bg-muted/80'
               }`}
             >
@@ -315,7 +315,7 @@ export default function GuestPage() {
               />
             </div>
             {bugTip && (
-              <p className={`text-xs ${bugTip.ok ? 'text-green-600' : 'text-destructive'}`}>
+              <p className={`text-xs ${bugTip.ok ? 'text-success' : 'text-destructive'}`}>
                 {bugTip.text}
               </p>
             )}
@@ -355,7 +355,7 @@ export default function GuestPage() {
                     onClick={() => setFbForm({ ...fbForm, type: value })}
                     className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                       fbForm.type === value
-                        ? 'bg-primary/10 text-primary'
+                        ? 'bg-brand/10 text-brand'
                         : 'bg-muted text-muted-foreground hover:bg-muted/80'
                     }`}
                   >
@@ -390,7 +390,7 @@ export default function GuestPage() {
               />
             </div>
             {fbTip && (
-              <p className={`text-xs ${fbTip.ok ? 'text-green-600' : 'text-destructive'}`}>
+              <p className={`text-xs ${fbTip.ok ? 'text-success' : 'text-destructive'}`}>
                 {fbTip.text}
               </p>
             )}
@@ -420,7 +420,7 @@ export default function GuestPage() {
               <div className="space-y-5">
                 <div>
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
-                    <BugIcon className="h-3.5 w-3.5 text-primary" />
+                    <BugIcon className="h-3.5 w-3.5 text-brand" />
                     我提交的 Bug（{submissions?.bugs?.length || 0}）
                   </p>
                   {!submissions?.bugs?.length ? (
@@ -431,14 +431,14 @@ export default function GuestPage() {
                         <li key={i} className="flex items-center gap-2 rounded-md border px-3 py-2">
                           <span className="min-w-0 flex-1 truncate text-xs">{b.title}</span>
                           {!!b.pending && (
-                            <Badge className="shrink-0 border-0 bg-amber-100 text-[10px] text-amber-700">
+                            <Badge className="shrink-0 border-0 bg-warning-muted text-[10px] text-warning">
                               <Clock className="mr-1 h-2.5 w-2.5" />
                               待确认
                             </Badge>
                           )}
                           <Badge
                             className={`shrink-0 border-0 text-[10px] ${
-                              BUG_STATUS[b.status]?.cls || 'bg-slate-100 text-slate-600'
+                              BUG_STATUS[b.status]?.cls || 'bg-surface-2 text-ink-subtle'
                             }`}
                           >
                             {BUG_STATUS[b.status]?.label || b.status}
@@ -450,7 +450,7 @@ export default function GuestPage() {
                 </div>
                 <div>
                   <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
-                    <MessageSquarePlus className="h-3.5 w-3.5 text-primary" />
+                    <MessageSquarePlus className="h-3.5 w-3.5 text-brand" />
                     我提交的建议（{submissions?.feedbacks?.length || 0}）
                   </p>
                   {!submissions?.feedbacks?.length ? (
@@ -465,7 +465,7 @@ export default function GuestPage() {
                           </span>
                           <Badge
                             className={`shrink-0 border-0 text-[10px] ${
-                              FEEDBACK_STATUS[f.status]?.cls || 'bg-slate-100 text-slate-600'
+                              FEEDBACK_STATUS[f.status]?.cls || 'bg-surface-2 text-ink-subtle'
                             }`}
                           >
                             {FEEDBACK_STATUS[f.status]?.label || f.status}

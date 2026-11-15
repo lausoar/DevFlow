@@ -225,7 +225,7 @@ export default function ChatContent() {
       <div className="hidden w-64 shrink-0 flex-col border-r bg-muted/30 lg:flex">
         {/* 品牌标题 */}
         <div className="flex items-center gap-2 border-b px-4 py-3.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand text-primary-foreground">
             <MessageSquare className="h-4 w-4" />
           </div>
           <span className="font-semibold">消息频道</span>
@@ -297,7 +297,7 @@ export default function ChatContent() {
                     }}
                     className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors ${
                       channel.id === selectedChannel
-                        ? 'bg-primary/10 font-medium text-primary'
+                        ? 'bg-brand/10 font-medium text-brand'
                         : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                     }`}
                   >
@@ -459,7 +459,7 @@ export default function ChatContent() {
                               className="h-7 w-7 rounded object-cover"
                             />
                           ) : (
-                            <FileText className="h-4 w-4 shrink-0 text-primary" />
+                            <FileText className="h-4 w-4 shrink-0 text-brand" />
                           )}
                           <span className="max-w-24 truncate text-xs">{file.name}</span>
                           <button
@@ -547,7 +547,7 @@ export default function ChatContent() {
                       <span
                         title={online ? '在线' : '离线'}
                         className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background ${
-                          online ? 'bg-green-500' : 'bg-gray-300'
+                          online ? 'bg-success' : 'bg-surface-3'
                         }`}
                       />
                     </div>
@@ -602,7 +602,7 @@ function ChannelItem({
       onClick={onClick}
       className={`flex w-full items-center gap-2 rounded-md border-l-2 border-transparent px-2 py-1.5 text-left text-sm transition-colors ${
         isActive
-          ? 'bg-primary/10 font-medium text-primary'
+          ? 'bg-brand/10 font-medium text-brand'
           : 'text-muted-foreground hover:bg-muted hover:text-foreground'
       }`}
     >
@@ -691,7 +691,7 @@ function HighlightedText({ text, keyword }: { text: string; keyword: string }) {
     <>
       {parts.map((part, i) =>
         part.hit ? (
-          <mark key={i} className="rounded bg-amber-200 px-0.5 text-foreground dark:bg-amber-500/40">
+          <mark key={i} className="rounded bg-warning-muted px-0.5 text-foreground ">
             {part.value}
           </mark>
         ) : (
@@ -841,7 +841,7 @@ function MessageItem({
           {message.recalledAt ? (
             <RecalledBubble isSelf />
           ) : (
-            <div className="break-words rounded-2xl rounded-tr-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
+            <div className="break-words rounded-2xl rounded-tr-sm bg-brand px-3 py-2 text-sm text-primary-foreground">
               <MessageContent message={message} />
             </div>
           )}
@@ -956,7 +956,7 @@ function MessageContent({ message }: { message: ChatMessage }) {
               download={file.name}
               className="flex items-center gap-2 rounded-lg bg-background/80 px-3 py-2 transition-colors hover:bg-background"
             >
-              <FileText className="h-5 w-5 shrink-0 text-primary" />
+              <FileText className="h-5 w-5 shrink-0 text-brand" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-foreground">
                   {file.name}

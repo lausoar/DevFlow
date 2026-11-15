@@ -56,7 +56,7 @@ export function TaskCommentsPanel({ taskId }: { taskId: string }) {
   return (
     <div className="flex flex-col h-full">
       {/* 标题 */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-hairline">
         <MessageSquare className="h-4 w-4 text-muted-foreground" />
         <span className="text-sm font-medium">评论</span>
         <span className="text-xs text-muted-foreground">({comments.length})</span>
@@ -88,7 +88,7 @@ export function TaskCommentsPanel({ taskId }: { taskId: string }) {
       </div>
 
       {/* 输入区域 */}
-      <div className="border-t border-border px-3 py-2 space-y-2">
+      <div className="border-t border-hairline px-3 py-2 space-y-2">
         {/* 回复提示 */}
         {replyTo && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1">
@@ -192,7 +192,7 @@ function CommentItem({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-5 px-1 text-red-500 hover:text-red-600"
+                  className="h-5 px-1 text-danger hover:text-danger"
                   onClick={onDelete}
                 >
                   <Trash2 className="h-3 w-3" />

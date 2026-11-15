@@ -41,24 +41,24 @@ export function MainLayout({ children }: { children: ReactNode }) {
         <SheetContent side="left" className="w-64 p-0">
           <SheetTitle className="sr-only">导航菜单</SheetTitle>
           <div className="flex h-full flex-col">
-            <div className="flex h-14 items-center justify-between border-b px-4">
+            <div className="flex h-14 items-center justify-between border-b border-hairline px-4">
               <Link href="/workspace" className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-white">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-brand-foreground">
                   <Zap className="h-4 w-4" />
                 </div>
-                <span className="text-lg font-bold">DevFlow</span>
+                <span className="text-[15px] font-semibold tracking-tight">DevFlow</span>
               </Link>
               <Button variant="ghost" size="icon" onClick={() => setMobileMenuOpen(false)}>
                 <X className="h-5 w-5" />
               </Button>
             </div>
-            <nav className="flex-1 space-y-1 p-2">
+            <nav className="flex-1 space-y-0.5 p-2">
               {mobileNavItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
                   onClick={() => setMobileMenuOpen(false)}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-devflow hover:bg-accent hover:text-foreground"
+                  className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium text-ink-subtle transition-devflow hover:bg-surface-2 hover:text-ink"
                 >
                   <span className="text-lg">{item.icon}</span>
                   {item.title}
@@ -73,18 +73,18 @@ export function MainLayout({ children }: { children: ReactNode }) {
       <div
         className={cn(
           'flex h-dvh flex-col transition-all duration-200',
-          'md:ml-60',
+          'md:ml-56',
           sidebarCollapsed && 'md:ml-16'
         )}
       >
         <TopBar />
-        <main className="flex-1 min-h-0 overflow-auto p-4 pb-20 md:p-6 md:pb-6">
+        <main className="flex-1 min-h-0 overflow-auto bg-canvas p-4 pb-20 md:px-6 md:py-5 md:pb-6">
           {children}
         </main>
       </div>
 
       {/* 移动端底部导航 */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t border-border bg-background/95 backdrop-blur md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t border-hairline bg-canvas/95 backdrop-blur-xl md:hidden">
         {mobileNavItems.map((item) => (
           <button
             key={item.href}

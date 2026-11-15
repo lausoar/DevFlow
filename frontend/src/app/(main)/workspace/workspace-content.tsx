@@ -51,10 +51,10 @@ import { useRouter } from 'next/navigation';
 
 // 任务状态展示口径（我的任务卡）
 const TASK_STATUS: Record<string, { label: string; dot: string }> = {
-  TODO: { label: '待办', dot: 'bg-slate-400' },
-  DOING: { label: '进行中', dot: 'bg-amber-500' },
-  TESTING: { label: '测试中', dot: 'bg-blue-500' },
-  DONE: { label: '已完成', dot: 'bg-green-500' },
+  TODO: { label: '待办', dot: 'bg-surface-4' },
+  DOING: { label: '进行中', dot: 'bg-warning' },
+  TESTING: { label: '测试中', dot: 'bg-info' },
+  DONE: { label: '已完成', dot: 'bg-success' },
 };
 
 // ============================================
@@ -129,10 +129,10 @@ export default function WorkspaceContent() {
     const openBugs = myBugs.filter((b) => b.status !== 'RESOLVED' && b.status !== 'CLOSED').length;
 
     return [
-      { label: '我的待办', value: todoTasks, icon: ListTodo, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-      { label: '进行中', value: doingTasks, icon: Clock, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-      { label: '已完成', value: doneTasks, icon: CheckCircle2, color: 'text-green-500', bg: 'bg-green-500/10' },
-      { label: '我的风险项', value: openBugs, icon: AlertTriangle, color: 'text-red-500', bg: 'bg-red-500/10' },
+      { label: '我的待办', value: todoTasks, icon: ListTodo, color: 'text-info', bg: 'bg-info/10' },
+      { label: '进行中', value: doingTasks, icon: Clock, color: 'text-warning', bg: 'bg-warning/10' },
+      { label: '已完成', value: doneTasks, icon: CheckCircle2, color: 'text-success', bg: 'bg-success/10' },
+      { label: '我的风险项', value: openBugs, icon: AlertTriangle, color: 'text-danger', bg: 'bg-danger/10' },
     ];
   }, [myTasks, myBugs]);
 
@@ -141,10 +141,10 @@ export default function WorkspaceContent() {
       {/* 欢迎区域 */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">
+          <h1 className="text-headline text-ink">
             你好，{user?.realName || user?.username || '开发者'} 👋
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-ink-subtle">
             今天是 {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
         </div>
@@ -164,7 +164,7 @@ export default function WorkspaceContent() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">{stat.label}</p>
-                    <p className="text-2xl font-bold text-foreground">{stat.value}</p>
+                    <p className="text-[22px] font-semibold tracking-tight text-ink tabular-nums">{stat.value}</p>
                   </div>
                   <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${stat.bg}`}>
                     <Icon className={`h-5 w-5 ${stat.color}`} />
@@ -207,7 +207,7 @@ export default function WorkspaceContent() {
                   {projects.map((project) => (
                     <div
                       key={project.id}
-                      className="group rounded-lg border border-border/50 p-4 transition-devflow hover:border-border hover:shadow-sm"
+                      className="group rounded-lg border border-hairline/50 p-4 transition-devflow hover:border-hairline hover:shadow-sm"
                     >
                       <div className="mb-3 flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -224,9 +224,9 @@ export default function WorkspaceContent() {
                         <Badge
                           variant="secondary"
                           className={`text-[10px] ${
-                            project.status === 'ACTIVE' ? 'bg-green-500/10 text-green-600' :
-                            project.status === 'PLANNING' ? 'bg-amber-500/10 text-amber-600' :
-                            'bg-gray-500/10 text-gray-500'
+                            project.status === 'ACTIVE' ? 'bg-success/10 text-success' :
+                            project.status === 'PLANNING' ? 'bg-warning/10 text-warning' :
+                            'bg-surface-4/10 text-ink-tertiary'
                           }`}
                         >
                           {project.status === 'ACTIVE' ? '进行中' : project.status === 'PLANNING' ? '规划中' : '已归档'}
@@ -279,7 +279,7 @@ export default function WorkspaceContent() {
               ) : (
                 <div className="space-y-0.5">
                   {myTasks.slice(0, 5).map((t) => {
-                    const st = TASK_STATUS[t.status] || { label: t.status, dot: 'bg-slate-400' };
+                    const st = TASK_STATUS[t.status] || { label: t.status, dot: 'bg-surface-4' };
                     return (
                       <button
                         key={t.id}
@@ -365,7 +365,7 @@ export default function WorkspaceContent() {
 
               {/* 任务标题 */}
               <div className="space-y-2">
-                <Label>任务标题 <span className="text-red-500">*</span></Label>
+                <Label>任务标题 <span className="text-danger">*</span></Label>
                 <Input
                   value={taskTitle}
                   onChange={(e) => setTaskTitle(e.target.value)}
@@ -404,7 +404,7 @@ export default function WorkspaceContent() {
                   <SelectContent>
                     <SelectItem value="CRITICAL">
                       <span className="flex items-center gap-2">
-                        <Flag className="h-3 w-3 text-red-500" /> 紧急
+                        <Flag className="h-3 w-3 text-danger" /> 紧急
                       </span>
                     </SelectItem>
                     <SelectItem value="HIGH">
@@ -414,7 +414,7 @@ export default function WorkspaceContent() {
                     </SelectItem>
                     <SelectItem value="MEDIUM">
                       <span className="flex items-center gap-2">
-                        <Flag className="h-3 w-3 text-yellow-500" /> 中
+                        <Flag className="h-3 w-3 text-warning" /> 中
                       </span>
                     </SelectItem>
                     <SelectItem value="LOW">

@@ -1,12 +1,22 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
+/**
+ * 多行输入。与 Input 同一套取值（surface-1 底 + hairline 边框 + 8px 圆角），
+ * 只是没有固定高度，用 min-height 撑开。
+ */
 function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
   return (
     <textarea
       data-slot="textarea"
       className={cn(
-        "flex min-h-[60px] w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
+        "flex min-h-[72px] w-full rounded-md border border-hairline bg-surface-1 px-3 py-2 text-sm leading-relaxed outline-none transition-devflow",
+        "placeholder:text-ink-tertiary",
+        "hover:border-hairline-strong",
+        "focus-visible:border-ring focus-visible:shadow-[var(--focus-ring)]",
+        "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
+        "aria-invalid:border-destructive",
+        "resize-y",
         className
       )}
       {...props}

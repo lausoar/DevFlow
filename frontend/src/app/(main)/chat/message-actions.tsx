@@ -157,7 +157,7 @@ export function ReactionBar({
             key={emoji}
             onClick={() => onToggle(emoji)}
             className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] transition-colors ${
-              mine ? 'border-primary bg-primary/10 text-primary' : 'bg-muted/60 text-muted-foreground hover:bg-muted'
+              mine ? 'border-primary bg-brand/10 text-brand' : 'bg-muted/60 text-muted-foreground hover:bg-muted'
             }`}
             title={users.length > 3 ? `${users.slice(0, 3).join(', ')} 等 ${users.length} 人` : users.join(', ')}
           >

@@ -168,8 +168,8 @@ export default function ProjectDetailContent({
 
   // 角色显示配置
   const roleConfig: Record<ProjectMemberRole, { label: string; icon: React.ElementType; color: string }> = {
-    OWNER:   { label: '负责人',   icon: Crown,        color: 'text-amber-500 bg-amber-500/10' },
-    MANAGER: { label: '管理员',   icon: Shield,       color: 'text-blue-500 bg-blue-500/10' },
+    OWNER:   { label: '负责人',   icon: Crown,        color: 'text-warning bg-warning/10' },
+    MANAGER: { label: '管理员',   icon: Shield,       color: 'text-info bg-info/10' },
     TESTER:  { label: '测试人员', icon: FlaskConical, color: 'text-emerald-500 bg-emerald-500/10' },
     MEMBER:  { label: '成员',     icon: UserIcon,     color: 'text-muted-foreground bg-muted' },
   };
@@ -269,7 +269,7 @@ export default function ProjectDetailContent({
 
         {/* 项目图标 + 名称 */}
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-lg font-bold text-primary">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand/10 text-lg font-bold text-brand">
             {project.icon || project.name.charAt(0)}
           </div>
           <div>
@@ -319,14 +319,14 @@ export default function ProjectDetailContent({
           {/* 更多操作菜单 */}
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background hover:bg-accent"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-hairline bg-background hover:bg-accent"
             >
               <MoreHorizontal className="h-4 w-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {canManageProjectRoles && (
                 <DropdownMenuItem onClick={() => setAutomationOpen(true)}>
-                  <Zap className="mr-1.5 h-3.5 w-3.5 text-amber-500" /> 自动化规则
+                  <Zap className="mr-1.5 h-3.5 w-3.5 text-warning" /> 自动化规则
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={() => setRecycleBinOpen(true)}>
@@ -673,7 +673,7 @@ export default function ProjectDetailContent({
                 onClick={handleCopyInviteLink}
               >
                 {linkCopied ? (
-                  <><Check className="h-3 w-3 text-green-500" /> 已复制</>
+                  <><Check className="h-3 w-3 text-success" /> 已复制</>
                 ) : (
                   <><Copy className="h-3 w-3" /> 复制链接</>
                 )}

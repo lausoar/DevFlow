@@ -73,7 +73,7 @@ export function TopBar() {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 lg:px-6">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-hairline bg-canvas/80 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-canvas/50 lg:px-6">
       {/* 移动端菜单按钮 */}
       <Button
         variant="ghost"
@@ -88,11 +88,11 @@ export function TopBar() {
         {/* 全局搜索入口（Cmd/Ctrl + K） */}
         <button
           onClick={() => setSearchOpen(true)}
-          className="hidden sm:flex h-8 w-48 items-center gap-2 rounded-md border border-border bg-muted/50 px-3 text-xs text-muted-foreground transition-colors hover:bg-muted"
+          className="hidden sm:flex h-8 w-56 items-center gap-2 rounded-md border border-hairline bg-surface-1 px-3 text-xs text-ink-tertiary transition-devflow hover:border-hairline-strong hover:text-ink-muted"
         >
           <Search className="h-3.5 w-3.5" />
           <span className="flex-1 text-left">搜索…</span>
-          <kbd className="rounded border bg-background px-1 py-0.5 text-[10px]">⌘K</kbd>
+          <kbd className="text-mono-token rounded-xs border border-hairline bg-surface-2 px-1.5 py-0.5 text-[10px] text-ink-tertiary">⌘K</kbd>
         </button>
         <Button
           variant="ghost"
@@ -122,13 +122,13 @@ export function TopBar() {
           >
             <Bell className="h-5 w-5" />
             {unreadCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] leading-none text-white">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] leading-none text-danger-foreground">
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-84 p-0">
-            <div className="flex items-center justify-between border-b px-3 py-2">
+            <div className="flex items-center justify-between border-b border-hairline px-3 py-2">
               <span className="text-sm font-semibold">通知</span>
               <div className="flex items-center gap-2">
                 <button
@@ -139,7 +139,7 @@ export function TopBar() {
                   全部已读
                 </button>
                 <button
-                  className="text-[11px] text-primary transition-colors hover:underline"
+                  className="text-[11px] text-brand transition-colors hover:underline"
                   onClick={() => router.push('/notifications')}
                 >
                   查看全部
@@ -155,10 +155,10 @@ export function TopBar() {
                     key={n.id}
                     onClick={() => openNotification(n)}
                     className={`flex cursor-pointer items-start gap-2.5 border-b px-3 py-2.5 transition-colors last:border-b-0 hover:bg-muted/60 ${
-                      !n.isRead ? 'bg-primary/[0.04]' : ''
+                      !n.isRead ? 'bg-brand-muted/40' : ''
                     }`}
                   >
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" style={{ opacity: n.isRead ? 0.15 : 1 }} />
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" style={{ opacity: n.isRead ? 0.15 : 1 }} />
                     <div className="min-w-0 flex-1">
                       <p className={`truncate text-xs ${n.isRead ? 'text-foreground/80' : 'font-semibold text-foreground'}`}>
                         {n.title}
@@ -195,7 +195,7 @@ export function TopBar() {
 
         {/* 用户菜单 */}
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex items-center gap-2 px-2 rounded-lg hover:bg-accent">
+          <DropdownMenuTrigger className="flex items-center gap-2 rounded-md px-2 py-1 transition-devflow hover:bg-surface-2">
             <Avatar className="h-7 w-7">
               <AvatarImage src={user?.avatar} alt={user?.realName || user?.username} />
               <AvatarFallback className="text-xs">

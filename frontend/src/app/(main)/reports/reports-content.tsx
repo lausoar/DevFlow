@@ -60,8 +60,8 @@ export default function ReportsContent() {
       {/* 页面标题 */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">统计报表</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-headline text-ink">统计报表</h1>
+          <p className="text-[13px] text-ink-subtle">
             企业级数据统计、项目健康度评估、成员工作量分析
           </p>
         </div>
@@ -108,21 +108,21 @@ export default function ReportsContent() {
             title="项目总数"
             value={enterprise.projectOverview.totalProjects}
             subtitle={`${enterprise.projectOverview.activeProjects} 个进行中`}
-            icon={<FolderKanban className="h-4 w-4 text-blue-500" />}
+            icon={<FolderKanban className="h-4 w-4 text-info" />}
             color="blue"
           />
           <OverviewCard
             title="任务完成率"
             value={`${enterprise.taskOverview.completionRate.toFixed(1)}%`}
             subtitle={`${enterprise.taskOverview.completedTasks} / ${enterprise.taskOverview.totalTasks}`}
-            icon={<CheckCircle2 className="h-4 w-4 text-green-500" />}
+            icon={<CheckCircle2 className="h-4 w-4 text-success" />}
             color="green"
           />
           <OverviewCard
             title="Bug 解决率"
             value={`${enterprise.bugOverview.resolutionRate.toFixed(1)}%`}
             subtitle={`${enterprise.bugOverview.openBugs} 个待处理`}
-            icon={<Bug className="h-4 w-4 text-amber-500" />}
+            icon={<Bug className="h-4 w-4 text-warning" />}
             color="amber"
           />
           <OverviewCard
@@ -186,11 +186,11 @@ function OverviewCard({
   color: string;
 }) {
   const bgMap: Record<string, string> = {
-    blue: 'bg-blue-50 dark:bg-blue-950/30',
-    green: 'bg-green-50 dark:bg-green-950/30',
-    amber: 'bg-amber-50 dark:bg-amber-950/30',
-    purple: 'bg-purple-50 dark:bg-purple-950/30',
-    red: 'bg-red-50 dark:bg-red-950/30',
+    blue: 'bg-info-muted ',
+    green: 'bg-success-muted ',
+    amber: 'bg-warning-muted ',
+    purple: 'bg-purple-50 ',
+    red: 'bg-danger-muted ',
   };
 
   return (

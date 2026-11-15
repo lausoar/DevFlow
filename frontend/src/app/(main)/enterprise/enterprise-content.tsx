@@ -84,10 +84,10 @@ const roleLabels: Record<string, string> = {
   MEMBER: '成员',
 };
 const roleColors: Record<string, string> = {
-  SUPER_ADMIN: 'bg-red-500/10 text-red-600 dark:bg-red-900/30 dark:text-red-400',
-  ADMIN: 'bg-amber-500/10 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
-  MANAGER: 'bg-blue-500/10 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400',
-  MEMBER: 'bg-gray-500/10 text-gray-500 dark:bg-gray-900/30 dark:text-gray-400',
+  SUPER_ADMIN: 'bg-danger/10 text-danger ',
+  ADMIN: 'bg-warning/10 text-warning ',
+  MANAGER: 'bg-info/10 text-info ',
+  MEMBER: 'bg-surface-4/10 text-ink-tertiary ',
 };
 const roleLevels: Record<string, number> = {
   SUPER_ADMIN: 100, ADMIN: 80, MANAGER: 60, MEMBER: 10,
@@ -112,7 +112,7 @@ function DepartmentTreeNode({
     <div>
       <div
         className={`group/dept flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-devflow cursor-pointer ${
-          isSelected ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-muted/50'
+          isSelected ? 'bg-brand/10 font-medium text-brand' : 'hover:bg-muted/50'
         }`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
         onClick={() => { onSelect(node.id); if (hasChildren) setExpanded(true); }}
@@ -127,7 +127,7 @@ function DepartmentTreeNode({
         ) : (
           <span className="w-3.5" />
         )}
-        <FolderTree className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
+        <FolderTree className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-brand' : 'text-muted-foreground'}`} />
         <span className="flex-1 truncate">{node.name}</span>
         {manageable && (
           <span className="hidden shrink-0 items-center gap-0.5 group-hover/dept:flex">
@@ -631,24 +631,24 @@ export default function EnterpriseContent() {
             <Building2 className="h-6 w-6 text-brand" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-foreground">{enterprise.name}</h1>
-            <p className="text-sm text-muted-foreground">
+            <h1 className="text-headline text-ink">{enterprise.name}</h1>
+            <p className="text-[13px] text-ink-subtle">
               {members.length} 名成员 · 创建于 {new Date(enterprise.createdAt).toLocaleDateString('zh-CN')}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {isSuperAdmin && (
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5">
+            <div className="flex items-center gap-2 rounded-lg border border-hairline bg-muted/50 px-3 py-1.5">
               <span className="text-xs text-muted-foreground">邀请码</span>
               <code className="text-sm font-mono font-bold">{enterprise.inviteCode}</code>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopyInvite}>
-                {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
               </Button>
             </div>
           )}
           {/* 我的职级 + 自助退出（所有成员可见） */}
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5">
+          <div className="flex items-center gap-2 rounded-lg border border-hairline bg-muted/50 px-3 py-1.5">
             <span className="text-xs text-muted-foreground">我的职级</span>
             <Badge className={`border-0 text-[10px] ${roleColors[myRole || 'MEMBER'] || ''}`}>
               {roleLabels[myRole || 'MEMBER'] || myRole}
@@ -667,7 +667,7 @@ export default function EnterpriseContent() {
       </div>
 
       {/* Tab 切换 */}
-      <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
+      <div className="flex gap-1 rounded-lg border border-hairline bg-muted/30 p-1">
         {tabItems.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -735,10 +735,10 @@ export default function EnterpriseContent() {
                       </p>
                     </div>
                     <div className="flex items-center gap-1">
-                      {member.role === 'SUPER_ADMIN' && <Crown className="h-3.5 w-3.5 text-red-500" />}
-                      {member.role === 'ADMIN' && <Shield className="h-3.5 w-3.5 text-amber-500" />}
+                      {member.role === 'SUPER_ADMIN' && <Crown className="h-3.5 w-3.5 text-danger" />}
+                      {member.role === 'ADMIN' && <Shield className="h-3.5 w-3.5 text-warning" />}
                       <div
-                        className={`h-2 w-2 rounded-full ${isOnline(member.id) ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        className={`h-2 w-2 rounded-full ${isOnline(member.id) ? 'bg-success' : 'bg-surface-3 '}`}
                         title={isOnline(member.id) ? '在线' : '离线'}
                       />
                       {(canEditMember(member.role) || canMoveMember(member.role) || canRemoveMemberFn(member.role) || (isSuperAdmin && member.id !== currentUser?.id)) ? (
@@ -902,7 +902,7 @@ export default function EnterpriseContent() {
                   {deptMembers.map((member) => (
                     <div
                       key={member.id}
-                      className="flex items-center gap-3 rounded-lg border border-border p-3"
+                      className="flex items-center gap-3 rounded-lg border border-hairline p-3"
                     >
                       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-sm font-medium">
                         {member.avatar || member.username.charAt(0)}
@@ -917,7 +917,7 @@ export default function EnterpriseContent() {
                         <p className="text-xs text-muted-foreground truncate">{member.email}</p>
                       </div>
                       <div
-                        className={`h-2 w-2 rounded-full ${isOnline(member.id) ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                        className={`h-2 w-2 rounded-full ${isOnline(member.id) ? 'bg-success' : 'bg-surface-3 '}`}
                         title={isOnline(member.id) ? '在线' : '离线'}
                       />
                     </div>
@@ -949,7 +949,7 @@ export default function EnterpriseContent() {
                <div className="space-y-2">
                  <Label>企业 Logo</Label>
                  <div className="flex items-center gap-4">
-                   <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-border">
+                   <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-hairline">
                      {settingsLogo ? (
                        <img src={settingsLogo} alt="Logo" className="h-full w-full object-cover" />
                      ) : (
@@ -998,7 +998,7 @@ export default function EnterpriseContent() {
                 </p>
               </div>
               {wecomTestResult && (
-                <p className={`text-xs ${wecomTestResult.ok ? 'text-green-600' : 'text-destructive'}`}>
+                <p className={`text-xs ${wecomTestResult.ok ? 'text-success' : 'text-destructive'}`}>
                   {wecomTestResult.msg}
                 </p>
               )}
@@ -1041,13 +1041,13 @@ export default function EnterpriseContent() {
               <CardDescription>分享邀请码让成员加入企业</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 p-4">
+              <div className="flex items-center gap-3 rounded-lg border border-hairline bg-muted/30 p-4">
                 <div className="flex-1">
                   <p className="text-xs text-muted-foreground">当前邀请码</p>
                   <p className="text-2xl font-mono font-bold tracking-wider">{enterprise.inviteCode}</p>
                 </div>
                 <Button variant="outline" onClick={handleCopyInvite} className="gap-2">
-                  {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                  {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                   {copied ? '已复制' : '复制'}
                 </Button>
               </div>
@@ -1475,7 +1475,7 @@ ${v.message}`
                     } catch {}
                   }}
                 >
-                  {userCopied ? <><Check className="h-3 w-3 text-green-500" /> 已复制</> : <><Copy className="h-3 w-3" /> 复制</>}
+                  {userCopied ? <><Check className="h-3 w-3 text-success" /> 已复制</> : <><Copy className="h-3 w-3" /> 复制</>}
                 </Button>
               </div>
             </div>
@@ -1503,7 +1503,7 @@ ${v.message}`
                     setTimeout(() => setPwdCopied(false), 2000);
                   }}
                 >
-                  {pwdCopied ? <><Check className="h-3 w-3 text-green-500" /> 已复制</> : <><Copy className="h-3 w-3" /> 复制</>}
+                  {pwdCopied ? <><Check className="h-3 w-3 text-success" /> 已复制</> : <><Copy className="h-3 w-3" /> 复制</>}
                 </Button>
               </div>
             </div>

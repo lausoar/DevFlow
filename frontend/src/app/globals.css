@@ -6,20 +6,47 @@
 
 /* ============================================
    DevFlow Design Tokens
-   现代 SaaS + AI Native 风格
+   设计语言来源：Linear（VoltAgent/awesome-design-md，MIT）
+   ============================================
+   核心取自 designs/linear.app.md 的实测值：
+     canvas / surface-1..4 / hairline / ink / primary / success
+   浅色主题在 Linear 的分析里只有 inverse-canvas 三个值，
+   其余浅色档位是按同一套阶梯推导的（见下方标注「推导」）。
+
+   设计原则（同样来自那份分析，值得记住为什么这么配色）：
+   - 只有**一个**彩色强调色（lavender #5e6ad2）：主 CTA、焦点环、品牌标。
+     不用第二个彩色，不做装饰性渐变。
+   - 层级靠 surface 阶梯 + 1px 细线，不靠阴影。
+   - 展示级字号用负字距（-3px @ 80px ≈ 4%），正文几乎为 0。
    ============================================ */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-mono);
 
-  /* 主色调 - 品牌色 */
+  /* 品牌色 */
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  --color-brand-hover: var(--brand-hover);
   --color-brand-muted: var(--brand-muted);
 
-  /* Shadcn 基础色 */
+  /* 编辑区层级（Linear 的 canvas → surface-1..4 阶梯） */
+  --color-canvas: var(--canvas);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+
+  /* 文字层级（ink 四级） */
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-ink-tertiary: var(--ink-tertiary);
+
+  /* Shadcn 语义映射（让既有组件自动继承） */
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -50,110 +77,198 @@
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
 
-  /* 统一圆角 - 12px 基础 */
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
+  /* 圆角：Linear 的 4/6/8/12/16/24，按钮与输入用 md(8)，卡片用 lg(12) */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
 
-  /* 状态色 */
-  --color-success: oklch(0.723 0.219 149.579);
-  --color-warning: oklch(0.795 0.184 86.047);
-  --color-info: oklch(0.707 0.165 254.624);
+  /* 状态色：Linear 只给了 success(#27a644)，warning/danger/info 为推导值。
+     取法：饱和度压到与 #27a644 同档，保证三种状态并列时不分主次。 */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-muted: var(--warning-muted);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-danger-muted: var(--danger-muted);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-muted: var(--info-muted);
+}
+
+/* ============================================
+   深色主题（Linear 的签名画布）
+   ============================================ */
+:root,
+.dark {
+  /* ---- Linear 实测值 ---- */
+  --canvas: #010102;
+  --surface-1: #0f1011;
+  --surface-2: #141516;
+  --surface-3: #18191a;
+  --surface-4: #191a1b;
+  --hairline: #23252a;
+  --hairline-strong: #34343a;
+
+  --ink: #f7f8f8;
+  --ink-muted: #d0d6e0;
+  --ink-subtle: #8a8f98;
+  --ink-tertiary: #62666d;
+
+  --brand: #5e6ad2;
+  --brand-hover: #828fff;
+  --brand-focus: #5e69d1;
+  --brand-foreground: #ffffff;
+  --brand-muted: rgba(94, 106, 210, 0.16);
+
+  --success: #27a644;
+
+  /* ---- 推导值（Linear 未提供，按同档饱和度取） ---- */
+  --warning: #d4a72c;
+  --danger: #e5484d;
+  --info: #5e6ad2;
+
+  /* ---- shadcn 语义映射 ---- */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+
+  --card: var(--surface-1);
+  --card-foreground: var(--ink);
+  --popover: var(--surface-2);
+  --popover-foreground: var(--ink);
+
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-foreground);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--ink-subtle);
+  --accent: var(--surface-3);
+  --accent-foreground: var(--ink);
+
+  --destructive: var(--danger);
+  --border: var(--hairline);
+  --input: var(--hairline-strong);
+  --ring: var(--brand-focus);
+
+  /* 状态色前景/浅底 */
+  --success-foreground: #ffffff;
+  --success-muted: rgba(39, 166, 68, 0.14);
+  --warning-foreground: #1a1400;
+  --warning-muted: rgba(212, 167, 44, 0.14);
+  --danger-foreground: #ffffff;
+  --danger-muted: rgba(229, 72, 77, 0.14);
+  --info-foreground: #ffffff;
+  --info-muted: rgba(94, 106, 210, 0.16);
+
+  /* 图表色板：强调色打头，其余按饱和度递降，避免彩虹感 */
+  --chart-1: #5e6ad2;
+  --chart-2: #27a644;
+  --chart-3: #d4a72c;
+  --chart-4: #828fff;
+  --chart-5: #8a8f98;
+
+  /* 侧边栏：比 canvas 高一档，让它与内容区分层但不抢眼 */
+  --sidebar: #08090a;
+  --sidebar-foreground: var(--ink-muted);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--brand-foreground);
+  --sidebar-accent: var(--surface-2);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--hairline);
+  --sidebar-ring: var(--brand-focus);
+
+  --radius: 12px;
+
+  /* 焦点环：Linear 的做法是 1px 描边 + 极淡外扩，而不是 3px 实心环 */
+  --focus-ring: 0 0 0 1px var(--brand-focus), 0 0 0 4px rgba(94, 106, 210, 0.18);
 }
 
 /* ============================================
    浅色主题
-   ============================================ */
-:root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.13 0.028 261.692);
+   ============================================
+   Linear 的分析只给了 inverse-canvas(#ffffff) / inverse-surface-1(#f5f6f6)
+   / inverse-surface-2(#f6f7f7) / inverse-ink(#000000) 四个值。
+   其余 ink 阶与 hairline 是按深色那套的相对关系推导的（标注「推导」）。
+   强调色与圆角沿用深色主题，保证两套主题是同一个设计语言。 */
+.light {
+  --canvas: #ffffff;
+  --surface-1: #fbfbfc;   /* 推导：比 canvas 略沉，用于卡片 */
+  --surface-2: #f5f6f6;   /* Linear inverse-surface-1 */
+  --surface-3: #eef0f2;   /* 推导 */
+  --surface-4: #e8eaed;   /* 推导 */
+  --hairline: #e4e6e9;    /* 推导 */
+  --hairline-strong: #d3d6db; /* 推导 */
 
-  /* 品牌色 - 现代蓝紫渐变基调 */
-  --brand: oklch(0.546 0.245 262.881);
-  --brand-foreground: oklch(0.985 0 0);
-  --brand-muted: oklch(0.92 0.04 262);
+  --ink: #08090a;
+  --ink-muted: #3d4149;   /* 推导 */
+  --ink-subtle: #62666d;  /* Linear 的 ink-tertiary，在浅色下同样可用 */
+  --ink-tertiary: #8a8f98;
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.13 0.028 261.692);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.13 0.028 261.692);
-  --primary: oklch(0.546 0.245 262.881);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.015 261.692);
-  --secondary-foreground: oklch(0.24 0.03 261.692);
-  --muted: oklch(0.967 0.015 261.692);
-  --muted-foreground: oklch(0.55 0.02 261.692);
-  --accent: oklch(0.967 0.015 261.692);
-  --accent-foreground: oklch(0.24 0.03 261.692);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.925 0.015 261.692);
-  --input: oklch(0.925 0.015 261.692);
-  --ring: oklch(0.546 0.245 262.881);
+  --brand: #5e6ad2;
+  --brand-hover: #4f5bc4;  /* 浅色下 hover 要变深，不能沿用深色主题的变亮 */
+  --brand-focus: #5e69d1;
+  --brand-foreground: #ffffff;
+  --brand-muted: rgba(94, 106, 210, 0.10);
 
-  /* 图表色板 */
-  --chart-1: oklch(0.546 0.245 262.881);
-  --chart-2: oklch(0.723 0.219 149.579);
-  --chart-3: oklch(0.795 0.184 86.047);
-  --chart-4: oklch(0.707 0.165 254.624);
-  --chart-5: oklch(0.629 0.217 302.321);
+  --success: #1a7f37;      /* 推导：浅底上 #27a644 对比度不足 */
+  --warning: #9a6b00;      /* 推导 */
+  --danger: #cf222e;       /* 推导 */
+  --info: #5e6ad2;
 
-  --radius: 0.75rem; /* 12px */
+  --background: var(--canvas);
+  --foreground: var(--ink);
 
-  /* 侧边栏 */
-  --sidebar: oklch(0.985 0.005 261.692);
-  --sidebar-foreground: oklch(0.13 0.028 261.692);
-  --sidebar-primary: oklch(0.546 0.245 262.881);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.94 0.02 262);
-  --sidebar-accent-foreground: oklch(0.24 0.03 261.692);
-  --sidebar-border: oklch(0.925 0.015 261.692);
-  --sidebar-ring: oklch(0.546 0.245 262.881);
-}
+  --card: var(--canvas);
+  --card-foreground: var(--ink);
+  --popover: var(--canvas);
+  --popover-foreground: var(--ink);
 
-/* ============================================
-   深色主题
-   ============================================ */
-.dark {
-  --background: oklch(0.13 0.028 261.692);
-  --foreground: oklch(0.967 0.015 261.692);
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-foreground);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--ink-subtle);
+  --accent: var(--surface-3);
+  --accent-foreground: var(--ink);
 
-  --brand: oklch(0.65 0.2 262);
-  --brand-foreground: oklch(0.985 0 0);
-  --brand-muted: oklch(0.25 0.06 262);
+  --destructive: var(--danger);
+  --border: var(--hairline);
+  --input: var(--hairline-strong);
+  --ring: var(--brand-focus);
 
-  --card: oklch(0.18 0.02 261.692);
-  --card-foreground: oklch(0.967 0.015 261.692);
-  --popover: oklch(0.18 0.02 261.692);
-  --popover-foreground: oklch(0.967 0.015 261.692);
-  --primary: oklch(0.65 0.2 262);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.24 0.02 261.692);
-  --secondary-foreground: oklch(0.967 0.015 261.692);
-  --muted: oklch(0.24 0.02 261.692);
-  --muted-foreground: oklch(0.65 0.02 261.692);
-  --accent: oklch(0.24 0.02 261.692);
-  --accent-foreground: oklch(0.967 0.015 261.692);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(0.28 0.02 261.692);
-  --input: oklch(0.28 0.02 261.692);
-  --ring: oklch(0.65 0.2 262);
+  --success-foreground: #ffffff;
+  --success-muted: rgba(26, 127, 55, 0.10);
+  --warning-foreground: #ffffff;
+  --warning-muted: rgba(154, 107, 0, 0.10);
+  --danger-foreground: #ffffff;
+  --danger-muted: rgba(207, 34, 46, 0.10);
+  --info-foreground: #ffffff;
+  --info-muted: rgba(94, 106, 210, 0.10);
 
-  --chart-1: oklch(0.65 0.2 262);
-  --chart-2: oklch(0.723 0.219 149.579);
-  --chart-3: oklch(0.795 0.184 86.047);
-  --chart-4: oklch(0.707 0.165 254.624);
-  --chart-5: oklch(0.629 0.217 302.321);
+  --chart-1: #5e6ad2;
+  --chart-2: #1a7f37;
+  --chart-3: #9a6b00;
+  --chart-4: #828fff;
+  --chart-5: #8a8f98;
 
-  --sidebar: oklch(0.15 0.02 261.692);
-  --sidebar-foreground: oklch(0.967 0.015 261.692);
-  --sidebar-primary: oklch(0.65 0.2 262);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.22 0.03 262);
-  --sidebar-accent-foreground: oklch(0.967 0.015 261.692);
-  --sidebar-border: oklch(0.28 0.02 261.692);
-  --sidebar-ring: oklch(0.65 0.2 262);
+  --sidebar: #fbfbfc;
+  --sidebar-foreground: var(--ink-muted);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--brand-foreground);
+  --sidebar-accent: var(--surface-2);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--hairline);
+  --sidebar-ring: var(--brand-focus);
+
+  --radius: 12px;
+  --focus-ring: 0 0 0 1px var(--brand-focus), 0 0 0 4px rgba(94, 106, 210, 0.14);
 }
 
 /* ============================================
@@ -161,36 +276,146 @@
    ============================================ */
 @layer base {
   * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground antialiased;
+    @apply border-border;
   }
   html {
-    @apply font-sans scroll-smooth;
+    @apply scroll-smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Linear 的正文是 16px / 1.5 / -0.05px；项目里大量用 text-sm(14px)，
+       这里把 body 基准定在 14px 并保留负字距，避免密度过低 */
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: -0.006em;
+    font-feature-settings: "cv11", "ss01";
+    font-variant-ligatures: common-ligatures;
   }
 
-  /* 自定义滚动条 */
+  /* 标题统一负字距：Linear 在 80px 用 -3px（≈4%），按比例下推到小字号 */
+  h1, h2, h3, h4, h5, h6 {
+    letter-spacing: -0.022em;
+    font-weight: 600;
+  }
+  h1 { letter-spacing: -0.032em; }
+  h2 { letter-spacing: -0.026em; }
+
+  /* 数字用表格数字，报表里对齐才不会跳 */
+  .tabular-nums,
+  table,
+  time {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 焦点：统一用 Linear 的细描边 + 淡外扩，替换掉浏览器默认粗环 */
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-md);
+  }
+
+  /* 选中文本用品牌色淡底 */
+  ::selection {
+    background: var(--brand-muted);
+    color: var(--ink);
+  }
+
+  /* 滚动条：Linear 是几乎不可见的细条，只在 hover 时显形 */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-border rounded-full;
+    background: transparent;
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+    transition: background-color 150ms ease;
+  }
+  *:hover::-webkit-scrollbar-thumb {
+    background-color: var(--hairline-strong);
+    background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/30;
+    background-color: var(--ink-tertiary);
+    background-clip: content-box;
   }
 }
 
 /* ============================================
-   动画 - 克制 150-250ms
+   排版工具类
+   字号/字重/行高/字距全部取自 Linear 的 typography 档位
    ============================================ */
 @layer utilities {
+  /* 动画：克制 150-250ms，与 Linear 的交互节奏一致 */
   .transition-devflow {
-    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+    transition-duration: 160ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* 展示级标题：对应 Linear 的 display-lg / display-md */
+  .text-display-lg {
+    font-size: 40px;
+    line-height: 1.1;
+    letter-spacing: -0.045em;
+    font-weight: 600;
+  }
+  .text-display-md {
+    font-size: 32px;
+    line-height: 1.15;
+    letter-spacing: -0.032em;
+    font-weight: 600;
+  }
+  /* 页面标题：对应 headline (28px / 600 / -0.6px) */
+  .text-headline {
+    font-size: 24px;
+    line-height: 1.2;
+    letter-spacing: -0.024em;
+    font-weight: 600;
+  }
+  /* 卡片标题：对应 card-title (22px / 500 / -0.4px) */
+  .text-card-title {
+    font-size: 16px;
+    line-height: 1.25;
+    letter-spacing: -0.018em;
+    font-weight: 500;
+  }
+  /* 章节小标：对应 eyebrow (13px / 500 / +0.4px 正字距) */
+  .text-eyebrow {
+    font-size: 11px;
+    line-height: 1.3;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  /* 表面：Linear 的卡片是 surface + 1px 细线，不用阴影 */
+  .surface-panel {
+    background-color: var(--surface-1);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+  }
+  /* 抬起面板：加一道顶部白色描边，模拟 Linear 的"像素渲染"高光 */
+  .surface-lifted {
+    background-color: var(--surface-2);
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  .light .surface-lifted {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(16, 24, 40, 0.04);
+  }
+
+  /* 代码/ID 之类用等宽字体 */
+  .text-mono-token {
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0;
   }
 }

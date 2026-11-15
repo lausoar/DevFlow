@@ -178,7 +178,7 @@ export function SavedFiltersPanel({
               </div>
               {error && <p className="text-xs text-destructive">{error}</p>}
               {preview && (
-                <p className="text-xs text-green-600">
+                <p className="text-xs text-success">
                   试运行命中 {preview.total} 条
                 </p>
               )}

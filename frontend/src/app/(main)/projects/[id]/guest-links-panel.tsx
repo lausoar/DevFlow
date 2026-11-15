@@ -75,7 +75,7 @@ export function GuestLinksPanel({ projectId }: { projectId: string }) {
     <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-          <LinkIcon className="h-3.5 w-3.5 text-amber-500" />
+          <LinkIcon className="h-3.5 w-3.5 text-warning" />
           游客链接
         </div>
         <div className="flex items-center gap-1.5">
@@ -111,8 +111,8 @@ export function GuestLinksPanel({ projectId }: { projectId: string }) {
 
       {/* 生成成功：完整链接只展示这一次 */}
       {newToken && (
-        <div className="space-y-1.5 rounded-md border border-amber-200 bg-amber-50 p-2 dark:border-amber-900 dark:bg-amber-950/30">
-          <p className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+        <div className="space-y-1.5 rounded-md border border-warning/30 bg-warning-muted p-2 ">
+          <p className="text-[11px] font-medium text-warning ">
             请立即复制下面的链接，关闭后将无法再次查看：
           </p>
           <div className="flex items-center gap-2">
@@ -130,7 +130,7 @@ export function GuestLinksPanel({ projectId }: { projectId: string }) {
               onClick={handleCopy}
             >
               {copied ? (
-                <><Check className="h-3 w-3 text-green-500" /> 已复制</>
+                <><Check className="h-3 w-3 text-success" /> 已复制</>
               ) : (
                 <><Copy className="h-3 w-3" /> 复制</>
               )}

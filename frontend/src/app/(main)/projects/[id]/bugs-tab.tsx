@@ -55,12 +55,12 @@ import type { Bug, BugStatus, BugSeverity, Priority, ProjectMember } from '@/typ
 // 状态配置
 // ============================================
 const STATUS_CONFIG: Record<BugStatus, { label: string; color: string }> = {
-  NEW: { label: '新提出', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-  ASSIGNED: { label: '已分配', color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400' },
-  DOING: { label: '解决中', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-  RESOLVED: { label: '已解决', color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-  REOPENED: { label: '重新打开', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
-  CLOSED: { label: '已关闭', color: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
+  NEW: { label: '新提出', color: 'bg-info-muted text-info ' },
+  ASSIGNED: { label: '已分配', color: 'bg-info-muted text-info ' },
+  DOING: { label: '解决中', color: 'bg-warning-muted text-warning ' },
+  RESOLVED: { label: '已解决', color: 'bg-success-muted text-success ' },
+  REOPENED: { label: '重新打开', color: 'bg-purple-100 text-purple-700 ' },
+  CLOSED: { label: '已关闭', color: 'bg-surface-2 text-ink-subtle ' },
 };
 
 /** 状态流转下拉选项（负责人/报告人可切换） */
@@ -75,11 +75,11 @@ const STATUS_OPTIONS: { value: BugStatus; label: string }[] = [
 
 // 严重程度配置
 const SEVERITY_CONFIG: Record<BugSeverity, { label: string; color: string; icon: string }> = {
-  BLOCKER: { label: '阻塞', color: 'text-red-600', icon: '🔴' },
+  BLOCKER: { label: '阻塞', color: 'text-danger', icon: '🔴' },
   CRITICAL: { label: '严重', color: 'text-orange-600', icon: '🟠' },
-  MAJOR: { label: '重要', color: 'text-amber-600', icon: '🟡' },
-  MINOR: { label: '一般', color: 'text-blue-600', icon: '🔵' },
-  TRIVIAL: { label: '轻微', color: 'text-slate-500', icon: '⚪' },
+  MAJOR: { label: '重要', color: 'text-warning', icon: '🟡' },
+  MINOR: { label: '一般', color: 'text-info', icon: '🔵' },
+  TRIVIAL: { label: '轻微', color: 'text-ink-tertiary', icon: '⚪' },
 };
 
 // 优先级显示
@@ -246,7 +246,7 @@ export function BugsTab({ projectId }: { projectId: string }) {
         </Button>
         {canEditBugs ? (
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            <DialogTrigger className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-brand/90">
               <Plus className="h-4 w-4" />
               新建 Bug
             </DialogTrigger>
@@ -347,7 +347,7 @@ export function BugsTab({ projectId }: { projectId: string }) {
             onClick={() => setStatusFilter(s)}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
               statusFilter === s
-                ? 'bg-primary text-primary-foreground'
+                ? 'bg-brand text-primary-foreground'
                 : 'bg-muted text-muted-foreground hover:bg-muted/80'
             }`}
           >
@@ -361,7 +361,7 @@ export function BugsTab({ projectId }: { projectId: string }) {
 
       {/* 批量操作条 */}
       {canEditBugs && selectedBugIds.size > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border bg-primary/5 px-3 py-2">
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border bg-brand/5 px-3 py-2">
           <span className="text-xs font-medium">已选 {selectedBugIds.size} 项</span>
           <Select
             value="_noop"
@@ -410,7 +410,7 @@ export function BugsTab({ projectId }: { projectId: string }) {
       )}
 
       {hiddenBugCount > 0 && (
-        <div className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200">
+        <div className="rounded-md border border-warning/30/60 bg-warning-muted px-3 py-2 text-xs text-warning ">
           当前只显示前 {bugs.length} 条 Bug，另有 {hiddenBugCount} 条未加载（共 {bugTotal} 条）。
         </div>
       )}
@@ -551,13 +551,13 @@ function BugCard({
           <div className="flex items-center gap-2">
             <h4 className="truncate text-sm font-medium">{bug.title}</h4>
             {!!bug.pending && (
-              <Badge variant="outline" className="shrink-0 border-amber-200 text-[10px] text-amber-600">
+              <Badge variant="outline" className="shrink-0 border-warning/30 text-[10px] text-warning">
                 <Clock className="mr-0.5 h-2.5 w-2.5" />
                 游客待确认
               </Badge>
             )}
             {bug.priority === 'CRITICAL' && (
-              <Badge variant="outline" className="border-red-200 text-[10px] text-red-600">
+              <Badge variant="outline" className="border-danger/30 text-[10px] text-danger">
                 紧急
               </Badge>
             )}
@@ -605,7 +605,7 @@ function BugCard({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-red-500 hover:text-red-600"
+              className="h-7 w-7 text-danger hover:text-danger"
               onClick={(e) => { e.stopPropagation(); onDelete(bug.id); }}
               title="删除"
             >
@@ -716,14 +716,14 @@ function BugDetailDialog({
         <div className="space-y-4">
           {/* 游客待确认提示条 */}
           {!!bug.pending && (
-            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400">
+            <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-muted px-3 py-2 text-xs text-warning ">
               <Clock className="h-3.5 w-3.5 shrink-0" />
               <span className="flex-1">该 Bug 由游客提交，确认后才会进入正常处理流程。</span>
               {canEdit && (
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 shrink-0 gap-1 border-amber-300 text-xs text-amber-700 hover:bg-amber-100 dark:text-amber-400"
+                  className="h-7 shrink-0 gap-1 border-warning/30 text-xs text-warning hover:bg-warning-muted "
                   disabled={confirmingGuest}
                   onClick={() => onConfirmGuest(bug)}
                 >
@@ -754,7 +754,7 @@ function BugDetailDialog({
               <p className="mb-1 text-muted-foreground">报告人</p>
               {isGuestReporter ? (
                 <div className="flex items-center gap-1.5">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500/10 text-[10px] font-medium text-amber-600">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-warning/10 text-[10px] font-medium text-warning">
                     客
                   </span>
                   <span className="font-medium">游客「{bug.guestNickname || '匿名'}」</span>

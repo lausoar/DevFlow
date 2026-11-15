@@ -38,10 +38,10 @@ import { statisticsApi } from '@/lib/api/statistics';
 // 健康等级配置
 // ============================================
 const HEALTH_CONFIG = {
-  EXCELLENT: { label: '优秀', color: 'text-green-600', bg: 'bg-green-500/10', borderColor: 'border-green-200' },
-  GOOD: { label: '良好', color: 'text-blue-600', bg: 'bg-blue-500/10', borderColor: 'border-blue-200' },
-  FAIR: { label: '一般', color: 'text-amber-600', bg: 'bg-amber-500/10', borderColor: 'border-amber-200' },
-  POOR: { label: '较差', color: 'text-red-600', bg: 'bg-red-500/10', borderColor: 'border-red-200' },
+  EXCELLENT: { label: '优秀', color: 'text-success', bg: 'bg-success/10', borderColor: 'border-success/30' },
+  GOOD: { label: '良好', color: 'text-info', bg: 'bg-info/10', borderColor: 'border-info/30' },
+  FAIR: { label: '一般', color: 'text-warning', bg: 'bg-warning/10', borderColor: 'border-warning/30' },
+  POOR: { label: '较差', color: 'text-danger', bg: 'bg-danger/10', borderColor: 'border-danger/30' },
 };
 
 // ============================================
@@ -195,10 +195,10 @@ export default function ProjectHealthTab() {
                         <div className="h-2 flex-1 rounded-full bg-muted">
                           <div
                             className={`h-full rounded-full transition-all ${
-                              dim.score >= 80 ? 'bg-green-500' :
-                              dim.score >= 60 ? 'bg-blue-500' :
-                              dim.score >= 40 ? 'bg-amber-500' :
-                              'bg-red-500'
+                              dim.score >= 80 ? 'bg-success' :
+                              dim.score >= 60 ? 'bg-info' :
+                              dim.score >= 40 ? 'bg-warning' :
+                              'bg-danger'
                             }`}
                             style={{ width: `${dim.score}%` }}
                           />
@@ -217,7 +217,7 @@ export default function ProjectHealthTab() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                <Lightbulb className="h-4 w-4 text-amber-500" />
+                <Lightbulb className="h-4 w-4 text-warning" />
                 改进建议
               </CardTitle>
             </CardHeader>
@@ -262,9 +262,9 @@ function MetricCard({
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">{label}</p>
           {isPositive ? (
-            <TrendingUp className="h-4 w-4 text-green-500" />
+            <TrendingUp className="h-4 w-4 text-success" />
           ) : (
-            <TrendingDown className="h-4 w-4 text-red-500" />
+            <TrendingDown className="h-4 w-4 text-danger" />
           )}
         </div>
         <p className="mt-1 text-xl font-bold">{value}</p>

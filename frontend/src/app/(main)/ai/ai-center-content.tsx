@@ -195,7 +195,7 @@ function AiChatPanel() {
         ) : messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/20 to-purple-600/20">
-              <Sparkles className="h-7 w-7 text-indigo-500" />
+              <Sparkles className="h-7 w-7 text-info" />
             </div>
             <p className="text-sm">有什么可以帮助你的？</p>
             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -274,7 +274,7 @@ function ChatBubble({ message }: { message: AiMessage }) {
       <div
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
           isUser
-            ? 'bg-primary text-primary-foreground'
+            ? 'bg-brand text-primary-foreground'
             : 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white'
         }`}
       >
@@ -285,7 +285,7 @@ function ChatBubble({ message }: { message: AiMessage }) {
       <div
         className={`group relative max-w-[75%] rounded-2xl px-4 py-2.5 text-sm ${
           isUser
-            ? 'bg-primary text-primary-foreground'
+            ? 'bg-brand text-primary-foreground'
             : 'bg-muted'
         }`}
       >
@@ -298,7 +298,7 @@ function ChatBubble({ message }: { message: AiMessage }) {
             className="absolute -bottom-6 right-0 rounded p-1 opacity-0 group-hover:opacity-100 transition-opacity"
           >
             {copied ? (
-              <Check className="h-3 w-3 text-green-500" />
+              <Check className="h-3 w-3 text-success" />
             ) : (
               <Copy className="h-3 w-3 text-muted-foreground" />
             )}
@@ -400,7 +400,7 @@ function AgentPanel() {
       {loading && (
         <Card>
           <CardContent className="flex items-center gap-3 py-6">
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            <Loader2 className="h-5 w-5 animate-spin text-brand" />
             <span className="text-sm text-muted-foreground">Agent 正在分析并执行工具...</span>
           </CardContent>
         </Card>
@@ -417,7 +417,7 @@ function AgentPanel() {
               <CardContent className="space-y-2">
                 {result.tool_calls.map((tc, i) => (
                   <div key={i} className="flex items-center gap-2 rounded-md bg-muted/50 p-2">
-                    <Zap className="h-3.5 w-3.5 text-amber-500" />
+                    <Zap className="h-3.5 w-3.5 text-warning" />
                     <span className="text-xs font-medium">{tc.tool}</span>
                     <Badge variant="outline" className="text-[10px]">
                       已完成
@@ -720,7 +720,7 @@ function AssistantPanel() {
             onClick={() => { setMode(m.key); setOutput(''); }}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
               mode === m.key
-                ? 'bg-primary text-primary-foreground'
+                ? 'bg-brand text-primary-foreground'
                 : 'bg-muted text-muted-foreground hover:bg-muted/80'
             }`}
           >

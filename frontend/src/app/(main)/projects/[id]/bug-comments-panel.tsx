@@ -52,7 +52,7 @@ export function BugCommentsPanel({ bugId }: { bugId: string }) {
     const parts = text.split(/(@[A-Za-z0-9_.\-\u4e00-\u9fa5]+)/g);
     return parts.map((part, i) =>
       part.startsWith('@') ? (
-        <span key={i} className="font-medium text-blue-600">{part}</span>
+        <span key={i} className="font-medium text-info">{part}</span>
       ) : (
         <span key={i}>{part}</span>
       ),

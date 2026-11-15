@@ -17,7 +17,7 @@ export function MarkdownView({
   className?: string;
 }) {
   if (!content || !content.trim()) {
-    return <p className="text-sm text-muted-foreground">（空）</p>;
+    return <p className="text-[13px] text-ink-subtle">（空）</p>;
   }
   return (
     <div className={`markdown-body text-sm leading-relaxed ${className ?? ''}`}>
@@ -54,7 +54,7 @@ export function MarkdownView({
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-primary underline underline-offset-2"
+              className="text-brand underline underline-offset-2"
             >
               {children}
             </a>
@@ -63,16 +63,16 @@ export function MarkdownView({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={typeof src === 'string' ? src : undefined} alt={alt || ''} className="my-3 max-w-full rounded-lg" />
           ),
-          hr: () => <hr className="my-4 border-border" />,
+          hr: () => <hr className="my-4 border-hairline" />,
           table: ({ children }) => (
             <div className="my-3 overflow-x-auto">
               <table className="w-full border-collapse text-xs">{children}</table>
             </div>
           ),
           th: ({ children }) => (
-            <th className="border border-border bg-muted px-2 py-1 text-left font-medium">{children}</th>
+            <th className="border border-hairline bg-muted px-2 py-1 text-left font-medium">{children}</th>
           ),
-          td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+          td: ({ children }) => <td className="border border-hairline px-2 py-1">{children}</td>,
           input: ({ checked, type }) =>
             type === 'checkbox' ? (
               <input type="checkbox" checked={checked} readOnly className="mr-1 align-middle" />

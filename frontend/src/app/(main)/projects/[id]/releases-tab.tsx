@@ -65,7 +65,7 @@ export function ReleasesTab({ projectId, canManage }: { projectId: string; canMa
         </div>
         {canManage && (
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            <DialogTrigger className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-brand/90">
               <Plus className="h-4 w-4" />
               新建版本
             </DialogTrigger>
@@ -165,15 +165,15 @@ function ReleaseRow({
   onDelete: () => void;
 }) {
   const statusConfig: Record<string, { label: string; className: string }> = {
-    UNRELEASED: { label: '未发布', className: 'bg-amber-100 text-amber-700' },
-    RELEASED: { label: '已发布', className: 'bg-green-100 text-green-700' },
-    ARCHIVED: { label: '已归档', className: 'bg-slate-100 text-slate-600' },
+    UNRELEASED: { label: '未发布', className: 'bg-warning-muted text-warning' },
+    RELEASED: { label: '已发布', className: 'bg-success-muted text-success' },
+    ARCHIVED: { label: '已归档', className: 'bg-surface-2 text-ink-subtle' },
   };
   const st = statusConfig[release.status] || statusConfig.UNRELEASED;
 
   return (
     <div className="flex items-center gap-3 rounded-lg border px-3 py-2.5">
-      <Rocket className="h-4 w-4 shrink-0 text-primary" />
+      <Rocket className="h-4 w-4 shrink-0 text-brand" />
       <button className="flex-1 text-left" onClick={onOpen}>
         <span className="font-mono text-xs text-muted-foreground">{release.version}</span>
         <span className="ml-2 text-sm font-medium">{release.name}</span>
@@ -317,9 +317,9 @@ function Stat({
   return (
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`text-lg font-semibold ${danger ? 'text-red-600' : ''}`}>{value}</p>
+      <p className={`text-lg font-semibold ${danger ? 'text-danger' : ''}`}>{value}</p>
       {warn != null && warn > 0 && (
-        <p className="text-[11px] text-amber-600">其中 {warn} 项未完成</p>
+        <p className="text-[11px] text-warning">其中 {warn} 项未完成</p>
       )}
     </div>
   );
