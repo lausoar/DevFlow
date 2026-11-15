@@ -13,7 +13,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useQuery } from '@tanstack/react-query';
-import { useChannels, useMessageHistory, useSendMessage } from '@/lib/hooks/use-chat';
+import { useChannels, useMessageHistory, useMessageSearch, useSendMessage } from '@/lib/hooks/use-chat';
+import {
+  useEditMessage,
+  useRecallMessage,
+  useToggleReaction,
+  useMarkRead,
+} from '@/lib/hooks/use-chat-actions';
+import { MessageActions, ReactionBar, RecalledBubble } from './message-actions';
 import { chatApi } from '@/lib/api/chat';
 import { useAuthStore } from '@/stores';
 import { usePresenceStore } from '@/stores/presence-store';
@@ -102,6 +109,8 @@ export default function ChatContent() {
   }, []);
   const { user } = useAuthStore();
   const currentUserId = user?.id;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const onlineUserIds = usePresenceStore((s) => s.onlineUserIds);
 
   // 群成员弹窗（项目群成员 = 项目成员，动态派生）
@@ -319,23 +328,60 @@ export default function ChatContent() {
                   {channelTypeLabel(selectedChannelData.type)}
                 </Badge>
               )}
+              {/* 搜索消息 */}
+              <button
+                onClick={() => setSearchOpen((v) => !v)}
+                title="搜索消息"
+                className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Search className="h-3.5 w-3.5" />
+                搜索
+              </button>
               {/* 查看群成员（项目群成员=项目成员） */}
               <button
                 onClick={() => setMembersOpen(true)}
                 title="查看群成员"
-                className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <Users className="h-3.5 w-3.5" />
                 群成员
               </button>
             </div>
 
+            {/* 消息搜索框 */}
+            {searchOpen && (
+              <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-2">
+                <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <Input
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  placeholder="搜索本频道消息…"
+                  className="h-7 text-xs"
+                  autoFocus
+                />
+                <Button
+                  variant="ghost" size="sm" className="h-7 text-xs"
+                  onClick={() => { setSearchOpen(false); setSearchKeyword(''); }}
+                >
+                  关闭
+                </Button>
+              </div>
+            )}
+
             {/* 消息列表（固定高度内滚动，超出隐藏） */}
-            <MessageList
-              channelId={selectedChannel}
-              messagesEndRef={messagesEndRef}
-              currentUserId={currentUserId}
-            />
+            {searchOpen && searchKeyword.trim() ? (
+              <MessageSearchResults
+                channelId={selectedChannel}
+                keyword={searchKeyword}
+                currentUserId={currentUserId}
+              />
+            ) : (
+              <MessageList
+                channelId={selectedChannel}
+                messagesEndRef={messagesEndRef}
+                currentUserId={currentUserId}
+              />
+            )}
 
             {/* 消息输入 */}
             <div className="relative border-t p-3">
@@ -567,6 +613,96 @@ function ChannelItem({
 }
 
 // ============================================
+// 消息搜索结果（频道内检索）
+// ============================================
+function MessageSearchResults({
+  channelId,
+  keyword,
+  currentUserId,
+}: {
+  channelId: string;
+  keyword: string;
+  currentUserId?: string;
+}) {
+  const { data: res, isLoading } = useMessageSearch(channelId, keyword);
+  const hits = res?.data?.records || [];
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+  if (hits.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
+        <Search className="h-8 w-8 opacity-30" />
+        <p className="text-sm">没有匹配「{keyword}」的消息</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <p className="mb-2 text-xs text-muted-foreground">找到 {res?.data?.total ?? hits.length} 条</p>
+      <div className="space-y-2">
+        {hits.map((msg) => {
+          const isSelf = !!currentUserId && msg.senderId === currentUserId;
+          return (
+            <div key={msg.id} className="rounded-lg border px-3 py-2">
+              <div className="mb-1 flex items-baseline gap-2 text-xs">
+                <span className="font-medium">{msg.senderName || msg.senderId?.slice(0, 8)}</span>
+                <span className="text-muted-foreground">
+                  {new Date(msg.createdAt).toLocaleString('zh-CN')}
+                </span>
+                {isSelf && <Badge variant="outline" className="text-[9px]">我</Badge>}
+              </div>
+              <p className="text-sm break-words">
+                <HighlightedText text={msg.content} keyword={keyword} />
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 关键词高亮：用 indexOf 扫描而不是正则，避免构造正则带来的注入与转义问题 */
+function HighlightedText({ text, keyword }: { text: string; keyword: string }) {
+  const kw = keyword.trim();
+  if (!kw) return <>{text}</>;
+  const lowerText = text.toLowerCase();
+  const lowerKw = kw.toLowerCase();
+  const parts: { value: string; hit: boolean }[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const idx = lowerText.indexOf(lowerKw, cursor);
+    if (idx < 0) {
+      parts.push({ value: text.slice(cursor), hit: false });
+      break;
+    }
+    if (idx > cursor) parts.push({ value: text.slice(cursor, idx), hit: false });
+    parts.push({ value: text.slice(idx, idx + kw.length), hit: true });
+    cursor = idx + kw.length;
+  }
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.hit ? (
+          <mark key={i} className="rounded bg-amber-200 px-0.5 text-foreground dark:bg-amber-500/40">
+            {part.value}
+          </mark>
+        ) : (
+          <span key={i}>{part.value}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+// ============================================
 // 消息列表（固定高度，超出滚动）
 // ============================================
 function MessageList({
@@ -589,6 +725,21 @@ function MessageList({
   const messages = historyRes?.records || [];
   const totalMessages = historyRes?.total || 0;
   const hasMore = messages.length < totalMessages;
+
+  // 动作（编辑 / 撤回 / 表情）
+  const editMessage = useEditMessage(channelId);
+  const recallMessage = useRecallMessage(channelId);
+  const toggleReaction = useToggleReaction(channelId);
+  const markRead = useMarkRead(channelId);
+
+  // 打开频道即标记已读；收到新消息（条数增加）也标记一次
+  useEffect(() => {
+    if (messages.length > 0) {
+      markRead.mutate();
+    }
+    // 只在频道切换或消息条数变化时上报，避免每次渲染都打接口
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId, messages.length]);
 
   // 自动滚动到底部（只在新增消息时滚，翻看历史时不打断）
   const prevCountRef = useRef(0);
@@ -628,7 +779,16 @@ function MessageList({
           </div>
         )}
         {messages.map((msg) => (
-          <MessageItem key={msg.id} message={msg} currentUserId={currentUserId} />
+          <MessageItem
+            key={msg.id}
+            message={msg}
+            currentUserId={currentUserId}
+            onEdit={async (content) => {
+              await editMessage.mutateAsync({ messageId: msg.id, content });
+            }}
+            onRecall={() => recallMessage.mutate(msg.id)}
+            onReact={(emoji) => toggleReaction.mutate({ messageId: msg.id, emoji })}
+          />
         ))}
         <div ref={messagesEndRef} />
       </div>
@@ -642,9 +802,15 @@ function MessageList({
 function MessageItem({
   message,
   currentUserId,
+  onEdit,
+  onRecall,
+  onReact,
 }: {
   message: ChatMessage;
   currentUserId?: string;
+  onEdit: (content: string) => Promise<void>;
+  onRecall: () => void;
+  onReact: (emoji: string) => void;
 }) {
   const displayName =
     message.senderName || message.senderId?.substring(0, 8) || 'Unknown';
@@ -657,7 +823,7 @@ function MessageItem({
 
   if (isSelf) {
     return (
-      <div className="flex flex-row-reverse gap-3">
+      <div className="group flex flex-row-reverse gap-3">
         <Avatar className="h-8 w-8 shrink-0">
           <AvatarImage src={message.senderAvatar || undefined} />
           <AvatarFallback className="text-xs">
@@ -668,17 +834,36 @@ function MessageItem({
           <div className="mb-0.5 flex items-baseline gap-2">
             <span className="text-xs text-muted-foreground">{time}</span>
             <span className="text-sm font-medium">{displayName}</span>
+            {message.editedAt && !message.recalledAt && (
+              <span className="text-[10px] text-muted-foreground">（已编辑）</span>
+            )}
           </div>
-          <div className="break-words rounded-2xl rounded-tr-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
-            <MessageContent message={message} />
-          </div>
+          {message.recalledAt ? (
+            <RecalledBubble isSelf />
+          ) : (
+            <div className="break-words rounded-2xl rounded-tr-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
+              <MessageContent message={message} />
+            </div>
+          )}
+          <ReactionBar
+            reactions={message.reactions}
+            currentUserId={currentUserId}
+            onToggle={onReact}
+          />
+          <MessageActions
+            message={message}
+            isSelf
+            onEdit={onEdit}
+            onRecall={onRecall}
+            onReact={onReact}
+          />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex gap-3">
+    <div className="group flex gap-3">
       <Avatar className="h-8 w-8 shrink-0">
         <AvatarImage src={message.senderAvatar || undefined} />
         <AvatarFallback className="text-xs">
@@ -689,10 +874,29 @@ function MessageItem({
         <div className="mb-0.5 flex items-baseline gap-2">
           <span className="text-sm font-medium">{displayName}</span>
           <span className="text-xs text-muted-foreground">{time}</span>
+          {message.editedAt && !message.recalledAt && (
+            <span className="text-[10px] text-muted-foreground">（已编辑）</span>
+          )}
         </div>
+        {message.recalledAt ? (
+          <RecalledBubble isSelf={false} />
+        ) : (
           <div className="break-words rounded-2xl rounded-tl-sm bg-muted px-3 py-2 text-sm">
             <MessageContent message={message} />
           </div>
+        )}
+        <ReactionBar
+          reactions={message.reactions}
+          currentUserId={currentUserId}
+          onToggle={onReact}
+        />
+        <MessageActions
+          message={message}
+          isSelf={false}
+          onEdit={onEdit}
+          onRecall={onRecall}
+          onReact={onReact}
+        />
       </div>
     </div>
   );

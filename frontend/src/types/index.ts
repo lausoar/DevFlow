@@ -352,6 +352,13 @@ export interface ChatMessage {
   mentions: string[];
   attachments: Attachment[];
   createdAt: string;
+  /** 编辑时间（有值表示已编辑） */
+  editedAt?: string | null;
+  /** 撤回时间（有值表示已撤回，content 已被服务端置占位） */
+  recalledAt?: string | null;
+  recalledBy?: string | null;
+  /** 表情聚合：emoji → userId 列表 */
+  reactions?: Record<string, string[]>;
 }
 
 export type MessageType = 'TEXT' | 'IMAGE' | 'FILE' | 'CODE' | 'SYSTEM';

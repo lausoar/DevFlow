@@ -58,6 +58,17 @@ export function useMessageHistory(channelId: string | null, loadedPages: number)
   });
 }
 
+/** 频道内消息搜索（关键词为空时不请求） */
+export function useMessageSearch(channelId: string | null, keyword: string) {
+  const q = keyword.trim();
+  return useQuery({
+    queryKey: ['message-search', channelId, q],
+    queryFn: () => chatApi.searchMessages(channelId!, q),
+    enabled: !!channelId && q.length > 0,
+    staleTime: 30 * 1000,
+  });
+}
+
 /** 发送消息 */
 export function useSendMessage(channelId: string) {
   const queryClient = useQueryClient();

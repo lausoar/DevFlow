@@ -120,11 +120,16 @@ public class ChatController {
         // SQL 按时间倒序取"最新一页"，这里翻回正序，前端按时间自上而下渲染
         result.setRecords(new java.util.ArrayList<>(result.getRecords()));
         java.util.Collections.reverse(result.getRecords());
+        // 撤回的消息不返回原文；同时批量填充表情聚合（一次查询，避免逐条打库）
+        java.util.List<String> msgIds = result.getRecords().stream()
+                .map(ChatMessage::getId).toList();
+        java.util.Map<String, java.util.Map<String, java.util.List<String>>> reactions =
+                messageActionService.reactionsOfMessages(msgIds);
         result.getRecords().forEach(m -> {
-            // 撤回的消息不返回原文（服务端已置占位，这里再兜一层）
             if (m.getRecalledAt() != null) {
                 m.setOriginalContent(null);
             }
+            m.setReactions(reactions.getOrDefault(m.getId(), java.util.Map.of()));
         });
         // 顺带返回未读数，前端可省一次请求
         return R.ok(result);
@@ -177,6 +182,28 @@ public class ChatController {
     // ==================== 内部 ====================
 
     /** 频道必须存在且所属项目对当前用户可见，否则 404（不泄露存在性） */
+    /** 频道内消息搜索（全文索引优先，短词/英文回落 LIKE；已撤回消息不参与） */
+    @Operation(summary = "搜索频道内消息")
+    @GetMapping("/channels/{channelId}/messages/search")
+    public R<Page<ChatMessage>> searchMessages(
+            @PathVariable String channelId,
+            @RequestParam String q,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "30") Integer pageSize,
+            Authentication authentication) {
+        String userId = guard.userId(authentication);
+        requireChannel(userId, channelId);
+        String kw = q == null ? "" : q.trim();
+        if (kw.isEmpty()) {
+            return R.ok(new Page<>(page, pageSize));
+        }
+        // 与全局搜索同一套判断：单字与纯英文词在 ngram 下命中不了，回落 LIKE
+        boolean useFullText = kw.length() >= 2 && !kw.matches("^[A-Za-z0-9\s]+$");
+        Page<ChatMessage> result = messageMapper.searchMessages(
+                new Page<>(page, pageSize), channelId, kw, useFullText);
+        return R.ok(result);
+    }
+
     /** 频道未读数（委托消息动作服务，避免前端为未读再打一个端点） */
     @Operation(summary = "频道未读数")
     @GetMapping("/channels/{channelId}/unread-count")

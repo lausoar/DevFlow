@@ -21,6 +21,11 @@ export const chatApi = {
   getMessages: (channelId: string, page = 1, pageSize = 50) =>
     request<PageResult<ChatMessage>>('GET', `/channels/${channelId}/messages`, undefined, { page, pageSize }),
 
+  /** 频道内消息搜索 */
+  searchMessages: (channelId: string, q: string, page = 1, pageSize = 30) =>
+    request<PageResult<ChatMessage>>('GET', `/channels/${channelId}/messages/search`, undefined,
+      { q, page, pageSize }),
+
   /** 发送消息（REST） */
   sendMessage: (channelId: string, data: { content: string; type?: string; replyToId?: string }) =>
     request<ChatMessage>('POST', `/channels/${channelId}/messages`, data),

@@ -87,14 +87,14 @@ fi
 # 3. 新表必须真的存在（回归："新表从未创建"）
 # ============================================
 info "检查第 2-4 批新增的表"
-REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference"
+REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference subscription"
 MISSING=""
 for t in $REQUIRED_TABLES; do
     n=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='$t';")
     [ "$n" = "1" ] || MISSING="$MISSING $t"
 done
 if [ -z "$MISSING" ]; then
-    ok "20 张新表全部创建"
+    ok "21 张新表全部创建"
 else
     bad "缺少表:$MISSING（schema.sql 里是否漏了 CREATE TABLE？）"
 fi
@@ -435,6 +435,39 @@ DND=$(curl -s -m 10 "$BASE/notification-preferences" -H "$AUTH" | json_field "['
 # 全文索引
 FT=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema='$DB_NAME' AND index_type='FULLTEXT';")
 [ "${FT:-0}" -ge 4 ] && ok "全文索引已创建（$FT 个）" || bad "全文索引数=$FT（期望 ≥4）"
+
+# ============================================
+# 第 7 批：消息搜索 / 关注
+# ============================================
+if [ -n "$CH_ID" ]; then
+    # 频道内消息搜索（先发一条含关键词的消息）
+    curl -s -m 10 -X POST "$BASE/channels/$CH_ID/messages" -H "$AUTH"         -H "Content-Type: application/json" -d '{"content":"deploy pipeline keyword"}' >/dev/null
+    HITS=$(curl -s -m 10 "$BASE/channels/$CH_ID/messages/search?q=deploy" -H "$AUTH"            | json_field "['data']['total']")
+    [ "${HITS:-0}" -ge 1 ] && ok "频道内消息搜索命中（$HITS 条）" || bad "消息搜索命中数=$HITS"
+
+    # 搜不到的词应为 0
+    HITS0=$(curl -s -m 10 "$BASE/channels/$CH_ID/messages/search?q=zzzznotfound" -H "$AUTH"             | json_field "['data']['total']")
+    [ "${HITS0:-1}" = "0" ] && ok "无关关键词返回 0 条" || bad "无关关键词命中=$HITS0"
+fi
+
+# 关注：关注任务 → 查询状态 → 列表 → 取消
+if [ -n "$TASK_ID" ]; then
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X POST "$BASE/subscriptions" -H "$AUTH"            -H "Content-Type: application/json" -d "{\"targetType\":\"TASK\",\"targetId\":\"$TASK_ID\"}")
+    [ "$CODE" = "200" ] && ok "关注任务" || bad "关注任务返回 $CODE"
+
+    ST=$(curl -s -m 10 "$BASE/subscriptions/status?targetType=TASK&targetId=$TASK_ID" -H "$AUTH"          | json_field "['data']['subscribed']")
+    [ "$ST" = "True" ] && ok "关注状态查询正确" || bad "关注状态=$ST"
+
+    N=$(curl -s -m 10 "$BASE/subscriptions?targetType=TASK" -H "$AUTH"         | python -c "import sys,json;print(len(json.load(sys.stdin).get('data') or []))" 2>/dev/null || echo 0)
+    [ "${N:-0}" -ge 1 ] && ok "关注列表返回 $N 条" || bad "关注列表为空"
+
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X DELETE            "$BASE/subscriptions?targetType=TASK&targetId=$TASK_ID" -H "$AUTH")
+    [ "$CODE" = "200" ] && ok "取消关注" || bad "取消关注返回 $CODE"
+
+    # 非法类型被拒绝
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X POST "$BASE/subscriptions" -H "$AUTH"            -H "Content-Type: application/json" -d '{"targetType":"HACK","targetId":"x"}')
+    [ "$CODE" = "400" ] && ok "非法关注类型被拒绝（400）" || bad "非法类型返回 $CODE"
+fi
 
 # ============================================
 # 汇总

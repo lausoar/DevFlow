@@ -27,6 +27,7 @@ public class TaskServiceImpl implements TaskService {
     private final TaskMapper taskMapper;
     private final NotificationService notificationService;
     private final com.devflow.service.WorkflowService workflowService;
+    private final com.devflow.service.SubscriptionService subscriptionService;
 
     @Override
     public Page<Task> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
@@ -73,6 +74,16 @@ public class TaskServiceImpl implements TaskService {
             task.setStatus("TODO"); // 兜底：正常路径由 Controller 按工作流初始状态赋值
         }
         taskMapper.insert(task);
+
+        // 自动关注：创建人与被指派人（否则用户会漏掉与自己直接相关的事）
+        try {
+            subscriptionService.autoSubscribe(reporterId, "TASK", task.getId(), projectId);
+            if (StringUtils.hasText(task.getAssigneeId())) {
+                subscriptionService.autoSubscribe(task.getAssigneeId(), "TASK", task.getId(), projectId);
+            }
+        } catch (Exception e) {
+            log.debug("自动关注失败（不影响创建）: {}", e.getMessage());
+        }
 
         // 通知被指派的人
         if (StringUtils.hasText(task.getAssigneeId()) && !task.getAssigneeId().equals(reporterId)) {
@@ -123,9 +134,15 @@ public class TaskServiceImpl implements TaskService {
         // 重新查询以获取更新后的完整数据
         Task updated = taskMapper.selectById(id);
 
-        // 如果被指派人变更，通知新的被指派人
+        // 如果被指派人变更，通知新的被指派人并让他自动关注
         if (updated != null && StringUtils.hasText(updated.getAssigneeId())
                 && !updated.getAssigneeId().equals(oldAssigneeId)) {
+            try {
+                subscriptionService.autoSubscribe(updated.getAssigneeId(), "TASK",
+                        updated.getId(), updated.getProjectId());
+            } catch (Exception e) {
+                log.debug("改派自动关注失败（不影响主流程）: {}", e.getMessage());
+            }
             notificationService.createNotification(
                 updated.getAssigneeId(),
                 "TASK_UPDATE",
