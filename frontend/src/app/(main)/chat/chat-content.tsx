@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParam } from '@/lib/hooks/use-client-only';
 import { useChannels, useMessageHistory, useMessageSearch, useSendMessage } from '@/lib/hooks/use-chat';
 import {
   useEditMessage,
@@ -88,7 +89,7 @@ function formatFileSize(bytes: number): string {
 // 聊天内容（客户端组件）
 // ============================================
 export default function ChatContent() {
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+  const [pickedChannel, setSelectedChannel] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileChannelOpen, setMobileChannelOpen] = useState(false);
@@ -102,11 +103,14 @@ export default function ChatContent() {
   const { data: channelsRes } = useChannels();
   const channels = channelsRes?.data || [];
 
-  // 支持通知等深链 /chat?channel=xxx 直达指定频道
-  useEffect(() => {
-    const ch = new URLSearchParams(window.location.search).get('channel');
-    if (ch) setSelectedChannel(ch);
-  }, []);
+  // 支持通知等深链 /chat?channel=xxx 直达指定频道。
+  // 用 useSearchParam 而不是「effect 里读 URL 再 setState」：
+  // 后者会在首帧后触发一次多余渲染，也是 set-state-in-effect 规则命中的原因。
+  const deepLinkChannel = useSearchParam('channel');
+
+  // 用户手动选的频道优先；未手动选时退化为深链参数，再退化为列表第一个。
+  // 全部在渲染期求值，避免 effect 里补状态（会多渲染一轮、且可能覆盖用户选择）。
+  const selectedChannel = pickedChannel ?? deepLinkChannel ?? channels[0]?.id ?? null;
   const { user } = useAuthStore();
   const currentUserId = user?.id;
   const [searchOpen, setSearchOpen] = useState(false);
@@ -211,13 +215,6 @@ export default function ChatContent() {
   const filteredChannels = searchQuery
     ? channels.filter((c) => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
     : channels;
-
-  // 自动选择第一个频道
-  useEffect(() => {
-    if (!selectedChannel && channels.length > 0) {
-      setSelectedChannel(channels[0].id);
-    }
-  }, [channels, selectedChannel]);
 
   return (
     <div className="flex h-full min-h-[600px] flex-row overflow-hidden rounded-2xl border bg-card shadow-sm">
@@ -714,12 +711,21 @@ function MessageList({
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   currentUserId?: string;
 }) {
-  // page=1 是最新一页；loadedPages 增加时向上加载更早的历史
-  const [loadedPages, setLoadedPages] = useState(1);
-  // 切换频道时重置已加载页数，避免把上一个频道的翻页状态带过来
-  useEffect(() => {
-    setLoadedPages(1);
-  }, [channelId]);
+  // page=1 是最新一页；loadedPages 增加时向上加载更早的历史。
+  // 切换频道要把页数重置为 1 —— 用「频道变化即重置」的渲染期派生代替
+  // effect：状态里同时记住它属于哪个频道，不一致时直接按 1 处理，
+  // 既不会把上个频道的翻页状态带过来，也不会多渲染一轮。
+  const [pageState, setPageState] = useState<{ channelId: string; pages: number }>({
+    channelId,
+    pages: 1,
+  });
+  const loadedPages = pageState.channelId === channelId ? pageState.pages : 1;
+  const setLoadedPages = (updater: number | ((n: number) => number)) =>
+    setPageState((prev) => {
+      const base = prev.channelId === channelId ? prev.pages : 1;
+      const next = typeof updater === 'function' ? updater(base) : updater;
+      return { channelId, pages: next };
+    });
 
   const { data: historyRes, isLoading } = useMessageHistory(channelId, loadedPages);
   const messages = historyRes?.records || [];

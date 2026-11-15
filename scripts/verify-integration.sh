@@ -181,11 +181,15 @@ else
     exit 1
 fi
 
-# 3a. 迁移历史：4 个版本全部成功
+# 3a. 迁移历史：与 db/migration 下的文件一一对应，且全部 success=1。
+# 期望版本号从目录推导而不是写死 —— 否则每加一个迁移都要改这里，
+# 忘改就会报"版本不匹配"，看着像迁移出错，其实是校验脚本过期。
+EXPECTED_VERSIONS=$(ls "$BACKEND_DIR/src/main/resources/db/migration" \
+    | sed -n 's/^V\([0-9]\+\)__.*$/\1/p' | sort -n | paste -sd, -)
 VERSIONS=$(mysql_exec -N -e "SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM \`$DB_NAME\`.flyway_schema_history WHERE success=1 AND version IS NOT NULL;")
-[ "$VERSIONS" = "1,2,3,4,5" ] \
+[ "$VERSIONS" = "$EXPECTED_VERSIONS" ] \
     && ok "Flyway 迁移历史完整（版本 $VERSIONS）" \
-    || bad "Flyway 迁移版本是 [$VERSIONS]（期望 1,2,3,4,5）"
+    || bad "Flyway 迁移版本是 [$VERSIONS]（期望 $EXPECTED_VERSIONS，来自 db/migration）"
 
 N_FAILED=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schema_history WHERE success = 0;")
 [ "${N_FAILED:-1}" = "0" ] && ok "无失败的迁移" || bad "有 $N_FAILED 条迁移失败"

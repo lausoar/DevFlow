@@ -46,6 +46,16 @@ export function GlobalSearch() {
   const [keyword, setKeyword] = useState('');
   const [debounced, setDebounced] = useState('');
 
+  // 关闭时清空关键词：放在事件处理里而不是 effect 里，
+  // 关闭动作本身就是用户事件，没必要再多渲染一轮去"发现"它已关闭。
+  const handleOpenChange = (open: boolean) => {
+    setSearchOpen(open);
+    if (!open) {
+      setKeyword('');
+      setDebounced('');
+    }
+  };
+
   // 输入防抖 300ms
   useEffect(() => {
     const t = setTimeout(() => setDebounced(keyword.trim()), 300);
@@ -64,13 +74,6 @@ export function GlobalSearch() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // 关闭时清空关键词
-  useEffect(() => {
-    if (!searchOpen) {
-      setKeyword('');
-      setDebounced('');
-    }
-  }, [searchOpen]);
 
   const { data, isFetching } = useQuery({
     queryKey: ['global-search', debounced],
@@ -89,7 +92,7 @@ export function GlobalSearch() {
   };
 
   return (
-    <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
+    <Dialog open={searchOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-xl p-0 gap-0 overflow-hidden top-[15%] translate-y-0">
         <DialogHeader className="sr-only">
           <DialogTitle>全局搜索</DialogTitle>

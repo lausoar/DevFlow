@@ -847,35 +847,28 @@ function BugEditDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const updateBug = useUpdateBug(projectId);
-  const [form, setForm] = useState<{
+  // 表单初值以「哪个 Bug + 是否打开」为 key：换 Bug 或重新打开时在渲染期重置，
+  // 列表/详情后台刷新不会覆盖正在输入的内容，也不需要 effect 回填。
+  type BugForm = {
     title: string;
     description: string;
     priority: Priority;
     severity: BugSeverity;
     environment: string;
     assigneeId: string;
-  }>({
-    title: '',
-    description: '',
-    priority: 'MEDIUM',
-    severity: 'MAJOR',
-    environment: '',
-    assigneeId: '',
+  };
+  const toForm = (b: Bug | null): BugForm => ({
+    title: b?.title || '',
+    description: b?.description || '',
+    priority: (b?.priority || 'MEDIUM') as Priority,
+    severity: (b?.severity || 'MAJOR') as BugSeverity,
+    environment: b?.environment || '',
+    assigneeId: b?.assigneeId || '',
   });
-
-  // 当 bug 变化时同步表单数据
-  useEffect(() => {
-    if (bug) {
-      setForm({
-        title: bug.title || '',
-        description: bug.description || '',
-        priority: bug.priority || 'MEDIUM',
-        severity: bug.severity || 'MAJOR',
-        environment: bug.environment || '',
-        assigneeId: bug.assigneeId || '',
-      });
-    }
-  }, [bug]);
+  const dialogKey = `${bug?.id ?? ''}|${open}`;
+  const [draft, setDraft] = useState<{ key: string; form: BugForm }>(() => ({ key: dialogKey, form: toForm(bug) }));
+  const form = draft.key === dialogKey ? draft.form : toForm(bug);
+  const setForm = (next: BugForm) => setDraft({ key: dialogKey, form: next });
 
   if (!bug) return null;
 

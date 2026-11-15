@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -72,18 +72,22 @@ export function RequirementsTab({ projectId }: { projectId: string }) {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
-  const [page, setPage] = useState(1);
+  // 页码和它所属的筛选条件存一起：条件变了页码自动回 1，
+  // 不需要 effect 回填（effect 版会先按旧页码发一次请求，再回第一页发第二次）
+  const filterKey = `${searchKeyword}|${priorityFilter}|${statusFilter}`;
+  const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: filterKey, page: 1 });
+  const page = pageState.key === filterKey ? pageState.page : 1;
+  const setPage = (updater: number | ((p: number) => number)) =>
+    setPageState((prev) => {
+      const base = prev.key === filterKey ? prev.page : 1;
+      return { key: filterKey, page: typeof updater === 'function' ? updater(base) : updater };
+    });
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   // 只存 ID，详情从最新列表派生：操作后弹窗能同步刷新，避免展示旧快照
   const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
   const [editingRequirementId, setEditingRequirementId] = useState<string | null>(null);
-
-  // 筛选条件变化时回到第一页
-  useEffect(() => {
-    setPage(1);
-  }, [searchKeyword, priorityFilter, statusFilter]);
 
   // 获取需求列表
   const { data: requirementsRes, isLoading } = useRequirements(projectId, {
@@ -442,6 +446,15 @@ function CreateRequirementDialog({
   );
 }
 
+function draftOf(r: Requirement | null) {
+  return {
+    title: r?.title ?? '',
+    description: r?.description ?? '',
+    priority: (r?.priority ?? 'MEDIUM') as Priority,
+    estimatedHours: r?.estimatedHours ? String(r.estimatedHours) : '',
+  };
+}
+
 // ============================================
 // 编辑需求对话框
 // ============================================
@@ -456,23 +469,22 @@ function EditRequirementDialog({
   requirement: Requirement | null;
   projectId: string;
 }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<Priority>('MEDIUM');
-  const [estimatedHours, setEstimatedHours] = useState('');
-
   const updateRequirement = useUpdateRequirement(projectId);
 
-  // 打开时用当前需求回填（依赖 id，避免列表后台刷新打断编辑）
-  useEffect(() => {
-    if (open && requirement) {
-      setTitle(requirement.title);
-      setDescription(requirement.description || '');
-      setPriority(requirement.priority || 'MEDIUM');
-      setEstimatedHours(requirement.estimatedHours ? String(requirement.estimatedHours) : '');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, requirement?.id]);
+  // 表单初值以「哪个需求 + 是否打开」为 key：换需求或重新打开时在渲染期重置，
+  // 列表后台刷新不会打断正在输入的内容。走的是 React 官方的
+  // "adjusting state when a prop changes" 模式，不需要 effect 回填。
+  const dialogKey = `${requirement?.id ?? ''}|${open}`;
+  const [draft, setDraft] = useState<{ key: string; title: string; description: string; priority: Priority; estimatedHours: string }>(
+    () => ({ key: dialogKey, ...draftOf(requirement) }),
+  );
+  const form = draft.key === dialogKey ? draft : { key: dialogKey, ...draftOf(requirement) };
+  const setField = (patch: Partial<Omit<typeof form, 'key'>>) =>
+    setDraft({ ...form, ...patch });
+  const title = form.title;
+  const description = form.description;
+  const priority = form.priority;
+  const estimatedHours = form.estimatedHours;
 
   if (!requirement) return null;
 
@@ -519,7 +531,7 @@ function EditRequirementDialog({
             <Input
               placeholder="输入需求标题"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => setField({ title: e.target.value })}
             />
           </div>
 
@@ -527,7 +539,7 @@ function EditRequirementDialog({
           <BugDescriptionField
             projectId={projectId}
             value={description}
-            onChange={setDescription}
+            onChange={(v) => setField({ description: v })}
             label="需求描述"
             placeholder="详细描述需求内容、背景、预期效果，可直接粘贴截图…"
           />
@@ -536,7 +548,7 @@ function EditRequirementDialog({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">优先级</label>
-              <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
+              <Select value={priority} onValueChange={(v) => setField({ priority: v as Priority })}>
                 <SelectTrigger>
                   <SelectValue>{getPriorityConfig(priority).label}</SelectValue>
                 </SelectTrigger>
@@ -555,7 +567,7 @@ function EditRequirementDialog({
                 step="0.5"
                 placeholder="0"
                 value={estimatedHours}
-                onChange={(e) => setEstimatedHours(e.target.value)}
+                onChange={(e) => setField({ estimatedHours: e.target.value })}
               />
             </div>
           </div>

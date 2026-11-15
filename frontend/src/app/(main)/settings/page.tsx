@@ -16,6 +16,12 @@ import { MfaCard } from '@/components/auth/mfa-card';
 import { NotificationPreferencesCard } from '@/components/settings/notification-preferences-card';
 import { useMfaStatus } from '@/lib/hooks/use-security';
 
+// 从 request() 抛出的错误里取后端 message（错误形状是 any，这里收窄一次）
+function readApiError(e: unknown, fallback: string): string {
+  const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+  return msg || fallback;
+}
+
 // ============================================
 // 设置页面 - 个人信息和密码修改
 // ============================================
@@ -80,8 +86,8 @@ function ProfileCard({ user, setUser }: {
       setUser(res.data);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || '保存失败');
+    } catch (e) {
+      setError(readApiError(e, '保存失败'));
     }
   };
 
@@ -231,8 +237,8 @@ function PasswordCard() {
       setNewPassword('');
       setConfirmPassword('');
       setTimeout(() => setSuccess(false), 3000);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || '修改密码失败');
+    } catch (e) {
+      setError(readApiError(e, '修改密码失败'));
     }
   };
 

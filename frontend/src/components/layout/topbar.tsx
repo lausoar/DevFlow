@@ -16,7 +16,6 @@ import {
   Search,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
-import { useState, useEffect } from 'react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +27,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useRouter } from 'next/navigation';
 import type { Notification as NotifItem } from '@/types';
+import { useIsMounted } from '@/lib/hooks/use-client-only';
 
 // ============================================
 // 顶部工具栏组件
@@ -36,7 +36,6 @@ export function TopBar() {
   const { theme, setTheme } = useTheme();
   const { user, logout } = useAuthStore();
   const { setMobileMenuOpen, setAiAssistantOpen, sidebarCollapsed, setSearchOpen } = useAppStore();
-  const [mounted, setMounted] = useState(false);
   const router = useRouter();
   const { data: unreadRes } = useUnreadCount();
   const unreadCount = unreadRes?.data?.count ?? 0;
@@ -54,8 +53,9 @@ export function TopBar() {
     }
   };
 
-  // 避免主题切换闪烁
-  useEffect(() => setMounted(true), []);
+  // 避免主题切换闪烁：mounted 用 useSyncExternalStore 直接读，
+  // 不再 effect + setState（省一次级联渲染）
+  const mounted = useIsMounted();
 
   const handleLogout = async () => {
     try {

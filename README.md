@@ -268,12 +268,28 @@ npm run dev
 # 访问: http://localhost:3000
 ```
 
+### 6️⃣ 灌一套全场景演示数据（可选，但强烈建议）
+
+空库进入系统会看到一堆空状态，挨个点着建数据很费时间。一条命令就能把
+**每一个功能点**都填上真实内容（组织/需求/迭代/任务/Bug/测试/文档/聊天/
+版本发布/部署审批/设计走查/游客通道/Git 接入/审计链）：
+
+```bash
+node scripts/seed-demo-data.mjs
+# 后端不在默认地址时：BASE=http://localhost:18090/api/v1 node scripts/seed-demo-data.mjs
+```
+
+跑完会打印演示账号与前端直达链接。详细清单见
+[docs/BUSINESS_FLOW_AND_DEMO_DATA.md](docs/BUSINESS_FLOW_AND_DEMO_DATA.md)。
+
 ### 测试账号
 
-| 用户名 | 密码 | 角色 |
-|--------|------|------|
-| admin | admin123 | 企业超管 |
-| zhangsan | admin123 | 普通成员 |
+| 用户名 | 密码 | 角色 | 说明 |
+|--------|------|------|------|
+| admin | admin123 | 企业超管 | 迁移种子数据自带 |
+| zhangsan | admin123 | 普通成员 | 迁移种子数据自带 |
+| demo_owner | Demo@2026 | 企业超管 | 演示数据生成，数据最全 |
+| demo_admin / demo_manager / demo_member / demo_tester | Demo@2026 | 管理员/经理/成员/成员 | 演示数据生成，用于验证逐级权限 |
 
 支持**用户名或邮箱**登录。
 
@@ -290,9 +306,18 @@ npm run dev
 ## 🧪 测试
 
 ```bash
-cd backend
-mvn test        # JDK 17，约 30s
+cd backend  && mvn test                                  # 后端单测（JDK 17，约 30s）
+cd ai-service && python -m pytest -q                     # AI 服务单测（无需 LLM Key）
+cd frontend  && npx tsc --noEmit && npm run lint         # 类型检查 + Lint
+scripts/verify-integration.sh                            # 集成验证（需真实 MySQL）
 ```
+
+前端还有两个辅助脚本：
+
+| 脚本 | 用途 |
+|------|------|
+| `node scripts/seed-demo-data.mjs` | 生成全场景演示数据（可重复运行） |
+| `node scripts/render-diagrams.mjs` | 从 `docs/diagrams/*.mmd` 重新渲染业务流程图 |
 
 分层设计：
 

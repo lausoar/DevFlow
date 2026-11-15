@@ -207,9 +207,6 @@ export default function EnterpriseContent() {
   const updateDepartment = useUpdateDepartment();
 
   // 企业微信机器人 webhook（企业设置）
-  const [settingsWebhook, setSettingsWebhook] = useState('');
-  const [wecomTestResult, setWecomTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [wecomSaving, setWecomSaving] = useState(false);
   const deleteDept = useDeleteDepartment();
   const [editingDept, setEditingDept] = useState<DepartmentTree | null>(null);
   const [deptEditName, setDeptEditName] = useState('');
@@ -316,13 +313,14 @@ export default function EnterpriseContent() {
     return null;
   };
 
-  useEffect(() => {
-    if (departments.length > 0 && (!selectedDeptId || !findDeptNode(departments, selectedDeptId))) {
-      setSelectedDeptId(departments[0]?.id ?? null);
-    }
-  }, [departments, selectedDeptId]);
+  // 未选中或选中的部门已不存在时，退化为第一个部门 —— 渲染期派生，
+  // 不再用 effect 回填（effect 版会在首帧后多渲染一轮且可能覆盖用户选择）
+  const effectiveDeptId =
+    selectedDeptId && findDeptNode(departments, selectedDeptId)
+      ? selectedDeptId
+      : departments[0]?.id ?? null;
 
-  const selectedDept = findDeptNode(departments, selectedDeptId);
+  const selectedDept = findDeptNode(departments, effectiveDeptId);
 
   // 扁平化部门列表（供下拉选择）
   const flattenDepts = (
@@ -434,22 +432,11 @@ export default function EnterpriseContent() {
   };
 
   // 企业设置 / 邀请 / 部门表单状态
-  const [settingsName, setSettingsName] = useState('');
-  const [settingsLogo, setSettingsLogo] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRealName, setInviteRealName] = useState('');
   const [inviteRole, setInviteRole] = useState('MEMBER');
   const [deptName, setDeptName] = useState('');
   const [deptParent, setDeptParent] = useState('');
-
-  // 企业数据加载后同步表单初始值
-  useEffect(() => {
-    if (enterprise) {
-      setSettingsName(enterprise.name);
-      setSettingsLogo(enterprise.logo || '');
-      setSettingsWebhook(enterprise.wecomWebhook || '');
-    }
-  }, [enterprise]);
 
   const filteredMembers = useMemo(() => {
     if (!searchQuery) return members;
@@ -864,7 +851,7 @@ export default function EnterpriseContent() {
                     <DepartmentTreeNode
                       key={dept.id}
                       node={dept}
-                      selectedId={selectedDeptId}
+                      selectedId={effectiveDeptId}
                       onSelect={setSelectedDeptId}
                       onEdit={openEditDept}
                       onDelete={handleDeleteDept}
@@ -933,108 +920,13 @@ export default function EnterpriseContent() {
       {/* 企业设置（仅超级管理员） */}
       {activeTab === 'settings' && (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">基本信息</CardTitle>
-              <CardDescription>修改企业名称、Logo 等信息</CardDescription>
-            </CardHeader>
-             <CardContent className="space-y-4">
-               <div className="space-y-2">
-                 <Label>企业名称</Label>
-                 <Input
-                   value={settingsName}
-                   onChange={(e) => setSettingsName(e.target.value)}
-                 />
-               </div>
-               <div className="space-y-2">
-                 <Label>企业 Logo</Label>
-                 <div className="flex items-center gap-4">
-                   <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-hairline">
-                     {settingsLogo ? (
-                       <img src={settingsLogo} alt="Logo" className="h-full w-full object-cover" />
-                     ) : (
-                       <Building2 className="h-6 w-6 text-muted-foreground" />
-                     )}
-                   </div>
-                   <Button
-                     variant="outline"
-                     size="sm"
-                     onClick={() => {
-                       const url = window.prompt('请输入 Logo 图片 URL');
-                       if (url) setSettingsLogo(url);
-                     }}
-                   >
-                     设置 Logo
-                   </Button>
-                 </div>
-               </div>
-               <Button
-                 disabled={updateEnterprise.isPending}
-                 onClick={() => updateEnterprise.mutate({ name: settingsName, logo: settingsLogo, wecomWebhook: settingsWebhook })}
-               >
-                 {updateEnterprise.isPending ? '保存中...' : '保存修改'}
-               </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">企业微信机器人</CardTitle>
-              <CardDescription>
-                配置群机器人 Webhook 后，新缺陷、用例执行失败等关键事件将自动推送到企业群
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <Label>机器人 Webhook 地址</Label>
-                <Input
-                  value={settingsWebhook}
-                  onChange={(e) => setSettingsWebhook(e.target.value)}
-                  placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
-                  className="font-mono text-xs"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  在企业群 → 群设置 → 群机器人 → 添加机器人 获取；留空表示不推送
-                </p>
-              </div>
-              {wecomTestResult && (
-                <p className={`text-xs ${wecomTestResult.ok ? 'text-success' : 'text-destructive'}`}>
-                  {wecomTestResult.msg}
-                </p>
-              )}
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={updateEnterprise.isPending || !settingsWebhook.trim()}
-                  onClick={async () => {
-                    // 先保存配置再测试
-                    await updateEnterprise.mutateAsync({
-                      name: settingsName,
-                      logo: settingsLogo,
-                      wecomWebhook: settingsWebhook,
-                    });
-                    try {
-                      const r = await request<{ ok: boolean; error?: string }>(
-                        'POST',
-                        `/enterprises/${enterprise.id}/wecom/test`,
-                      );
-                      setWecomTestResult({
-                        ok: !!r.data?.ok,
-                        msg: r.data?.ok ? '测试消息已发送，请到企业群查看' : '发送失败：' + (r.data?.error || '未知原因'),
-                      });
-                    } catch (e) {
-                      setWecomTestResult({ ok: false, msg: '发送失败，请检查 Webhook 地址' });
-                    }
-                  }}
-                >
-                  发送测试消息
-                </Button>
-                <span className="text-[11px] text-muted-foreground">推送事件：新缺陷、用例执行失败、用例转缺陷</span>
-              </div>
-            </CardContent>
-          </Card>
-
+          <EnterpriseSettingsCards
+            // 企业信息变化（保存成功 / 重新拉取）时重挂载，表单自动取最新值，
+            // 因此不需要「effect 里 setSettingsXxx」这种回填
+            key={`${enterprise.id}:${enterprise.name}:${enterprise.logo ?? ''}:${enterprise.wecomWebhook ?? ''}`}
+            enterprise={enterprise}
+            updateEnterprise={updateEnterprise}
+          />
           <Card>
             <CardHeader>
               <CardTitle className="text-base">邀请码</CardTitle>
@@ -1541,5 +1433,140 @@ ${v.message}`
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ============================================
+// 企业设置卡片（基本信息 + 企业微信机器人）
+// ============================================
+// 独立组件的原因：表单初始值直接来自 props，挂载即最新。
+// 原先在主组件里用「effect 监听 enterprise 再 setState 回填」，
+// 既有级联渲染问题，也会在用户编辑时被后台刷新打断。
+function EnterpriseSettingsCards({
+  enterprise,
+  updateEnterprise,
+}: {
+  enterprise: {
+    id: string;
+    name: string;
+    logo?: string | null;
+    wecomWebhook?: string | null;
+  };
+  updateEnterprise: {
+    isPending: boolean;
+    mutate: (v: Record<string, unknown>) => void;
+    mutateAsync: (v: Record<string, unknown>) => Promise<unknown>;
+  };
+}) {
+  const [name, setName] = useState(enterprise.name);
+  const [logo, setLogo] = useState(enterprise.logo || '');
+  const [webhook, setWebhook] = useState(enterprise.wecomWebhook || '');
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  return (
+    <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">基本信息</CardTitle>
+              <CardDescription>修改企业名称、Logo 等信息</CardDescription>
+            </CardHeader>
+             <CardContent className="space-y-4">
+               <div className="space-y-2">
+                 <Label>企业名称</Label>
+                 <Input
+                   value={name}
+                   onChange={(e) => setName(e.target.value)}
+                 />
+               </div>
+               <div className="space-y-2">
+                 <Label>企业 Logo</Label>
+                 <div className="flex items-center gap-4">
+                   <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-hairline">
+                     {logo ? (
+                       <img src={logo} alt="Logo" className="h-full w-full object-cover" />
+                     ) : (
+                       <Building2 className="h-6 w-6 text-muted-foreground" />
+                     )}
+                   </div>
+                   <Button
+                     variant="outline"
+                     size="sm"
+                     onClick={() => {
+                       const url = window.prompt('请输入 Logo 图片 URL');
+                       if (url) setLogo(url);
+                     }}
+                   >
+                     设置 Logo
+                   </Button>
+                 </div>
+               </div>
+               <Button
+                 disabled={updateEnterprise.isPending}
+                 onClick={() => updateEnterprise.mutate({ name: name, logo: logo, wecomWebhook: webhook })}
+               >
+                 {updateEnterprise.isPending ? '保存中...' : '保存修改'}
+               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">企业微信机器人</CardTitle>
+              <CardDescription>
+                配置群机器人 Webhook 后，新缺陷、用例执行失败等关键事件将自动推送到企业群
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <Label>机器人 Webhook 地址</Label>
+                <Input
+                  value={webhook}
+                  onChange={(e) => setWebhook(e.target.value)}
+                  placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+                  className="font-mono text-xs"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  在企业群 → 群设置 → 群机器人 → 添加机器人 获取；留空表示不推送
+                </p>
+              </div>
+              {testResult && (
+                <p className={`text-xs ${testResult.ok ? 'text-success' : 'text-destructive'}`}>
+                  {testResult.msg}
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={updateEnterprise.isPending || !webhook.trim()}
+                  onClick={async () => {
+                    // 先保存配置再测试
+                    await updateEnterprise.mutateAsync({
+                      name: name,
+                      logo: logo,
+                      wecomWebhook: webhook,
+                    });
+                    try {
+                      const r = await request<{ ok: boolean; error?: string }>(
+                        'POST',
+                        `/enterprises/${enterprise.id}/wecom/test`,
+                      );
+                      setTestResult({
+                        ok: !!r.data?.ok,
+                        msg: r.data?.ok ? '测试消息已发送，请到企业群查看' : '发送失败：' + (r.data?.error || '未知原因'),
+                      });
+                    } catch (e) {
+                      setTestResult({ ok: false, msg: '发送失败，请检查 Webhook 地址' });
+                    }
+                  }}
+                >
+                  发送测试消息
+                </Button>
+                <span className="text-[11px] text-muted-foreground">推送事件：新缺陷、用例执行失败、用例转缺陷</span>
+              </div>
+            </CardContent>
+          </Card>
+
+    </>
   );
 }

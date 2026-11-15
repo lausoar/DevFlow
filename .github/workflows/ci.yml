@@ -104,10 +104,11 @@ jobs:
         working-directory: frontend
         run: npx tsc --noEmit
 
-      # Lint 目前仍有存量告警，先不阻断合并（后续批次清干净后改为 --max-warnings=0）
       - name: Lint
         working-directory: frontend
-        run: npm run lint || true
+        # 不再 || true：lint 失败就是真失败。warning 级仍不阻断，
+        # 但 error 级（如 set-state-in-effect）会让 CI 变红。
+        run: npm run lint -- --max-warnings=-1
 
       - name: 构建
         working-directory: frontend
@@ -140,6 +141,16 @@ jobs:
         run: |
           pip install fastapi pydantic pydantic-settings httpx python-jose[cryptography] openai
           python -c "import sys; sys.path.insert(0,'.'); import app.main"
+
+      # 这些用例只覆盖纯逻辑（JWT 验签算法族、离线降级、占位 Key 判定），
+      # 不依赖真实 LLM / 数据库 / 网络，因此可以放在 CI 里跑。
+      - name: 单元测试
+        working-directory: ai-service
+        env:
+          JWT_SECRET: dGVzdC1qd3Qtc2VjcmV0LWtleS0zMi1ieXRlcy1sb25nLXJhbmRvbQ==
+        run: |
+          pip install pytest pytest-asyncio
+          python -m pytest -q
 
   docker:
     name: 镜像构建（不推送）

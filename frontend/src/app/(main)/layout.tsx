@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useAuthStore } from '@/stores';
 import { NotificationSocket } from '@/lib/ws/notification-socket';
 import { useRouter } from 'next/navigation';
@@ -12,62 +12,46 @@ import { Loader2 } from 'lucide-react';
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { accessToken } = useAuthStore();
   const router = useRouter();
-  const [authChecked, setAuthChecked] = useState(false);
-  const [userLoggedOut, setUserLoggedOut] = useState(false);
-  // zustand persist 从 localStorage 恢复 token 是异步的，
-  // 恢复完成前 accessToken 为 null，此时不能判定"未登录"。
-  // 注意：persist API 仅客户端存在，初始值必须为 false 以保证 SSR 一致
-  const [hydrated, setHydrated] = useState(false);
+  // zustand persist 从 localStorage 恢复 token 是异步的，恢复完成前
+  // accessToken 为 null，此时不能判定"未登录"。hasHydrated() 在服务端为
+  // false、客户端为 true，正好是 useSyncExternalStore 的两份快照，
+  // 比「effect 里 setState(true)」少一次级联渲染，也不会 hydration mismatch。
+  const hydrated = useSyncExternalStore(
+    (onChange) => useAuthStore.persist.onFinishHydration(onChange),
+    () => useAuthStore.persist.hasHydrated(),
+    () => false,
+  );
+
+  // 鉴权状态全部在渲染期派生，副作用（清 mock token、跳转）只留在 effect 里。
+  // 原先需要两个 state + 一个 effect 来"算"这两个布尔值，现在直接算出来。
+  const isMockToken = accessToken === 'mock-jwt-token';
+  const loggedOutFlag = hydrated && typeof window !== 'undefined'
+    && localStorage.getItem('devflow-logged-out') === '1';
+  const authChecked = hydrated;
+  const userLoggedOut = loggedOutFlag || !accessToken || isMockToken;
 
   useEffect(() => {
-    if (useAuthStore.persist.hasHydrated()) {
-      setHydrated(true);
-      return;
-    }
-    const unsub = useAuthStore.persist.onFinishHydration(() => setHydrated(true));
-    return unsub;
-  }, []);
+    if (!hydrated) return;
 
-  useEffect(() => {
-    if (!hydrated) return; // 等待 token 恢复完成
-
-    // 检测遗留的 mock token，清除后要求重新登录
-    const isMockToken = accessToken === 'mock-jwt-token';
     if (isMockToken && typeof window !== 'undefined') {
       localStorage.removeItem('access_token');
       localStorage.removeItem('devflow-auth');
     }
 
-    const hasToken = accessToken && !isMockToken;
-
-    // 用户主动退出后，直接跳转登录页
-    const loggedOut = typeof window !== 'undefined'
-      && localStorage.getItem('devflow-logged-out') === '1';
-    if (loggedOut) {
-      setUserLoggedOut(true);
-      setAuthChecked(true);
+    if (loggedOutFlag) {
+      router.replace('/login');
       return;
     }
 
-    // 未登录：跳转登录页（带上当前地址，登录后回跳，如分享链接落地页）
-    if (!hasToken) {
+    if (!accessToken || isMockToken) {
+      // 未登录：跳登录页（带上当前地址，登录后回跳，如分享链接落地页）
       const current = typeof window !== 'undefined'
         ? window.location.pathname + window.location.search
         : '';
       const suffix = current && current !== '/' ? `?redirect=${encodeURIComponent(current)}` : '';
       router.replace(`/login${suffix}`);
-      return;
     }
-
-    setAuthChecked(true);
-  }, [accessToken, router, hydrated]);
-
-  useEffect(() => {
-    // 用户主动退出后，跳转登录页
-    if (userLoggedOut) {
-      router.replace('/login');
-    }
-  }, [userLoggedOut, router]);
+  }, [hydrated, isMockToken, loggedOutFlag, accessToken, router]);
 
   // 等待登录态检查完成
   if (!authChecked) {

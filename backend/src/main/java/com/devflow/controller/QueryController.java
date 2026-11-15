@@ -81,7 +81,7 @@ public class QueryController {
 
         int page = request.getPage() == null || request.getPage() < 1 ? 1 : request.getPage();
         int pageSize = request.getPageSize() == null || request.getPageSize() < 1 ? 50
-                : Math.min(request.getPageSize(), 200);
+                : Math.min(request.getPageSize(), (int) com.devflow.config.MyBatisPlusConfig.MAX_PAGE_SIZE);
 
         Page<?> result = switch (entity) {
             case "BUG" -> bugMapper.selectPage(new Page<Bug>(page, pageSize),

@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { useJoinProjectByCode } from '@/lib/hooks/use-projects';
+import { useQueryClient } from '@tanstack/react-query';
+import { projectApi } from '@/lib/api/project';
+import { useSearchParam } from '@/lib/hooks/use-client-only';
 import type { Project } from '@/types';
 import { CheckCircle2, XCircle, Loader2, FolderKanban } from 'lucide-react';
 
@@ -21,36 +23,53 @@ function extractErrorMessage(err: unknown, fallback: string): string {
 // ============================================
 export default function ProjectJoinPage() {
   const router = useRouter();
-  const { mutateAsync: joinByCode } = useJoinProjectByCode();
 
-  const [status, setStatus] = useState<'joining' | 'success' | 'error'>('joining');
-  const [project, setProject] = useState<Project | null>(null);
-  const [errorMessage, setErrorMessage] = useState('');
+  const inviteCode = useSearchParam('code');
+  const queryClient = useQueryClient();
 
-  // 防止 React 18 StrictMode 双执行导致重复请求
+  // 结果直接放本地状态，由接口的 then/catch 落定。
+  // 不用 useMutation 的 isPending/isError：在这条「页面一进来就发一次、
+  // 发完就跳走」的路径上，mutation 状态出现过 404 后仍停在 pending 的情况，
+  // 用户会永远卡在"正在校验邀请链接"。
+  const [result, setResult] = useState<
+    { ok: true; project: Project } | { ok: false; message: string } | null
+  >(null);
+
   const startedRef = useRef(false);
-
   useEffect(() => {
-    if (startedRef.current) return;
+    if (startedRef.current || !inviteCode) return;
     startedRef.current = true;
-
-    const code = new URLSearchParams(window.location.search).get('code');
-    if (!code) {
-      setStatus('error');
-      setErrorMessage('邀请链接无效：缺少邀请码');
-      return;
-    }
-
-    joinByCode(code)
+    // 注意不要用「cleanup 里把 alive 置 false」来防重复：
+    // StrictMode 会 mount→unmount→mount，第二次因 startedRef 直接返回，
+    // 若第一次的请求被 alive 门挡住，结果就永远落不下来，页面卡在"正在校验"。
+    projectApi
+      .joinByInviteCode(inviteCode)
       .then((res) => {
-        setProject(res.data || null);
-        setStatus('success');
+        // 加入成功后让项目列表失效，回到项目页即可看到新项目
+        queryClient.invalidateQueries({ queryKey: ['projects'] });
+        setResult({ ok: true, project: res.data });
       })
       .catch((err) => {
-        setErrorMessage(extractErrorMessage(err, '加入失败，请联系项目成员重新分享'));
-        setStatus('error');
+        setResult({
+          ok: false,
+          message: extractErrorMessage(err, '加入失败，请联系项目成员重新分享'),
+        });
       });
-  }, [joinByCode]);
+  }, [inviteCode, queryClient]);
+
+  const status: 'joining' | 'success' | 'error' | 'invalid' = !inviteCode
+    ? 'invalid'
+    : result === null
+      ? 'joining'
+      : result.ok
+        ? 'success'
+        : 'error';
+  const project = result && result.ok ? result.project : null;
+  const errorMessage = !inviteCode
+    ? '邀请链接无效：缺少邀请码'
+    : result && !result.ok
+      ? result.message
+      : '';
 
   return (
     <div className="flex h-full items-center justify-center p-6">
@@ -69,13 +88,16 @@ export default function ProjectJoinPage() {
             {status === 'joining' && '正在加入项目...'}
             {status === 'success' && '加入成功'}
             {status === 'error' && '无法加入项目'}
+            {status === 'invalid' && '邀请链接无效'}
           </CardTitle>
           <CardDescription>
             {status === 'success' && project
               ? `你已加入项目「${project.name}」`
               : status === 'joining'
                 ? '正在校验邀请链接...'
-                : errorMessage}
+                : status === 'invalid'
+                  ? '这个链接缺少邀请码，请向项目成员索取完整的邀请链接。'
+                  : errorMessage}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center gap-2">

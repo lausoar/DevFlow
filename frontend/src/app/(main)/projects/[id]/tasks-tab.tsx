@@ -611,44 +611,40 @@ function TaskEditDialog({
   const checklistQuery = useTaskChecklist(open && task ? task.id : null);
   const depsQuery = useTaskDependencies(open && task ? task.id : null);
   const worklogsQuery = useWorklogs(open && task ? task.id : null);
-  const [showComments, setShowComments] = useState(false);
-  const [form, setForm] = useState<{
+  // 表单与评论面板的初值以「哪个任务 + 是否打开」为 key：
+  // 换任务或重新打开时在渲染期重置（React 官方推荐的 adjust-state-during-render），
+  // 列表后台刷新不会覆盖正在输入的内容，也不需要 effect 回填。
+  type TaskForm = {
     title: string;
     description: string;
     priority: Priority;
     dueDate: string;
     assigneeId: string;
     sprintId: string;
-  }>({
-    title: '',
-    description: '',
-    priority: 'MEDIUM',
-    dueDate: '',
-    assigneeId: '',
-    sprintId: '',
+  };
+  const toForm = (t: Task | null): TaskForm => ({
+    title: t?.title || '',
+    description: t?.description || '',
+    priority: (t?.priority || 'MEDIUM') as Priority,
+    dueDate: t?.dueDate ? t.dueDate.slice(0, 10) : '',
+    assigneeId: t?.assigneeId || '',
+    sprintId: t?.sprintId || '',
   });
+  const dialogKey = `${task?.id ?? ''}|${open}`;
+  const [draft, setDraft] = useState<{ key: string; form: TaskForm; showComments: boolean }>(
+    () => ({ key: dialogKey, form: toForm(task), showComments: false }),
+  );
+  const current = draft.key === dialogKey ? draft : { key: dialogKey, form: toForm(task), showComments: false };
+  const form = current.form;
+  const showComments = current.showComments;
+  const setForm = (next: TaskForm) => setDraft({ ...current, form: next });
+  const setShowComments = (next: boolean) => setDraft({ ...current, showComments: next });
 
   // 迭代与项目成员（用于负责人/迭代选择）
   const { data: dialogSprintsRes } = useSprints(projectId);
   const dialogSprints = dialogSprintsRes?.data || [];
   const { data: dialogMembersRes } = useProjectMembers(projectId);
   const dialogMembers = dialogMembersRes?.data || [];
-
-  // 当 task 变化时同步表单数据，并重置评论面板
-  useEffect(() => {
-    if (task) {
-      setForm({
-        title: task.title || '',
-        description: task.description || '',
-        priority: task.priority || 'MEDIUM',
-        dueDate: task.dueDate ? task.dueDate.slice(0, 10) : '',
-        assigneeId: task.assigneeId || '',
-        sprintId: task.sprintId || '',
-      });
-      // 每次打开新任务时重置评论面板
-      setShowComments(false);
-    }
-  }, [task]);
 
   if (!task) return null;
 
