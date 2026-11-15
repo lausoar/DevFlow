@@ -3,8 +3,11 @@
 -- MySQL 8.0+
 -- ============================================
 
-CREATE DATABASE IF NOT EXISTS devflow DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE devflow;
+-- 注意：这里不再写 CREATE DATABASE / USE。
+-- 原因（2026-11-15 集成验证发现）：Spring 在启动时通过 spring.sql.init 执行本脚本，
+-- 其中的 USE devflow 会把**那条池化连接**的默认库切到 devflow；连接归还连接池后
+-- 被后续业务查询复用，导致 DB_URL 指向别的库（如测试库）时数据仍写进 devflow。
+-- 现在一律使用连接自身的当前库：JDBC URL 的 db 或 docker 初始化时的 MYSQL_DATABASE。
 
 -- ============================================
 -- 企业表

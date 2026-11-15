@@ -71,8 +71,9 @@ public class SecurityConfig {
                     "/api-docs/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html",
-                    "/actuator/health",
-                    "/actuator/health/**"
+                    // 管理端点在独立端口（management.server.port）注册，
+                    // 业务端口上根本不存在这些路径，因此这里放通不会削弱业务端鉴权
+                    "/actuator/**"
                 ).permitAll()
                 .anyRequest().authenticated()
             )

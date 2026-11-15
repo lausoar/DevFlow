@@ -33,7 +33,7 @@ jobs:
         working-directory: backend
         run: >
           mvn -B test
-          -Dtest='EnterpriseRolesTest,PermissionServiceImplTest,GuestServiceImplTest,ProjectAccessServiceImplTest,SearchServiceImplTest,AutomationRuleServiceImplTest,QueryExpressionParserTest'
+          -Dtest='EnterpriseRolesTest,PermissionServiceImplTest,GuestServiceImplTest,ProjectAccessServiceImplTest,SearchServiceImplTest,AutomationRuleServiceImplTest,QueryExpressionParserTest,WorkflowDefaultsTest,DeploymentServiceImplDoraTest,TotpUtilTest,PasswordPolicyTest'
           -DfailIfNoSpecifiedTests=false
 
       - name: 上传测试报告
@@ -43,6 +43,46 @@ jobs:
           name: backend-surefire
           path: backend/target/surefire-reports/
           retention-days: 7
+
+  # 集成验证：起一个真实 MySQL，跑 schema.sql，再打一遍关键接口。
+  # 覆盖单测覆盖不到的一类缺陷（2026-11-15 验证中发现的 5 个缺陷全在此列）：
+  # 表未创建、schema 非幂等、审计链精度/排序/分叉、Servlet 流冲突、库串用。
+  integration:
+    name: 集成验证（真实 MySQL）
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: devflow123
+          MYSQL_DATABASE: devflow_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: 安装 mysql 客户端
+        run: sudo apt-get update && sudo apt-get install -y default-mysql-client python3
+
+      - name: 集成验证
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_USERNAME: root
+          DB_PASSWORD: devflow123
+          DB_NAME: devflow_ci
+        run: bash scripts/verify-integration.sh
 
   frontend:
     name: 前端（类型检查 + Lint + 构建）
@@ -104,7 +144,7 @@ jobs:
   docker:
     name: 镜像构建（不推送）
     runs-on: ubuntu-latest
-    needs: [backend]
+    needs: [backend, integration]
     strategy:
       matrix:
         include:
