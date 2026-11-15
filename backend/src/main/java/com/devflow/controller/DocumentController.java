@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -32,6 +33,7 @@ import java.util.stream.Collectors;
  * - 写：项目文档需 document:manage，删除需 document:delete；
  * - 请求体为白名单 DTO，归属字段（projectId/authorId/enterpriseId/version）不可由客户端改写。
  */
+@Slf4j
 @Tag(name = "文档管理", description = "文档 CRUD、Wiki 树形结构")
 @RestController
 @RequestMapping("/documents")
@@ -45,6 +47,8 @@ public class DocumentController {
     private final com.devflow.mapper.DocumentCommentMapper documentCommentMapper;
     private final com.devflow.mapper.UserMapper userMapper;
     private final com.devflow.service.PermissionService permissionService;
+    private final com.devflow.service.NotificationService notificationService;
+    private final com.devflow.service.NotificationRecipients notificationRecipients;
     private final AccessGuard guard;
 
     @Operation(summary = "获取文档列表")
@@ -248,6 +252,20 @@ public class DocumentController {
         comment.setUserId(userId);
         comment.setContent(content);
         documentCommentMapper.insert(comment);
+
+        // 通知文档作者 + 关注者（评论是文档最需要被知道的变更）
+        try {
+            var recipients = notificationRecipients.resolveOne(
+                    "DOCUMENT", id, userId, doc.getAuthorId());
+            for (String uid : recipients) {
+                notificationService.createNotification(
+                        uid, "COMMENT", "文档有新评论",
+                        "「" + doc.getTitle() + "」收到新评论：" + (content.length() > 60 ? content.substring(0, 60) + "…" : content),
+                        "/docs");
+            }
+        } catch (Exception e) {
+            log.debug("文档评论通知失败（不影响评论）: {}", e.getMessage());
+        }
 
         com.devflow.entity.User user = userMapper.selectById(comment.getUserId());
         Map<String, Object> result = new java.util.HashMap<>();

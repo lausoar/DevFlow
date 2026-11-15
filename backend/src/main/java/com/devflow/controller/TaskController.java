@@ -164,7 +164,7 @@ public class TaskController {
         boolean becomingDone = WorkflowStatus.CATEGORY_DONE.equals(
                 workflowService.categoryOf(projectId, doneCategory, status))
                 && !WorkflowStatus.CATEGORY_DONE.equals(workflowService.categoryOf(projectId, doneCategory, from));
-        taskService.updateStatus(id, status);
+        taskService.updateStatus(id, status, ref.userId());
 
         if (becomingDone) {
             // 自动化规则：任务完成（仅在状态真正变为 DONE 时触发）

@@ -28,6 +28,7 @@ public class TaskServiceImpl implements TaskService {
     private final NotificationService notificationService;
     private final com.devflow.service.WorkflowService workflowService;
     private final com.devflow.service.SubscriptionService subscriptionService;
+    private final com.devflow.service.NotificationRecipients notificationRecipients;
 
     @Override
     public Page<Task> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
@@ -156,17 +157,19 @@ public class TaskServiceImpl implements TaskService {
     }
 
     @Override
-    public void updateStatus(String id, String status) {
+    public void updateStatus(String id, String status, String operatorId) {
         Task task = taskMapper.selectById(id);
         if (task == null) return;
 
         task.setStatus(status);
         taskMapper.updateById(task);
 
-        // 通知任务相关人员（报告人和被指派人）
-        List<String> notifyUsers = new ArrayList<>();
-        if (StringUtils.hasText(task.getReporterId())) notifyUsers.add(task.getReporterId());
-        if (StringUtils.hasText(task.getAssigneeId())) notifyUsers.add(task.getAssigneeId());
+        // 通知任务相关人员（报告人和被指派人）∪ 关注该任务的人
+        List<String> explicit = new ArrayList<>();
+        if (StringUtils.hasText(task.getReporterId())) explicit.add(task.getReporterId());
+        if (StringUtils.hasText(task.getAssigneeId())) explicit.add(task.getAssigneeId());
+        List<String> notifyUsers = notificationRecipients.resolve(
+                "TASK", task.getId(), operatorId, explicit);
 
         // 状态展示名由工作流配置决定（支持自定义状态）
         String statusLabel = workflowService != null

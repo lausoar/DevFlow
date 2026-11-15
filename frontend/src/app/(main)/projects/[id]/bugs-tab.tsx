@@ -47,6 +47,7 @@ import {
   X,
 } from 'lucide-react';
 import { BugDescriptionField } from './bug-description-field';
+import { SubscribeButton } from '@/components/common/subscribe-button';
 import { BugCommentsPanel } from './bug-comments-panel';
 import type { Bug, BugStatus, BugSeverity, Priority, ProjectMember } from '@/types';
 
@@ -697,6 +698,9 @@ function BugDetailDialog({
                 （负责人/创建人可变更状态）
               </span>
             )}
+            <span className="ml-auto">
+              <SubscribeButton targetType="BUG" targetId={bug.id} />
+            </span>
           </div>
         </DialogHeader>
 

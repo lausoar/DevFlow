@@ -30,7 +30,7 @@ public class SubscriptionController {
     private final AccessGuard guard;
 
     /** 支持关注的对象类型（白名单，避免任意字符串进库） */
-    private static final Set<String> TYPES = Set.of("TASK", "BUG", "REQUIREMENT");
+    private static final Set<String> TYPES = Set.of("TASK", "BUG", "REQUIREMENT", "DOCUMENT");
 
     @Operation(summary = "我的关注列表")
     @GetMapping("/subscriptions")
@@ -54,10 +54,19 @@ public class SubscriptionController {
         }
         // 必须能看到该对象的项目才能关注
         String projectId = projectOf(type, targetId);
-        if (projectId == null || !projectAccessService.canView(userId, projectId)) {
+        boolean visible;
+        if ("GLOBAL".equals(projectId)) {
+            // 全局文档：同企业即可关注（与文档可见性口径一致）
+            var doc = documentMapper.selectById(targetId);
+            visible = doc != null && guard.enterpriseIdOf(userId) != null
+                    && guard.enterpriseIdOf(userId).equals(doc.getEnterpriseId());
+        } else {
+            visible = projectId != null && projectAccessService.canView(userId, projectId);
+        }
+        if (!visible) {
             throw new BusinessException(404, "对象不存在或不可见");
         }
-        subscriptionService.subscribe(userId, type, targetId, projectId);
+        subscriptionService.subscribe(userId, type, targetId, "GLOBAL".equals(projectId) ? null : projectId);
         return R.ok();
     }
 
@@ -96,6 +105,9 @@ public class SubscriptionController {
             case "TASK" -> taskProject(targetId);
             case "BUG" -> bugProject(targetId);
             case "REQUIREMENT" -> requirementProject(targetId);
+            // 文档可能是全局文档（无项目），此时返回 null → 上层按"不可见"处理；
+            // 项目文档则按其项目做可见性校验
+            case "DOCUMENT" -> documentProject(targetId);
             default -> null;
         };
     }
@@ -115,7 +127,20 @@ public class SubscriptionController {
         return r == null ? null : r.getProjectId();
     }
 
+    /**
+     * 文档所属项目。全局文档（projectId 为空）返回 "GLOBAL"：
+     * 关注全局文档不需要项目可见性，但需要调用方另行判断企业归属。
+     */
+    private String documentProject(String id) {
+        var d = documentMapper.selectById(id);
+        if (d == null) {
+            return null;
+        }
+        return d.getProjectId() != null && !d.getProjectId().isBlank() ? d.getProjectId() : "GLOBAL";
+    }
+
     private final com.devflow.mapper.TaskMapper taskMapper;
     private final com.devflow.mapper.BugMapper bugMapper;
     private final com.devflow.mapper.RequirementMapper requirementMapper;
+    private final com.devflow.mapper.DocumentMapper documentMapper;
 }

@@ -31,6 +31,8 @@ public class BugServiceImpl implements BugService {
     private final com.devflow.service.ImPushService imPushService;
     private final com.devflow.service.AutomationRuleService automationRuleService;
     private final com.devflow.mapper.UserMapper userMapper;
+    private final com.devflow.service.NotificationRecipients notificationRecipients;
+    private final com.devflow.service.SubscriptionService subscriptionService;
 
     @Override
     public Page<Bug> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
@@ -70,6 +72,16 @@ public class BugServiceImpl implements BugService {
         // 创建时已指派直接进入"已分配"
         bug.setStatus(StringUtils.hasText(bug.getAssigneeId()) ? "ASSIGNED" : "NEW");
         bugMapper.insert(bug);
+
+        // 自动关注：报告人与被指派人
+        try {
+            subscriptionService.autoSubscribe(reporterId, "BUG", bug.getId(), projectId);
+            if (StringUtils.hasText(bug.getAssigneeId())) {
+                subscriptionService.autoSubscribe(bug.getAssigneeId(), "BUG", bug.getId(), projectId);
+            }
+        } catch (Exception e) {
+            log.debug("Bug 自动关注失败（不影响创建）: {}", e.getMessage());
+        }
 
         // 通知被指派的人
         if (StringUtils.hasText(bug.getAssigneeId()) && !bug.getAssigneeId().equals(reporterId)) {
@@ -174,9 +186,12 @@ public class BugServiceImpl implements BugService {
         } else if (operatorId != null && operatorId.equals(bug.getReporterId())) {
             notifyUserId = bug.getAssigneeId();
         }
-        if (StringUtils.hasText(notifyUserId) && !notifyUserId.equals(operatorId)) {
+        // 收件人 = 直接关系人（负责人/报告人之一）∪ 关注该 Bug 的人，排除操作者
+        List<String> recipients = notificationRecipients.resolveOne(
+                "BUG", bug.getId(), operatorId, notifyUserId);
+        for (String uid : recipients) {
             notificationService.createNotification(
-                notifyUserId,
+                uid,
                 "BUG_UPDATE",
                 "Bug 状态变更",
                 "Bug「" + bug.getTitle() + "」状态由 " + oldStatus + " 变更为 " + status,

@@ -22,7 +22,7 @@ public interface TaskService {
 
     Task update(String id, Task task);
 
-    void updateStatus(String id, String status);
+    void updateStatus(String id, String status, String operatorId);
 
     void delete(String id);
 }

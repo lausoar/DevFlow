@@ -53,6 +53,7 @@ import type { TaskChecklistItem } from '@/lib/api/task';
 import { TaskCommentsPanel } from './task-comments-panel';
 import { CustomFieldsSection } from './custom-fields-section';
 import { SavedFiltersPanel } from './saved-filters-panel';
+import { SubscribeButton } from '@/components/common/subscribe-button';
 import { queryApi } from '@/lib/api/query';
 
 // ============================================
@@ -662,15 +663,18 @@ function TaskEditDialog({
         <DialogHeader>
           <div className="flex items-center justify-between">
             <DialogTitle>{form.title || '编辑任务'}</DialogTitle>
-            <Button
-              variant={showComments ? 'default' : 'outline'}
-              size="sm"
-              className="gap-1 h-7 text-xs"
-              onClick={() => setShowComments(!showComments)}
-            >
-              <MessageSquare className="h-3 w-3" />
-              评论
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <SubscribeButton targetType="TASK" targetId={task.id} />
+              <Button
+                variant={showComments ? 'default' : 'outline'}
+                size="sm"
+                className="gap-1 h-7 text-xs"
+                onClick={() => setShowComments(!showComments)}
+              >
+                <MessageSquare className="h-3 w-3" />
+                评论
+              </Button>
+            </div>
           </div>
         </DialogHeader>
 

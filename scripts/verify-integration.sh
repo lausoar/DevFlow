@@ -470,6 +470,46 @@ if [ -n "$TASK_ID" ]; then
 fi
 
 # ============================================
+# 第 8 批：订阅接入通知分发
+# ============================================
+SUB_TASK=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/tasks" -H "$AUTH" \
+           -H "Content-Type: application/json" -d '{"title":"ci-sub-task","priority":"LOW"}' \
+           | json_field "['data']['id']")
+if [ -n "$SUB_TASK" ]; then
+    # 另一个人关注该任务：直接把关注行写库（关注接口本身上面已覆盖），
+    # 这里验证的是"状态变更时是否按关注关系分发通知"
+    OTHER_ID=$(mysql_exec -N -e "SELECT id FROM $DB_NAME.sys_user WHERE username='zhangsan' LIMIT 1;")
+    if [ -n "$OTHER_ID" ]; then
+        mysql_exec -e "INSERT IGNORE INTO $DB_NAME.subscription (id, user_id, target_type, target_id, project_id, auto, created_at) \
+            VALUES (REPLACE(UUID(),'-',''), '$OTHER_ID', 'TASK', '$SUB_TASK', '$PROJ_ID', 0, NOW());" >/dev/null 2>&1
+
+        BEFORE=$(mysql_exec -N -e "SELECT COUNT(*) FROM $DB_NAME.notification WHERE user_id='$OTHER_ID' AND type='TASK_UPDATE';")
+        CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/tasks/$SUB_TASK/status" -H "$AUTH" \
+               -H "Content-Type: application/json" -d '{"status":"DOING"}')
+        AFTER=$(mysql_exec -N -e "SELECT COUNT(*) FROM $DB_NAME.notification WHERE user_id='$OTHER_ID' AND type='TASK_UPDATE';")
+        [ "$CODE" = "200" ] && [ "${AFTER:-0}" -gt "${BEFORE:-0}" ] \
+            && ok "关注者收到任务状态变更通知（$BEFORE → $AFTER）" \
+            || bad "关注者未收到通知（code=$CODE before=$BEFORE after=$AFTER）"
+
+        # 操作者本人不该收到自己触发的通知
+        ME_ID=$(mysql_exec -N -e "SELECT id FROM $DB_NAME.sys_user WHERE username='admin' LIMIT 1;")
+        MY_N=$(mysql_exec -N -e "SELECT COUNT(*) FROM $DB_NAME.notification WHERE user_id='$ME_ID' AND type='TASK_UPDATE' AND content LIKE '%ci-sub-task%';")
+        [ "${MY_N:-0}" = "0" ] && ok "操作者不会收到自己触发的通知" \
+            || bad "操作者收到了自己的通知（$MY_N 条）"
+    fi
+fi
+
+# 文档关注（全局文档需同企业）
+DOC_ID=$(curl -s -m 10 -X POST "$BASE/documents" -H "$AUTH" \
+         -H "Content-Type: application/json" -d '{"title":"ci doc","content":"hello","type":"DOC"}' \
+         | json_field "['data']['id']")
+if [ -n "$DOC_ID" ]; then
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X POST "$BASE/subscriptions" -H "$AUTH" \
+           -H "Content-Type: application/json" -d "{\"targetType\":\"DOCUMENT\",\"targetId\":\"$DOC_ID\"}")
+    [ "$CODE" = "200" ] && ok "关注全局文档（同企业）" || bad "关注文档返回 $CODE"
+fi
+
+# ============================================
 # 汇总
 # ============================================
 echo ""
