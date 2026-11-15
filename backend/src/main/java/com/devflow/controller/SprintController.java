@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -104,11 +105,33 @@ public class SprintController {
         return R.ok(sprintMapper.selectById(id));
     }
 
-    /** 激活 Sprint */
-    @Operation(summary = "激活 Sprint")
+    /**
+     * 激活 Sprint。
+     *
+     * 一个项目同时只能有一个 ACTIVE 迭代 —— 原实现不检查，多次点击或多个人操作后
+     * 项目内会并存多个 ACTIVE，而看板进度与燃尽图都只取第一个，于是两个迭代
+     * 显示同一份数据。激活新的自动把旧的置为 COMPLETED（与 Jira 一致：
+     * 不丢历史，只是结束）。
+     */
+    @Operation(summary = "激活 Sprint（同项目内互斥）")
     @PostMapping("/sprints/{id}/activate")
+    @Transactional
     public R<Sprint> activate(@PathVariable String id, Authentication authentication) {
         Sprint sprint = requireManageable(id, authentication);
+        if ("ACTIVE".equals(sprint.getStatus())) {
+            return R.ok(sprint);
+        }
+
+        List<Sprint> otherActive = sprintMapper.selectList(new LambdaQueryWrapper<Sprint>()
+                .eq(Sprint::getProjectId, sprint.getProjectId())
+                .eq(Sprint::getStatus, "ACTIVE"));
+        for (Sprint running : otherActive) {
+            Sprint patch = new Sprint();
+            patch.setId(running.getId());
+            patch.setStatus("COMPLETED");
+            sprintMapper.updateById(patch);
+        }
+
         sprint.setStatus("ACTIVE");
         sprintMapper.updateById(sprint);
         return R.ok(sprint);
@@ -117,6 +140,7 @@ public class SprintController {
     /** 完成 Sprint：未完成任务自动移出迭代（sprintId 置空），返回移动数量供前端提示 */
     @Operation(summary = "完成 Sprint")
     @PostMapping("/sprints/{id}/complete")
+    @Transactional
     public R<Map<String, Object>> complete(@PathVariable String id, Authentication authentication) {
         Sprint sprint = requireManageable(id, authentication);
         sprint.setStatus("COMPLETED");
@@ -146,6 +170,7 @@ public class SprintController {
     /** 删除 Sprint：未完成任务移出迭代后逻辑删除迭代 */
     @Operation(summary = "删除 Sprint（逻辑删除）")
     @DeleteMapping("/sprints/{id}")
+    @Transactional
     public R<Void> delete(@PathVariable String id, Authentication authentication) {
         requireManageable(id, authentication);
         taskMapper.update(null, new LambdaUpdateWrapper<Task>()

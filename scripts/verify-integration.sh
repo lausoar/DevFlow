@@ -111,19 +111,104 @@ else
     bad "重复执行产生新错误（索引/迁移不幂等）："
     grep "ERROR" "$WORK_DIR/schema2.err" | grep -vE "Duplicate column|Duplicate key name" | head -5
 fi
-# 索引幂等：单独确认存储过程那批索引都建成了
-IDX_MISSING=$(mysql_exec -N -e "
-SELECT COUNT(*) FROM (
-  SELECT 'idx_task_fix_version' AS i UNION ALL SELECT 'idx_bug_fix_version'
-  UNION ALL SELECT 'idx_requirement_fix_version' UNION ALL SELECT 'idx_execution_cycle'
-  UNION ALL SELECT 'idx_requirement_assignee' UNION ALL SELECT 'idx_status'
-  UNION ALL SELECT 'idx_review_status') want
-WHERE NOT EXISTS (SELECT 1 FROM information_schema.statistics s
-                  WHERE s.table_schema='$DB_NAME' AND s.index_name=want.i);")
-if [ "$IDX_MISSING" = "0" ]; then
-    ok "7 个高频索引全部存在（幂等创建生效）"
+# 索引幂等：确认 schema.sql 里那批"条件建索引"语句真的执行了
+# 按 (表, 索引) 成对计数。
+# 不能只按 index_name 去重：idx_project_id 这种通用名字在 7 张表上都有，
+# 按名字数会在删掉 chat_channel.idx_project_id 之后仍然"看见"它（因为 task/bug 上还有）。
+count_indexes() {
+    mysql_exec -N -e "
+    SELECT COUNT(*) FROM (
+      SELECT 'task' t,'idx_task_fix_version' i UNION ALL SELECT 'bug','idx_bug_fix_version'
+      UNION ALL SELECT 'requirement','idx_requirement_fix_version'
+      UNION ALL SELECT 'test_execution','idx_execution_cycle'
+      UNION ALL SELECT 'requirement','idx_requirement_assignee'
+      UNION ALL SELECT 'design_asset','idx_status'
+      UNION ALL SELECT 'test_case','idx_review_status'
+      UNION ALL SELECT 'chat_channel','idx_project_id'
+      UNION ALL SELECT 'bug','idx_bug_assignee'
+      UNION ALL SELECT 'notification','idx_user_unread'
+      UNION ALL SELECT 'activity_log','idx_activity_ent_created'
+      UNION ALL SELECT 'chat_message','idx_msg_channel_created'
+      UNION ALL SELECT 'document','idx_doc_parent'
+      UNION ALL SELECT 'department_member','idx_dept_member_ent'
+    ) want
+    WHERE EXISTS (SELECT 1 FROM information_schema.statistics s
+                  WHERE s.table_schema='$DB_NAME' AND s.table_name=want.t AND s.index_name=want.i);"
+}
+N_IDX=$(count_indexes)
+if [ "${N_IDX:-0}" = "14" ]; then
+    ok "14 个热点索引全部创建（mysql 客户端路径）"
 else
-    bad "有 $IDX_MISSING 个索引未创建"
+    bad "热点索引只创建了 ${N_IDX:-0}/14 个"
+fi
+
+# schema.sql 不能再用 DELIMITER / CREATE PROCEDURE：
+# Spring 的 spring.sql.init 用 ScriptUtils 执行，只按 ";" 切分，不认识 DELIMITER。
+# 历史上那批"幂等建索引"正是因此从未在应用里生效，而本脚本用 mysql 客户端执行
+# （认识 DELIMITER）所以一直是绿的。这条静态检查把那个盲区钉死。
+if grep -qE "^[[:space:]]*(DELIMITER|CREATE PROCEDURE)" "$SCHEMA_FOR_CI"; then
+    bad "schema.sql 含 DELIMITER/CREATE PROCEDURE（Spring 执行时会静默失败）"
+else
+    ok "schema.sql 不含 DELIMITER/CREATE PROCEDURE"
+fi
+
+# ============================================
+# 4b. 一次性数据迁移：重启不得改写业务数据
+# ============================================
+# 这是本批修复的核心回归项。原来有几条裸 UPDATE 每次启动都执行，例如
+# "把所有非 OPEN/COMPLETED/CLOSED 的需求状态改成 OPEN"，导致用户改的状态
+# 活不过一次重启（已复现：COMPLETED / CLOSED 全部被打回 OPEN）。
+mysql_exec "$DB_NAME" -e "
+INSERT INTO project (id,name,project_key,enterprise_id,owner_id,status,deleted) VALUES
+  ('mig-p','migration-probe','MIGP','mig-e','mig-u','ACTIVE',0);
+INSERT INTO requirement (id,title,project_id,requester_id,status) VALUES
+  ('mig-r1','done-req','mig-p','mig-u','COMPLETED'),
+  ('mig-r2','closed-req','mig-p','mig-u','CLOSED');
+INSERT INTO task (id,title,project_id,reporter_id,status) VALUES
+  ('mig-t1','custom-status','mig-p','mig-u','IN_PROGRESS');
+" 2>&1 | head -3
+
+# 再跑一次 schema.sql（模拟重启）
+mysql_exec --force "$DB_NAME" < "$SCHEMA_FOR_CI" >/dev/null 2>&1
+
+R1=$(mysql_exec -N -e "SELECT status FROM \`$DB_NAME\`.requirement WHERE id='mig-r1';")
+R2=$(mysql_exec -N -e "SELECT status FROM \`$DB_NAME\`.requirement WHERE id='mig-r2';")
+T1=$(mysql_exec -N -e "SELECT status FROM \`$DB_NAME\`.task WHERE id='mig-t1';")
+[ "$R1" = "COMPLETED" ] && [ "$R2" = "CLOSED" ] \
+    && ok "重启不重置需求状态（COMPLETED/CLOSED 保持）" \
+    || bad "重启改写了需求状态：r1=$R1 r2=$R2（应为 COMPLETED/CLOSED）"
+[ "$T1" = "IN_PROGRESS" ] \
+    && ok "重启不重置自定义任务状态" \
+    || bad "重启改写了任务状态：t1=$T1（应为 IN_PROGRESS）"
+
+MIG=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.schema_migration;")
+[ "${MIG:-0}" -ge 5 ] && ok "一次性迁移已登记（$MIG 条）" || bad "schema_migration 只有 ${MIG:-0} 条"
+
+# 工时精度：曾因 task_worklog 被定义两次，先建者 DECIMAL(5,1) 生效，
+# 0.25 小时落库变成 0.3。这条断言类型，不靠"看起来对"。
+HOURS_TYPE=$(mysql_exec -N -e "SELECT column_type FROM information_schema.columns
+    WHERE table_schema='$DB_NAME' AND table_name='task_worklog' AND column_name='hours';")
+[ "$HOURS_TYPE" = "decimal(5,2)" ] \
+    && ok "工时列精度 DECIMAL(5,2)" \
+    || bad "工时列精度是 $HOURS_TYPE（应为 decimal(5,2)）"
+
+# ============================================
+# 4c. 用"应用的方式"重建索引：先删掉，让 Spring 启动时自己建
+# ============================================
+# 上面的索引是 mysql 客户端建的。这里把它们删掉，随后启动后端由
+# spring.sql.init 执行 schema.sql 重建 —— 只有这样才能证明"应用路径"有效，
+# 而这恰恰是历史上从未被验证过的那条路径。
+info "删除热点索引，交由应用启动时重建"
+IDX_PAIRS="task:idx_task_fix_version bug:idx_bug_fix_version requirement:idx_requirement_fix_version test_execution:idx_execution_cycle requirement:idx_requirement_assignee design_asset:idx_status test_case:idx_review_status chat_channel:idx_project_id bug:idx_bug_assignee notification:idx_user_unread activity_log:idx_activity_ent_created chat_message:idx_msg_channel_created document:idx_doc_parent department_member:idx_dept_member_ent"
+for pair in $IDX_PAIRS; do
+    tbl="${pair%%:*}"; idx="${pair##*:}"
+    mysql_exec "$DB_NAME" -e "ALTER TABLE \`$tbl\` DROP INDEX \`$idx\`;" >/dev/null 2>&1
+done
+N_DROPPED=$(count_indexes)
+if [ "${N_DROPPED:-0}" = "0" ]; then
+    ok "索引已清空（准备验证应用重建）"
+else
+    bad "仍有 ${N_DROPPED} 个索引未删除，无法验证应用路径"
 fi
 
 # ============================================
@@ -157,6 +242,28 @@ else
     tail -30 "$APP_LOG"
     echo "---- 校验汇总：通过 $PASS，失败 $FAIL ----"
     exit 1
+fi
+
+# ============================================
+# 5b. 应用路径必须真的把索引建回来（本批核心回归）
+# ============================================
+# 这是历史上从没被验证过的一条路径：schema.sql 由 spring.sql.init 执行，
+# 执行器只按 ";" 切分。之前那批索引用 DELIMITER 存储过程实现，在应用里
+# 从来没有生效过，而 CLI 执行的验证一直是绿的。
+N_AFTER_BOOT=$(count_indexes)
+if [ "${N_AFTER_BOOT:-0}" = "14" ]; then
+    ok "后端启动后 14 个索引全部重建（应用路径生效）"
+else
+    bad "后端启动后只有 ${N_AFTER_BOOT:-0}/14 个索引（schema 在应用里执行失败）"
+    grep -iE "script|schema|ERROR" "$APP_LOG" | tail -5
+fi
+
+# 启动自检日志：有缺失必须在日志里喊出来，而不是静默
+if grep -q "schema 自检失败" "$APP_LOG"; then
+    bad "启动自检报告 schema 不一致"
+    grep -A 12 "schema 自检失败" "$APP_LOG" | head -16
+else
+    ok "启动自检通过（未报告缺失对象）"
 fi
 
 # ============================================
@@ -507,6 +614,88 @@ if [ -n "$DOC_ID" ]; then
     CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X POST "$BASE/subscriptions" -H "$AUTH" \
            -H "Content-Type: application/json" -d "{\"targetType\":\"DOCUMENT\",\"targetId\":\"$DOC_ID\"}")
     [ "$CODE" = "200" ] && ok "关注全局文档（同企业）" || bad "关注文档返回 $CODE"
+fi
+
+# ============================================
+# 第 9 批：数据一致性（乐观锁 / 崩溃修复 / 级联清理）
+# ============================================
+
+# 1) 文档并发保存必须返回 409，而不是 500 或静默覆盖
+DOC_ID2=$(curl -s -m 10 -X POST "$BASE/documents" -H "$AUTH"           -H "Content-Type: application/json" -d '{"title":"ci-doc-lock","content":"v1","type":"DOC"}'           | json_field "['data']['id']")
+if [ -n "$DOC_ID2" ]; then
+    V=$(curl -s -m 10 "$BASE/documents/$DOC_ID2" -H "$AUTH" | json_field "['data']['version']")
+    # 用正确的版本号保存一次：应当成功
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/documents/$DOC_ID2" -H "$AUTH"            -H "Content-Type: application/json" -d "{\"title\":\"ci-doc-lock\",\"content\":\"v2\",\"expectedVersion\":${V:-1}}")
+    [ "$CODE" = "200" ] && ok "文档按正确版本保存成功" || bad "文档保存返回 $CODE（期望 200）"
+
+    # 再用已过期的版本号保存：必须 409
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/documents/$DOC_ID2" -H "$AUTH"            -H "Content-Type: application/json" -d "{\"title\":\"ci-doc-lock\",\"content\":\"v3\",\"expectedVersion\":${V:-1}}")
+    [ "$CODE" = "409" ] && ok "并发保存被拒绝（409，不覆盖他人修改）"         || bad "并发保存返回 $CODE（期望 409）"
+fi
+
+# 2) 任务并发编辑必须返回 409
+TASK_V=$(curl -s -m 10 "$BASE/tasks/$TASK_ID" -H "$AUTH" | json_field "['data']['version']")
+if [ -n "$TASK_V" ]; then
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/tasks/$TASK_ID" -H "$AUTH"            -H "Content-Type: application/json"            -d "{\"title\":\"ci-task-locked\",\"expectedVersion\":$TASK_V}")
+    [ "$CODE" = "200" ] && ok "任务按正确版本保存成功" || bad "任务保存返回 $CODE（期望 200）"
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/tasks/$TASK_ID" -H "$AUTH"            -H "Content-Type: application/json"            -d "{\"title\":\"ci-task-stale\",\"expectedVersion\":$TASK_V}")
+    [ "$CODE" = "409" ] && ok "任务并发编辑被拒绝（409）" || bad "任务并发编辑返回 $CODE（期望 409）"
+fi
+
+# 3) 未来开始的迭代：燃尽图不能 500（原来 dataPoints 为空直接 get(-1) 抛异常）
+SPRINT_FUTURE=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/sprints" -H "$AUTH"     -H "Content-Type: application/json"     -d '{"name":"future-sprint","startDate":"2099-01-01","endDate":"2099-01-15"}'     | json_field "['data']['id']")
+if [ -n "$SPRINT_FUTURE" ]; then
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10            "$BASE/statistics/projects/$PROJ_ID/burndown?sprintId=$SPRINT_FUTURE" -H "$AUTH")
+    [ "$CODE" = "200" ] && ok "未来迭代的燃尽图返回 200（空数据不崩）"         || bad "未来迭代燃尽图返回 $CODE（期望 200）"
+fi
+
+# 4) 同一项目内只能有一个 ACTIVE 迭代
+S1=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/sprints" -H "$AUTH"      -H "Content-Type: application/json" -d '{"name":"s-alpha"}' | json_field "['data']['id']")
+S2=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/sprints" -H "$AUTH"      -H "Content-Type: application/json" -d '{"name":"s-beta"}' | json_field "['data']['id']")
+if [ -n "$S1" ] && [ -n "$S2" ]; then
+    curl -s -m 10 -X POST "$BASE/sprints/$S1/activate" -H "$AUTH" >/dev/null
+    curl -s -m 10 -X POST "$BASE/sprints/$S2/activate" -H "$AUTH" >/dev/null
+    N_ACTIVE=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.sprint WHERE project_id='$PROJ_ID' AND status='ACTIVE';")
+    [ "${N_ACTIVE:-0}" = "1" ] && ok "同项目内只有一个 ACTIVE 迭代"         || bad "同项目内有 $N_ACTIVE 个 ACTIVE 迭代（期望 1）"
+fi
+
+# 5) 企业移除成员必须连带清理项目成员关系
+#    原来只清 sys_user.enterprise_id，自助退出会清 project_member ——
+#    管理员移除反而比本人退出清得更少，被移除的人还能读全部项目数据。
+INV=$(curl -s -m 10 -X POST "$BASE/enterprises/$ENT_ID/members/invite" -H "$AUTH"       -H "Content-Type: application/json"       -d '{"email":"ci-remove@devflow.test","realName":"CI Remove","role":"MEMBER"}')
+NEW_UID=$(echo "$INV" | json_field "['data']['user']['id']")
+if [ -n "$NEW_UID" ]; then
+    # 把他加进项目
+    curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/members" -H "$AUTH"         -H "Content-Type: application/json" -d "{\"userId\":\"$NEW_UID\",\"role\":\"MEMBER\"}" >/dev/null
+
+    BEFORE_PM=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.project_member WHERE user_id='$NEW_UID';")
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X DELETE            "$BASE/enterprises/$ENT_ID/members/$NEW_UID" -H "$AUTH")
+    AFTER_PM=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.project_member WHERE user_id='$NEW_UID';")
+    [ "$CODE" = "200" ] && [ "${BEFORE_PM:-0}" -ge 1 ] && [ "${AFTER_PM:-1}" = "0" ]         && ok "移除企业成员同时清理项目成员关系（$BEFORE_PM → $AFTER_PM）"         || bad "移除成员返回 $CODE；项目成员 $BEFORE_PM → $AFTER_PM（期望 0）"
+fi
+
+# 6) 邀请码并发：两次请求必须拿到同一个码
+IC_A=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/invite-code" -H "$AUTH" | json_field "['data']")
+IC_B=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/invite-code" -H "$AUTH" | json_field "['data']")
+if [ -n "$IC_A" ] && [ "$IC_A" = "$IC_B" ]; then
+    ok "邀请码幂等（两次请求同一个码）"
+else
+    bad "邀请码不一致：$IC_A vs $IC_B"
+fi
+
+# 7) 删除任务必须连带清理依赖关系（否则看板徽章永久显示"前置未完成"）
+DEP_T1=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/tasks" -H "$AUTH"          -H "Content-Type: application/json" -d '{"title":"dep-a"}' | json_field "['data']['id']")
+DEP_T2=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/tasks" -H "$AUTH"          -H "Content-Type: application/json" -d '{"title":"dep-b"}' | json_field "['data']['id']")
+if [ -n "$DEP_T1" ] && [ -n "$DEP_T2" ]; then
+    curl -s -m 10 -X POST "$BASE/tasks/$DEP_T2/dependencies" -H "$AUTH"         -H "Content-Type: application/json" -d "{\"dependsOnTaskId\":\"$DEP_T1\"}" >/dev/null
+    N_DEP=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.task_dependency WHERE task_id='$DEP_T2' OR depends_on_task_id='$DEP_T2';")
+    if [ "${N_DEP:-0}" -ge 1 ]; then
+        curl -s -m 10 -X DELETE "$BASE/tasks/$DEP_T2" -H "$AUTH" >/dev/null
+        N_DEP2=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.task_dependency WHERE task_id='$DEP_T2' OR depends_on_task_id='$DEP_T2';")
+        [ "${N_DEP2:-1}" = "0" ] && ok "删除任务同时清理依赖关系（$N_DEP → $N_DEP2）"             || bad "删除后仍有 $N_DEP2 条依赖指向已删任务"
+    else
+        bad "依赖关系未建立（无法验证清理）"
+    fi
 fi
 
 # ============================================

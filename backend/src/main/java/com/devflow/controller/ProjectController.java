@@ -1,6 +1,7 @@
 package com.devflow.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.devflow.common.PermissionCodes;
@@ -344,8 +345,19 @@ public class ProjectController {
         requireSameEnterprise(project, user);
 
         if (!StringUtils.hasText(project.getInviteCode())) {
-            project.setInviteCode(generateUniqueInviteCode());
-            projectMapper.updateById(project);
+            // 条件更新：只有邀请码仍为空时才写入。
+            // 原实现是"读到空 → 生成 → updateById"，两个并发请求会各生成一个码，
+            // 后写覆盖前写，先返回给用户的那个邀请码随即失效。
+            String candidate = generateUniqueInviteCode();
+            projectMapper.update(null, new LambdaUpdateWrapper<Project>()
+                    .eq(Project::getId, id)
+                    .and(w -> w.isNull(Project::getInviteCode).or().eq(Project::getInviteCode, ""))
+                    .set(Project::getInviteCode, candidate));
+            // 无论是否抢到，都以库里已有的为准（保证对外只存在一个有效码）
+            project = projectMapper.selectById(id);
+            if (!StringUtils.hasText(project.getInviteCode())) {
+                throw new BusinessException(409, "邀请码生成冲突，请重试");
+            }
         }
         return R.ok(project.getInviteCode());
     }

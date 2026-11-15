@@ -33,6 +33,7 @@ public class BugCommentServiceImpl implements BugCommentService {
     private final BugCommentMapper bugCommentMapper;
     private final BugMapper bugMapper;
     private final UserMapper userMapper;
+    private final com.devflow.mapper.ProjectMapper projectMapper;
     private final MentionService mentionService;
     private final NotificationService notificationService;
 
@@ -93,11 +94,19 @@ public class BugCommentServiceImpl implements BugCommentService {
         if (comment == null || Integer.valueOf(1).equals(comment.getDeleted())) {
             throw new BusinessException(404, "评论不存在");
         }
+        // 管理员可删他人评论：原来把 comment.getProjectId() 和 operator.getEnterpriseId()
+        // 直接比较——项目 ID 和企业 ID 是两个 ID 空间，永远不会相等，这条分支恒为 false，
+        // 于是"企业管理员可删他人评论"实际从未生效。正确做法是先由项目查到企业再比。
         User operator = userMapper.selectById(userId);
-        boolean isAdmin = operator != null
+        boolean isAdmin = false;
+        if (operator != null
                 && EnterpriseRoles.level(operator.getRole()) >= EnterpriseRoles.level(EnterpriseRoles.ADMIN)
                 && comment.getProjectId() != null
-                && comment.getProjectId().equals(operator.getEnterpriseId());
+                && StringUtils.hasText(operator.getEnterpriseId())) {
+            var project = projectMapper.selectById(comment.getProjectId());
+            isAdmin = project != null
+                    && operator.getEnterpriseId().equals(project.getEnterpriseId());
+        }
         if (!comment.getUserId().equals(userId) && !isAdmin) {
             throw new BusinessException(403, "只能删除自己的评论");
         }

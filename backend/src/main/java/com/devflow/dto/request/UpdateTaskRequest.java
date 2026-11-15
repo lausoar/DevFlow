@@ -30,4 +30,10 @@ public class UpdateTaskRequest {
 
     /** 修复版本（project_release.id，可空） */
     private String fixVersionId;
+
+    /**
+     * 客户端读到的版本号（乐观锁）。带上了才做冲突检测：
+     * 版本不一致说明别人先改了，服务端返回 409 而不是用旧数据覆盖。
+     */
+    private Integer expectedVersion;
 }

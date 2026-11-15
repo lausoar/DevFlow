@@ -32,6 +32,17 @@ public class StatisticsServiceImpl implements StatisticsService {
     private final UserMapper userMapper;
     private final com.devflow.service.WorkflowService workflowService;
 
+    /**
+     * 任务的完成日期。优先用 completed_at；老数据没有这个值时回落到 updated_at
+     * （回填迁移已经覆盖绝大多数历史任务，这里是兜底）。
+     */
+    private LocalDate completionDate(com.devflow.entity.Task t) {
+        if (t.getCompletedAt() != null) {
+            return t.getCompletedAt().toLocalDate();
+        }
+        return t.getUpdatedAt() != null ? t.getUpdatedAt().toLocalDate() : null;
+    }
+
     // ============================================
     // 企业级统计
     // ============================================
@@ -570,9 +581,11 @@ public class StatisticsServiceImpl implements StatisticsService {
 
             // 实际剩余（截止到该日期完成的任务）
             final LocalDate currentDate = date;
+            // 用 completed_at（真正进入终态的时间），不能用 updated_at ——
+            // 任务完成后改标题/换负责人都会刷新 updated_at，历史曲线会被重画
             int actualCompleted = sprintTasks.stream()
                 .filter(t -> doneCodes.contains(t.getStatus()))
-                .filter(t -> t.getUpdatedAt() != null && t.getUpdatedAt().toLocalDate().isBefore(currentDate.plusDays(1)))
+                .filter(t -> completionDate(t) != null && completionDate(t).isBefore(currentDate.plusDays(1)))
                 .mapToInt(t -> t.getStoryPoints() != null ? t.getStoryPoints() : 1)
                 .sum();
             int actualRemaining = Math.max(0, totalStoryPoints - actualCompleted);
@@ -581,14 +594,14 @@ public class StatisticsServiceImpl implements StatisticsService {
             final LocalDate prevDate = date.minusDays(1);
             int completedBefore = sprintTasks.stream()
                 .filter(t -> doneCodes.contains(t.getStatus()))
-                .filter(t -> t.getUpdatedAt() != null && t.getUpdatedAt().toLocalDate().isBefore(prevDate.plusDays(1)))
+                .filter(t -> completionDate(t) != null && completionDate(t).isBefore(prevDate.plusDays(1)))
                 .mapToInt(t -> t.getStoryPoints() != null ? t.getStoryPoints() : 1)
                 .sum();
             int completedToday = actualCompleted - completedBefore;
 
             long completedTasksOnDate = sprintTasks.stream()
                 .filter(t -> doneCodes.contains(t.getStatus()))
-                .filter(t -> t.getUpdatedAt() != null && t.getUpdatedAt().toLocalDate().isEqual(date))
+                .filter(t -> completionDate(t) != null && completionDate(t).isEqual(date))
                 .count();
 
             dataPoints.add(BurndownResponse.BurndownPoint.builder()
@@ -600,16 +613,22 @@ public class StatisticsServiceImpl implements StatisticsService {
                 .build());
         }
 
-        // 计算速率和预计完成日期
-        double velocity = totalDays > 0 ? (double) (totalStoryPoints - dataPoints.get(dataPoints.size() - 1).getActualRemaining()) / dataPoints.size() : 0;
+        // 迭代开始日期在未来时，上面的循环第一次就 break，dataPoints 为空。
+        // 原实现直接 get(size - 1) → IndexOutOfBoundsException → 整个燃尽接口 500，
+        // 即"刚建好还没开始的迭代，一打开燃尽图就崩"。空数据是正常状态，不是异常。
+        double velocity = 0;
         String estimatedDate = null;
         boolean onTrack = true;
-        if (velocity > 0) {
-            int remaining = dataPoints.get(dataPoints.size() - 1).getActualRemaining();
-            int daysNeeded = (int) Math.ceil(remaining / velocity);
-            estimatedDate = LocalDate.now().plusDays(daysNeeded).toString();
-            onTrack = LocalDate.now().plusDays(daysNeeded).isBefore(endDate) ||
-                LocalDate.now().plusDays(daysNeeded).isEqual(endDate);
+        if (!dataPoints.isEmpty()) {
+            int latestRemaining = dataPoints.get(dataPoints.size() - 1).getActualRemaining();
+            velocity = totalDays > 0
+                    ? (double) (totalStoryPoints - latestRemaining) / dataPoints.size()
+                    : 0;
+            if (velocity > 0) {
+                int daysNeeded = (int) Math.ceil(latestRemaining / velocity);
+                estimatedDate = LocalDate.now().plusDays(daysNeeded).toString();
+                onTrack = !LocalDate.now().plusDays(daysNeeded).isAfter(endDate);
+            }
         }
 
         return BurndownResponse.builder()

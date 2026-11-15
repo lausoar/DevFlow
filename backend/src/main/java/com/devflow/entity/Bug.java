@@ -32,6 +32,10 @@ public class Bug {
     /** 游客提交待确认: 0-否 1-待确认 */
     private Integer pending;
 
+    /** 乐观锁版本号（乐观锁冲突时 409） */
+    @Version
+    private Integer version;
+
     /** 状态：取值来自项目工作流配置（默认 NEW/ASSIGNED/DOING/RESOLVED/REOPENED/CLOSED） */
     private String status;
 

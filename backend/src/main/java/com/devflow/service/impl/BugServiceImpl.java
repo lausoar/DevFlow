@@ -138,9 +138,19 @@ public class BugServiceImpl implements BugService {
     }
 
     @Override
-    public Bug update(String id, Bug bug) {
+    public Bug update(String id, Bug bug, Integer expectedVersion) {
         Bug existing = bugMapper.selectById(id);
         if (existing == null) return null;
+
+        // 乐观锁：带版本号才校验，冲突抛 409
+        if (expectedVersion != null) {
+            int current = existing.getVersion() == null ? 1 : existing.getVersion();
+            if (expectedVersion != current) {
+                throw new com.devflow.common.exception.BusinessException(409,
+                        "Bug 已被他人修改（当前版本 v" + current + "），请刷新后再保存");
+            }
+            bug.setVersion(expectedVersion);
+        }
 
         String oldAssigneeId = existing.getAssigneeId();
 

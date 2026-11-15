@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.devflow.entity.Task;
+import com.devflow.entity.TaskDependency;
 import com.devflow.mapper.TaskMapper;
 import com.devflow.service.NotificationService;
 import com.devflow.service.TaskService;
@@ -12,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -29,6 +31,7 @@ public class TaskServiceImpl implements TaskService {
     private final com.devflow.service.WorkflowService workflowService;
     private final com.devflow.service.SubscriptionService subscriptionService;
     private final com.devflow.service.NotificationRecipients notificationRecipients;
+    private final com.devflow.mapper.TaskDependencyMapper taskDependencyMapper;
 
     @Override
     public Page<Task> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
@@ -101,9 +104,19 @@ public class TaskServiceImpl implements TaskService {
     }
 
     @Override
-    public Task update(String id, Task task) {
+    public Task update(String id, Task task, Integer expectedVersion) {
         Task existing = taskMapper.selectById(id);
         if (existing == null) return null;
+
+        // 乐观锁：客户端带上版本号才校验。冲突时抛 409 而不是覆盖别人的修改。
+        if (expectedVersion != null) {
+            int current = existing.getVersion() == null ? 1 : existing.getVersion();
+            if (expectedVersion != current) {
+                throw new com.devflow.common.exception.BusinessException(409,
+                        "任务已被他人修改（当前版本 v" + current + "），请刷新后再保存");
+            }
+            task.setVersion(expectedVersion);
+        }
 
         // 记录分配变更，用于通知
         String oldAssigneeId = existing.getAssigneeId();
@@ -162,6 +175,14 @@ public class TaskServiceImpl implements TaskService {
         if (task == null) return;
 
         task.setStatus(status);
+        // 完成时间只在"进入/离开 DONE 分类"时变，不能靠 updated_at 推断
+        // （改标题、换负责人都会刷新 updated_at，历史燃尽曲线就被重画了）
+        boolean becomingDone = workflowService != null && isDoneStatus(task.getProjectId(), status);
+        if (becomingDone && task.getCompletedAt() == null) {
+            task.setCompletedAt(LocalDateTime.now());
+        } else if (!becomingDone) {
+            task.setCompletedAt(null);
+        }
         taskMapper.updateById(task);
 
         // 通知任务相关人员（报告人和被指派人）∪ 关注该任务的人
@@ -186,8 +207,33 @@ public class TaskServiceImpl implements TaskService {
         );
     }
 
+    /** 是否属于该项目的 DONE 分类（项目可自定义终态标签） */
+    private boolean isDoneStatus(String projectId, String status) {
+        if (status == null) return false;
+        try {
+            return com.devflow.entity.WorkflowStatus.CATEGORY_DONE.equals(
+                    workflowService.categoryOf(projectId, com.devflow.service.WorkflowService.TYPE_TASK, status));
+        } catch (Exception e) {
+            return "DONE".equals(status);
+        }
+    }
+
+    /**
+     * 删除任务（逻辑删除）。
+     *
+     * 原实现只删任务行，子表（依赖/工时/清单/评论/需求关联）全部留成孤儿：
+     * 已删除的任务还挂在别人的"前置依赖"上，看板徽章会永久显示"前置未完成"。
+     * 这里只清理依赖关系（其余子表按 task_id 存在即可，不参与跨对象判断）。
+     * 已删除依赖自然消失，任务被恢复时依赖不会自动恢复 —— 这符合直觉：
+     * 删掉的任务恢复后重排关系，比带着一堆指向已删任务的阻塞更安全。
+     */
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public void delete(String id) {
+        taskDependencyMapper.delete(new LambdaQueryWrapper<TaskDependency>()
+                .eq(TaskDependency::getTaskId, id)
+                .or()
+                .eq(TaskDependency::getDependsOnTaskId, id));
         taskMapper.deleteById(id);
     }
 }

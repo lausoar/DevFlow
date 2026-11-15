@@ -137,7 +137,7 @@ public class TaskController {
         patch.setDueDate(request.getDueDate());
         patch.setFixVersionId(request.getFixVersionId());
 
-        Task updated = taskService.update(id, patch);
+        Task updated = taskService.update(id, patch, request.getExpectedVersion());
         if (updated == null) {
             throw new BusinessException(404, "任务不存在或已被删除");
         }

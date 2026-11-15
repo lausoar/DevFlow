@@ -112,7 +112,7 @@ public class BugController {
         patch.setScreenshots(request.getScreenshots());
         patch.setFixVersionId(request.getFixVersionId());
 
-        Bug updated = bugService.update(id, patch);
+        Bug updated = bugService.update(id, patch, request.getExpectedVersion());
         if (updated == null) {
             throw new BusinessException(404, "Bug 不存在或已被删除");
         }

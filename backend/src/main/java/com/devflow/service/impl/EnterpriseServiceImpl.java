@@ -284,8 +284,29 @@ public class EnterpriseServiceImpl implements EnterpriseService {
                 .eq(DepartmentMember::getUserId, memberId)
         );
 
+        // 清除该企业下所有项目的成员关系。
+        // 原来这里什么都不做，而自助退出（leaveEnterprise）会清理 —— 结果是
+        // "管理员移除"比"自己退出"清得更不彻底：被移除的人仍是原企业各项目的成员，
+        // 项目可见性只看 project_member，所以他还能读全部项目数据。
+        int removedProjectMemberships = projectMemberMapper.delete(
+            new LambdaQueryWrapper<ProjectMember>()
+                .eq(ProjectMember::getUserId, memberId)
+                .in(ProjectMember::getProjectId, projectIdsOfEnterprise(enterpriseId))
+        );
+
         auditService.log(operatorId, enterpriseId, null, "member.remove",
-                "user", memberId, "移除成员 " + member.displayName() + "（原职级: " + member.getRole() + "）");
+                "user", memberId,
+                "移除成员 " + member.displayName() + "（原职级: " + member.getRole()
+                        + "，同时移出 " + removedProjectMemberships + " 个项目）");
+    }
+
+    /** 本企业下的全部项目 ID（用于移除成员时清理项目成员关系） */
+    private List<String> projectIdsOfEnterprise(String enterpriseId) {
+        List<String> ids = projectMapper.selectList(
+                        new LambdaQueryWrapper<Project>().eq(Project::getEnterpriseId, enterpriseId))
+                .stream().map(Project::getId).toList();
+        // .in() 传空集合会生成 IN () 语法错误，返回一个不可能命中的占位值
+        return ids.isEmpty() ? List.of("__none__") : ids;
     }
 
     @Override

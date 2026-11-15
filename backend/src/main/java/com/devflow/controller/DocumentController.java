@@ -134,8 +134,17 @@ public class DocumentController {
         Document old = requireVisibleDoc(userId, id);
         requireDocPermission(userId, old, PermissionCodes.DOCUMENT_MANAGE);
 
-        // 保存前对旧内容做版本快照（快照版本号 = 旧文档版本号，新版本号 = 旧 + 1）
         int prevVersion = old.getVersion() == null ? 1 : old.getVersion();
+
+        // 乐观锁：客户端带上它读到的版本号时，版本不一致就拒绝而不是覆盖。
+        // 不带时保持旧行为（兼容尚未改的前端调用点）。
+        if (request.getExpectedVersion() != null && request.getExpectedVersion() != prevVersion) {
+            throw new BusinessException(409,
+                    "文档已被他人修改（当前版本 v" + prevVersion + "，你基于 v"
+                            + request.getExpectedVersion() + " 编辑），请刷新后再保存");
+        }
+
+        // 保存前对旧内容做版本快照（快照版本号 = 旧文档版本号，新版本号 = 旧 + 1）
         com.devflow.entity.DocumentVersion snapshot = new com.devflow.entity.DocumentVersion();
         snapshot.setDocumentId(id);
         snapshot.setVersion(prevVersion);
@@ -154,7 +163,14 @@ public class DocumentController {
         patch.setParentId(request.getParentId());
         patch.setIsPublished(request.getIsPublished());
         patch.setVersion(prevVersion + 1);
-        documentMapper.updateById(patch);
+        // 带条件更新再兜一层：上面查过版本，但两次请求可能交错。
+        // 用 version 做 WHERE 条件，影响行数为 0 说明被抢先改了 → 409 而不是静默覆盖。
+        int updated = documentMapper.update(patch, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<Document>()
+                .eq(Document::getId, id)
+                .eq(Document::getVersion, prevVersion));
+        if (updated == 0) {
+            throw new BusinessException(409, "文档已被他人修改，请刷新后再保存");
+        }
 
         // 重新读取合并后的文档（更新请求可能只携带部分字段）再同步知识库
         Document merged = documentMapper.selectById(id);

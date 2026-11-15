@@ -10,6 +10,20 @@
 -- 现在一律使用连接自身的当前库：JDBC URL 的 db 或 docker 初始化时的 MYSQL_DATABASE。
 
 -- ============================================
+-- 一次性数据迁移登记表
+-- ============================================
+-- 本脚本每次启动都执行。此前有些"历史数据归一化"写成裸 UPDATE，等于每次重启
+-- 都把用户数据改回去（例如把所有需求状态重置成 OPEN）——用户改的状态活不过一次重启。
+-- 需要"只跑一次"的迁移一律写成：
+--     1) UPDATE ... AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name='<id>')
+--     2) INSERT IGNORE INTO schema_migration (name, applied_at) VALUES ('<id>', NOW());
+-- 顺序不能反：先查后用，否则标记先落库，迁移永远不执行。
+CREATE TABLE IF NOT EXISTS schema_migration (
+    name VARCHAR(100) PRIMARY KEY COMMENT '迁移标识（带日期，唯一）',
+    applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '执行时间'
+) ENGINE=InnoDB COMMENT='一次性数据迁移登记（保证迁移只执行一次）';
+
+-- ============================================
 -- 企业表
 -- ============================================
 CREATE TABLE IF NOT EXISTS enterprise (
@@ -151,15 +165,19 @@ CREATE TABLE IF NOT EXISTS task (
 -- ============================================
 -- 任务标签表
 -- ============================================
+-- 任务标签：这张表目前在 Java 与前端都无任何引用（见审计 §C14 "死表"），
+-- 但既然建了就补上唯一键 —— 同一任务重复打同一个标签没有业务意义，
+-- 没有唯一约束时任何一次"重复提交"都会静默堆出重复行。
 CREATE TABLE IF NOT EXISTS task_tag (
     id VARCHAR(36) PRIMARY KEY COMMENT 'ID',
     task_id VARCHAR(36) NOT NULL COMMENT '任务ID',
     tag_name VARCHAR(50) NOT NULL COMMENT '标签名',
-    KEY idx_task_id (task_id)
+    UNIQUE KEY uk_task_tag (task_id, tag_name)
 ) ENGINE=InnoDB COMMENT='任务标签表';
 
 -- ============================================
--- 任务检查清单
+-- 任务检查清单（同样是无引用的死表；保留是为了不破坏可能存在的历史数据，
+-- 新功能的清单实现在 task_checklist 表）
 -- ============================================
 CREATE TABLE IF NOT EXISTS checklist_item (
     id VARCHAR(36) PRIMARY KEY COMMENT 'ID',
@@ -305,7 +323,7 @@ CREATE TABLE IF NOT EXISTS requirement (
     project_id VARCHAR(36) NOT NULL COMMENT '所属项目ID',
     requester_id VARCHAR(36) NOT NULL COMMENT '需求提出人ID',
     approver_id VARCHAR(36) DEFAULT NULL COMMENT '当前审批人ID',
-    status VARCHAR(20) NOT NULL DEFAULT 'DRAFT' COMMENT '状态: DRAFT/PENDING/APPROVED/REJECTED/CANCELLED',
+    status VARCHAR(20) NOT NULL DEFAULT 'OPEN' COMMENT '状态: OPEN/COMPLETED/CLOSED（默认值由项目工作流决定，列默认仅为兜底）',
     priority VARCHAR(20) NOT NULL DEFAULT 'MEDIUM' COMMENT '优先级: CRITICAL/HIGH/MEDIUM/LOW',
     source VARCHAR(50) DEFAULT NULL COMMENT '需求来源: CUSTOMER/INTERNAL/MARKET/TECHNICAL',
     category VARCHAR(50) DEFAULT NULL COMMENT '需求分类: FEATURE/IMPROVEMENT/BUGFIX/OTHER',
@@ -476,9 +494,15 @@ INSERT IGNORE INTO sys_role_permission (id, scope, role, permission_code) VALUES
 (REPLACE(UUID(),'-',''), 'ENTERPRISE', 'MANAGER', 'member:role'),
 (REPLACE(UUID(),'-',''), 'ENTERPRISE', 'MANAGER', 'member:department');
 
--- 存量用户角色迁移（7 级 → 4 级，UPDATE 幂等）：总监/主管→经理，组长→成员
-UPDATE sys_user SET role='MANAGER' WHERE role IN ('DIRECTOR','SUPERVISOR');
-UPDATE sys_user SET role='MEMBER' WHERE role='LEADER';
+-- 存量用户角色迁移（7 级 → 4 级）：总监/主管→经理，组长→成员。
+-- 只跑一次——否则管理员事后把某个经理降回成员，重启会被重新升级成经理。
+UPDATE sys_user SET role='MANAGER'
+  WHERE role IN ('DIRECTOR','SUPERVISOR')
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-10-user-role-7to4');
+UPDATE sys_user SET role='MEMBER'
+  WHERE role='LEADER'
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-10-user-role-7to4');
+INSERT IGNORE INTO schema_migration (name) VALUES ('2026-10-user-role-7to4');
 
 -- ============================================
 -- 游客分享项目（第 3 期，见 docs/PERMISSION_DESIGN.md §6）
@@ -538,18 +562,26 @@ INSERT IGNORE INTO sys_role_permission (id, scope, role, permission_code) VALUES
 -- 聊天消息时间戳毫秒精度（MODIFY 幂等，修复同秒消息排序不稳定）
 ALTER TABLE chat_message MODIFY COLUMN created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间（毫秒精度）';
 
--- 需求审批功能已移除（2026-10-23）：需求创建即生效，历史状态统一归一为 APPROVED
-UPDATE requirement SET status='APPROVED', reject_reason=NULL, approver_id=NULL WHERE status IS NULL OR status <> 'APPROVED';
+-- 需求审批功能已移除（2026-10-23）：需求创建即生效。
+-- 这条原是"把所有非 APPROVED 状态改成 APPROVED"，但 2026-10-26 需求生命周期已改为
+-- OPEN/COMPLETED/CLOSED，这条会把 COMPLETED/CLOSED 全部打回，且每次启动都执行。
+-- 现在只把它并入下面的一次性迁移（见 2026-10-26-requirement-status-three-state）。
 
 -- 通知跳转地址修复（2026-10-23）：历史通知里的 /bugs/{id}、/tasks/{id} 迁移为真实前端路由（幂等）
+-- 这三条都是"历史通知地址修复"，幂等但每次启动都全表扫一遍。
+-- 用迁移标记挡住重复执行（通知表是增长最快的表之一，启动时全表 UPDATE 的代价不划算）。
 UPDATE notification n JOIN bug b ON SUBSTRING(n.action_url, 7) = b.id
   SET n.action_url = CONCAT('/projects/', b.project_id, '?tab=bugs')
-  WHERE n.action_url LIKE '/bugs/%';
+  WHERE n.action_url LIKE '/bugs/%'
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-10-23-notification-url');
 UPDATE notification n JOIN task t ON SUBSTRING(n.action_url, 8) = t.id
   SET n.action_url = CONCAT('/projects/', t.project_id, '?tab=tasks')
-  WHERE n.action_url LIKE '/tasks/%';
--- 关联不到实体（已删除）的旧地址置空，通知退化为不可点击而不是点了 404
-UPDATE notification SET action_url = NULL WHERE action_url LIKE '/bugs/%' OR action_url LIKE '/tasks/%';
+  WHERE n.action_url LIKE '/tasks/%'
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-10-23-notification-url');
+UPDATE notification SET action_url = NULL
+  WHERE (action_url LIKE '/bugs/%' OR action_url LIKE '/tasks/%')
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-10-23-notification-url');
+INSERT IGNORE INTO schema_migration (name) VALUES ('2026-10-23-notification-url');
 
 -- 用户真实姓名字段（2026-10-23，幂等）
 ALTER TABLE sys_user ADD COLUMN real_name VARCHAR(50) DEFAULT NULL COMMENT '真实姓名（展示用）' AFTER username;
@@ -573,19 +605,11 @@ CREATE TABLE IF NOT EXISTS task_dependency (
     KEY idx_dep_on (depends_on_task_id)
 ) ENGINE=InnoDB COMMENT='任务依赖';
 
--- 工时登记 / 文档版本 / 文档评论（2026-10-23）
-CREATE TABLE IF NOT EXISTS task_worklog (
-    id VARCHAR(36) PRIMARY KEY COMMENT '工时记录ID',
-    task_id VARCHAR(36) NOT NULL COMMENT '任务ID',
-    user_id VARCHAR(36) NOT NULL COMMENT '登记人',
-    hours DECIMAL(5,1) NOT NULL COMMENT '工时（小时）',
-    work_date DATE NOT NULL COMMENT '工作日期',
-    note VARCHAR(200) DEFAULT NULL COMMENT '备注',
-    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
-    KEY idx_task (task_id),
-    KEY idx_user_date (user_id, work_date)
-) ENGINE=InnoDB COMMENT='任务工时登记';
-
+-- 文档版本 / 文档评论（2026-10-23）
+-- 注意：task_worklog 曾在此处被定义过一次，下面的第 610 行附近又定义了一次。
+-- CREATE TABLE IF NOT EXISTS 是"先建者生效"，所以实际生效的是这里那份 DECIMAL(5,1)，
+-- 而实体与接口约定的却是 DECIMAL(5,2)（0.25 小时落库会被四舍五入成 0.3）。
+-- 已删除本处定义，统一由下面那份（DECIMAL(5,2) + note 500）建表。
 CREATE TABLE IF NOT EXISTS document_versions (
     id VARCHAR(36) PRIMARY KEY COMMENT '版本ID',
     document_id VARCHAR(36) NOT NULL COMMENT '文档ID',
@@ -607,16 +631,21 @@ CREATE TABLE IF NOT EXISTS document_comments (
 ) ENGINE=InnoDB COMMENT='文档评论';
 
 -- 工时登记（2026-10-23）
+-- 工时登记（唯一权威定义；DECIMAL(5,2) 支持 0.25/0.75 这类真实工时）
+-- 老库可能已被 DECIMAL(5,1) 版本建过表，ALTER ... MODIFY 把它纠正过来（幂等）
 CREATE TABLE IF NOT EXISTS task_worklog (
     id VARCHAR(36) PRIMARY KEY COMMENT '工时记录ID',
     task_id VARCHAR(36) NOT NULL COMMENT '任务ID',
     user_id VARCHAR(36) NOT NULL COMMENT '登记人',
-    hours DECIMAL(5,2) NOT NULL COMMENT '工时（小时）',
+    hours DECIMAL(5,2) NOT NULL COMMENT '工时（小时，两位小数）',
     work_date DATE NOT NULL COMMENT '工作日期',
     note VARCHAR(500) DEFAULT NULL COMMENT '备注',
     created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
-    KEY idx_task (task_id)
+    KEY idx_task (task_id),
+    KEY idx_user_date (user_id, work_date)
 ) ENGINE=InnoDB COMMENT='任务工时';
+ALTER TABLE task_worklog MODIFY COLUMN hours DECIMAL(5,2) NOT NULL COMMENT '工时（小时，两位小数）';
+ALTER TABLE task_worklog MODIFY COLUMN note VARCHAR(500) DEFAULT NULL COMMENT '备注';
 
 -- 文档版本快照（2026-10-23；同时修复 document 表缺 version 列导致的详情 500）
 ALTER TABLE document ADD COLUMN version INT DEFAULT 1 COMMENT '版本号（每次保存+1）';
@@ -709,8 +738,16 @@ CREATE TABLE IF NOT EXISTS automation_rule (
     KEY idx_project (project_id)
 ) ENGINE=InnoDB COMMENT='自动化规则';
 
--- 需求状态生命周期（2026-10-26，审批流移除后引入 OPEN/COMPLETED/CLOSED 三态，存量旧状态全部归为 OPEN）
-UPDATE requirement SET status = 'OPEN' WHERE status IS NULL OR status NOT IN ('OPEN', 'COMPLETED', 'CLOSED');
+-- 需求状态生命周期（2026-10-26，审批流移除后引入 OPEN/COMPLETED/CLOSED 三态）。
+-- **这条必须只跑一次**：裸 UPDATE 会让每次重启都把"已完成/已关闭"的需求重开成 OPEN。
+-- 已用 schema_migration 标记保护。
+UPDATE requirement SET status = 'OPEN'
+  WHERE (status IS NULL OR status NOT IN ('OPEN', 'COMPLETED', 'CLOSED'))
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-10-26-requirement-status-three-state');
+UPDATE requirement SET reject_reason = NULL, approver_id = NULL
+  WHERE (reject_reason IS NOT NULL OR approver_id IS NOT NULL)
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-10-26-requirement-status-three-state');
+INSERT IGNORE INTO schema_migration (name) VALUES ('2026-10-26-requirement-status-three-state');
 
 -- 需求预估工时支持小数（2026-10-26）
 ALTER TABLE requirement MODIFY estimated_hours DECIMAL(6,1) DEFAULT NULL COMMENT '预估工时（小时，支持小数）';
@@ -722,12 +759,18 @@ ALTER TABLE requirement MODIFY estimated_hours DECIMAL(6,1) DEFAULT NULL COMMENT
 -- 项目 Git 集成字段
 ALTER TABLE project ADD COLUMN git_repo_url VARCHAR(500) DEFAULT NULL COMMENT 'Git 仓库地址';
 ALTER TABLE project ADD COLUMN git_webhook_secret VARCHAR(32) DEFAULT NULL COMMENT 'Git Webhook 密钥';
-UPDATE project SET git_webhook_secret = REPLACE(UUID(), '-', '') WHERE git_webhook_secret IS NULL;
+-- 只跑一次：否则管理员把密钥置空（停用 webhook）后，重启又会被重新生成一个可用密钥
+UPDATE project SET git_webhook_secret = REPLACE(UUID(), '-', '')
+  WHERE git_webhook_secret IS NULL
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-10-26-webhook-secret-backfill');
+INSERT IGNORE INTO schema_migration (name) VALUES ('2026-10-26-webhook-secret-backfill');
 
 -- 全局文档按企业隔离（回填作者所属企业）
 ALTER TABLE document ADD COLUMN enterprise_id VARCHAR(36) DEFAULT NULL COMMENT '所属企业（全局文档按企业隔离）';
 UPDATE document d JOIN sys_user u ON d.author_id = u.id SET d.enterprise_id = u.enterprise_id
-  WHERE d.enterprise_id IS NULL AND u.enterprise_id IS NOT NULL;
+  WHERE d.enterprise_id IS NULL AND u.enterprise_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-10-26-document-enterprise-backfill');
+INSERT IGNORE INTO schema_migration (name) VALUES ('2026-10-26-document-enterprise-backfill');
 
 -- 需求变更记录
 CREATE TABLE IF NOT EXISTS requirement_change_log (
@@ -1062,35 +1105,171 @@ ALTER TABLE test_case ADD COLUMN review_status VARCHAR(20) NOT NULL DEFAULT 'DRA
 ALTER TABLE test_execution ADD COLUMN cycle_id VARCHAR(36) DEFAULT NULL COMMENT '所属测试轮次' AFTER project_id;
 ALTER TABLE test_execution ADD COLUMN case_version INT DEFAULT NULL COMMENT '执行时的用例版本号' AFTER case_id;
 
--- 高频索引（幂等：索引已存在时跳过，避免 continue-on-error 之外的裸报错）
-DROP PROCEDURE IF EXISTS devflow_add_index_if_absent;
-DELIMITER $$
-CREATE PROCEDURE devflow_add_index_if_absent(IN tbl VARCHAR(64), IN idx VARCHAR(64), IN coldef VARCHAR(255))
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.statistics
-                   WHERE table_schema = DATABASE() AND table_name = tbl AND index_name = idx) THEN
-        SET @ddl = CONCAT('ALTER TABLE `', tbl, '` ADD KEY `', idx, '` (', coldef, ')');
-        PREPARE stmt FROM @ddl;
-        EXECUTE stmt;
-        DEALLOCATE PREPARE stmt;
-    END IF;
-END$$
-DELIMITER ;
+-- 高频索引（幂等：索引已存在时跳过）
+--
+-- 这里原来用 CREATE PROCEDURE + DELIMITER $$ 实现幂等，看起来是对的，实际上在应用里
+-- **从来没有生效过**：Spring 的 spring.sql.init 用的是 ScriptUtils，它只按 ";" 切分语句，
+-- 不认识 DELIMITER。于是 "DELIMITER $$" 被当成一条非法 SQL 直接失败，而后半段
+-- "END$$ DELIMITER ;" 也各自失败，存储过程从未被创建，后面 7 条 CALL 全部报
+-- "PROCEDURE does not exist"。因为 continue-on-error=true，这些全被静默吞掉。
+--
+-- 集成验证脚本用的是 mysql 命令行客户端（认识 DELIMITER），所以那些检查一直是绿的 ——
+-- 一个只在"用应用启动"时才出现的缺陷，被一个"用 CLI 执行"的验证掩盖了。
+--
+-- 现在改成不依赖 DELIMITER 的写法：SET @ddl / PREPARE / EXECUTE 是四条独立语句，
+-- ScriptUtils 按 ";" 切分正好每句一条，两种执行方式结果一致。
 
-CALL devflow_add_index_if_absent('task', 'idx_task_fix_version', 'fix_version_id');
-CALL devflow_add_index_if_absent('bug', 'idx_bug_fix_version', 'fix_version_id');
-CALL devflow_add_index_if_absent('requirement', 'idx_requirement_fix_version', 'fix_version_id');
-CALL devflow_add_index_if_absent('test_execution', 'idx_execution_cycle', 'cycle_id');
-CALL devflow_add_index_if_absent('requirement', 'idx_requirement_assignee', 'assignee_id');
-CALL devflow_add_index_if_absent('design_asset', 'idx_status', 'status');
-CALL devflow_add_index_if_absent('test_case', 'idx_review_status', 'review_status');
-DROP PROCEDURE IF EXISTS devflow_add_index_if_absent;
+-- task.idx_task_fix_version
+SET @ddl := (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE `task` ADD KEY `idx_task_fix_version` (fix_version_id)', 'DO 0')
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'task' AND index_name = 'idx_task_fix_version');
+PREPARE devflow_stmt FROM @ddl;
+EXECUTE devflow_stmt;
+DEALLOCATE PREPARE devflow_stmt;
+
+-- bug.idx_bug_fix_version
+SET @ddl := (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE `bug` ADD KEY `idx_bug_fix_version` (fix_version_id)', 'DO 0')
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'bug' AND index_name = 'idx_bug_fix_version');
+PREPARE devflow_stmt FROM @ddl;
+EXECUTE devflow_stmt;
+DEALLOCATE PREPARE devflow_stmt;
+
+-- requirement.idx_requirement_fix_version
+SET @ddl := (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE `requirement` ADD KEY `idx_requirement_fix_version` (fix_version_id)', 'DO 0')
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'requirement' AND index_name = 'idx_requirement_fix_version');
+PREPARE devflow_stmt FROM @ddl;
+EXECUTE devflow_stmt;
+DEALLOCATE PREPARE devflow_stmt;
+
+-- test_execution.idx_execution_cycle
+SET @ddl := (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE `test_execution` ADD KEY `idx_execution_cycle` (cycle_id)', 'DO 0')
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'test_execution' AND index_name = 'idx_execution_cycle');
+PREPARE devflow_stmt FROM @ddl;
+EXECUTE devflow_stmt;
+DEALLOCATE PREPARE devflow_stmt;
+
+-- requirement.idx_requirement_assignee
+SET @ddl := (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE `requirement` ADD KEY `idx_requirement_assignee` (assignee_id)', 'DO 0')
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'requirement' AND index_name = 'idx_requirement_assignee');
+PREPARE devflow_stmt FROM @ddl;
+EXECUTE devflow_stmt;
+DEALLOCATE PREPARE devflow_stmt;
+
+-- design_asset.idx_status
+SET @ddl := (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE `design_asset` ADD KEY `idx_status` (status)', 'DO 0')
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'design_asset' AND index_name = 'idx_status');
+PREPARE devflow_stmt FROM @ddl;
+EXECUTE devflow_stmt;
+DEALLOCATE PREPARE devflow_stmt;
+
+-- test_case.idx_review_status
+SET @ddl := (SELECT IF(COUNT(*) = 0,
+    'ALTER TABLE `test_case` ADD KEY `idx_review_status` (review_status)', 'DO 0')
+  FROM information_schema.statistics
+  WHERE table_schema = DATABASE() AND table_name = 'test_case' AND index_name = 'idx_review_status');
+PREPARE devflow_stmt FROM @ddl;
+EXECUTE devflow_stmt;
+DEALLOCATE PREPARE devflow_stmt;
+
+
+-- requirement.status 的列注释长期写着已废弃的审批流状态（DRAFT/PENDING/APPROVED...），
+-- 实际取值是工作流定义的 OPEN/COMPLETED/CLOSED。老库的注释不会因 CREATE TABLE IF NOT EXISTS 更新，
+-- 这里显式 MODIFY 一次（MODIFY 幂等）。
+ALTER TABLE requirement MODIFY COLUMN status VARCHAR(20) NOT NULL DEFAULT 'OPEN'
+  COMMENT '状态: 取值来自项目工作流配置（默认 OPEN/COMPLETED/CLOSED）';
+
+-- 任务完成时间（审计报告 §C15）：燃尽图不能再用 updated_at 当完成时间
+ALTER TABLE task ADD COLUMN completed_at DATETIME DEFAULT NULL COMMENT '完成时间（进入 DONE 分类时写入）';
+
+-- 回填：历史上已完成的任务用 updated_at 近似（不完美，但比全空强；
+-- 而且只回填一次，之后由业务写入真实完成时间）
+UPDATE task t SET t.completed_at = t.updated_at
+  WHERE t.completed_at IS NULL AND t.status IN (
+      SELECT code FROM workflow_status WHERE category = 'DONE')
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-11-task-completed-at-backfill');
+INSERT IGNORE INTO schema_migration (name) VALUES ('2026-11-task-completed-at-backfill');
+
+-- ============================================
+-- 乐观锁版本列（审计报告 §C1）
+-- ============================================
+-- 三个人同时拖同一张看板卡片时，后保存的会静默覆盖前一个 —— 全库没有一列能让
+-- UPDATE 判断"我看到的是不是最新版本"。这里给编辑最频繁的两类工作项加 version，
+-- 配合 MyBatis-Plus 的 @Version 注解，冲突时影响行数为 0，接口返回 409。
+-- 注意 DOCUMENT.version 是"文档版本号"（语义不同），不要混用。
+ALTER TABLE task ADD COLUMN version INT NOT NULL DEFAULT 1 COMMENT '乐观锁版本号（每次更新+1）';
+ALTER TABLE bug ADD COLUMN version INT NOT NULL DEFAULT 1 COMMENT '乐观锁版本号（每次更新+1）';
+
+-- ============================================
+-- 审计报告 §D3 点名的缺失索引（热点过滤列）
+-- ============================================
+-- 这些列都在真实查询的 WHERE/JOIN 条件里，但建表时没建索引，等于每次全表扫：
+--   chat_channel.project_id      → GET /chat/channels 的主过滤条件，这张表原本除主键外零索引
+--   bug.assignee_id              → listMyBugs 按它查
+--   notification(user_id,is_read)→ 未读数查询；两个单列索引在复合条件下不如一个复合索引
+--   activity_log(enterprise_id, created_at) → 企业审计日志分页
+--   file_item.url                → 按 URL 反查文件（前缀索引，url 可能有 500 字符）
+--   chat_message(channel_id, created_at) → 历史消息分页（单列 channel_id 后还要排序）
+--   document.parent_id           → Wiki 树全量构建
+--   department_member.enterprise_id → 按企业列部门成员
+SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `chat_channel` ADD KEY `idx_project_id` (project_id)', 'DO 0')
+  FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'chat_channel' AND index_name = 'idx_project_id');
+PREPARE devflow_stmt FROM @ddl; EXECUTE devflow_stmt; DEALLOCATE PREPARE devflow_stmt;
+
+SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `bug` ADD KEY `idx_bug_assignee` (assignee_id)', 'DO 0')
+  FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'bug' AND index_name = 'idx_bug_assignee');
+PREPARE devflow_stmt FROM @ddl; EXECUTE devflow_stmt; DEALLOCATE PREPARE devflow_stmt;
+
+SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `notification` ADD KEY `idx_user_unread` (user_id, is_read)', 'DO 0')
+  FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'notification' AND index_name = 'idx_user_unread');
+PREPARE devflow_stmt FROM @ddl; EXECUTE devflow_stmt; DEALLOCATE PREPARE devflow_stmt;
+
+SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `notification` ADD KEY `idx_notification_created` (created_at)', 'DO 0')
+  FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'notification' AND index_name = 'idx_notification_created');
+PREPARE devflow_stmt FROM @ddl; EXECUTE devflow_stmt; DEALLOCATE PREPARE devflow_stmt;
+
+SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `activity_log` ADD KEY `idx_activity_ent_created` (enterprise_id, created_at)', 'DO 0')
+  FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'activity_log' AND index_name = 'idx_activity_ent_created');
+PREPARE devflow_stmt FROM @ddl; EXECUTE devflow_stmt; DEALLOCATE PREPARE devflow_stmt;
+
+SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `file_item` ADD KEY `idx_file_url` (url(191))', 'DO 0')
+  FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'file_item' AND index_name = 'idx_file_url');
+PREPARE devflow_stmt FROM @ddl; EXECUTE devflow_stmt; DEALLOCATE PREPARE devflow_stmt;
+
+SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `chat_message` ADD KEY `idx_msg_channel_created` (channel_id, created_at)', 'DO 0')
+  FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'chat_message' AND index_name = 'idx_msg_channel_created');
+PREPARE devflow_stmt FROM @ddl; EXECUTE devflow_stmt; DEALLOCATE PREPARE devflow_stmt;
+
+SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `document` ADD KEY `idx_doc_parent` (parent_id)', 'DO 0')
+  FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'document' AND index_name = 'idx_doc_parent');
+PREPARE devflow_stmt FROM @ddl; EXECUTE devflow_stmt; DEALLOCATE PREPARE devflow_stmt;
+
+SET @ddl := (SELECT IF(COUNT(*) = 0, 'ALTER TABLE `department_member` ADD KEY `idx_dept_member_ent` (enterprise_id)', 'DO 0')
+  FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'department_member' AND index_name = 'idx_dept_member_ent');
+PREPARE devflow_stmt FROM @ddl; EXECUTE devflow_stmt; DEALLOCATE PREPARE devflow_stmt;
 
 -- 历史任务状态归一：早期代码用过 IN_PROGRESS / IN_REVIEW，与 schema/前端约定的
 -- TODO/DOING/TESTING/DONE 不一致（审计报告 §C7）。不归一的话这些任务会落到
 -- 工作流之外的"未知状态"桶里，看板和报表都统计不进去。
-UPDATE task SET status = 'DOING' WHERE status = 'IN_PROGRESS';
-UPDATE task SET status = 'TESTING' WHERE status = 'IN_REVIEW';
+-- 只跑一次：项目可自定义工作流状态码，如果某个项目真的建了叫 IN_PROGRESS 的状态，
+-- 每次重启都把它改写成 DOING 就是在破坏用户数据。
+UPDATE task SET status = 'DOING'
+  WHERE status = 'IN_PROGRESS'
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-11-task-status-normalize');
+UPDATE task SET status = 'TESTING'
+  WHERE status = 'IN_REVIEW'
+    AND NOT EXISTS (SELECT 1 FROM schema_migration WHERE name = '2026-11-task-status-normalize');
+INSERT IGNORE INTO schema_migration (name) VALUES ('2026-11-task-status-normalize');
 
 -- ============================================
 -- 第 3 批：部署与发布闭环、UI 走查（2026-11，见 docs/BATCH3_DELIVERY.md）

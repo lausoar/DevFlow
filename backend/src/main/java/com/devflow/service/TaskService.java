@@ -20,7 +20,7 @@ public interface TaskService {
 
     Task create(String projectId, Task task, String reporterId);
 
-    Task update(String id, Task task);
+    Task update(String id, Task task, Integer expectedVersion);
 
     void updateStatus(String id, String status, String operatorId);
 
