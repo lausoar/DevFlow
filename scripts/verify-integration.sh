@@ -87,14 +87,14 @@ fi
 # 3. 新表必须真的存在（回归："新表从未创建"）
 # ============================================
 info "检查第 2-4 批新增的表"
-REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program"
+REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference"
 MISSING=""
 for t in $REQUIRED_TABLES; do
     n=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='$t';")
     [ "$n" = "1" ] || MISSING="$MISSING $t"
 done
 if [ -z "$MISSING" ]; then
-    ok "17 张新表全部创建"
+    ok "20 张新表全部创建"
 else
     bad "缺少表:$MISSING（schema.sql 里是否漏了 CREATE TABLE？）"
 fi
@@ -374,6 +374,67 @@ if [ -x "$ROOT_DIR/scripts/db-backup.sh" ] || [ -f "$ROOT_DIR/scripts/db-backup.
 else
     bad "缺少 scripts/db-backup.sh"
 fi
+
+# ============================================
+# 第 6 批：IM 动作 / 通知偏好 / 全文检索
+# ============================================
+CH=$(curl -s -m 10 "$BASE/channels" -H "$AUTH")
+CH_ID=$(echo "$CH" | json_field "[0]['id']")
+if [ -z "$CH_ID" ] || [ "$CH_ID" = "None" ]; then
+    # 项目创建时会自动建项目群，取第一个
+    CH_ID=$(echo "$CH" | python -c "import sys,json;d=json.load(sys.stdin);print(d['data'][0]['id'] if d.get('data') else '')" 2>/dev/null || echo "")
+fi
+if [ -n "$CH_ID" ]; then
+    ok "取到项目频道"
+    MSG=$(curl -s -m 10 -X POST "$BASE/channels/$CH_ID/messages" -H "$AUTH"           -H "Content-Type: application/json" -d '{"content":"ci message"}')
+    MSG_ID=$(echo "$MSG" | json_field "['data']['id']")
+    [ -n "$MSG_ID" ] && ok "发送消息" || bad "发送消息失败"
+
+    if [ -n "$MSG_ID" ]; then
+        # 编辑
+        CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/messages/$MSG_ID" -H "$AUTH"                -H "Content-Type: application/json" -d '{"content":"ci message edited"}')
+        [ "$CODE" = "200" ] && ok "编辑消息" || bad "编辑消息返回 $CODE"
+
+        # 表情
+        REACT=$(curl -s -m 10 -X POST "$BASE/messages/$MSG_ID/reactions" -H "$AUTH"                 -H "Content-Type: application/json" -d '{"emoji":"+1"}')
+        ADDED=$(echo "$REACT" | json_field "['data']['added']")
+        [ "$ADDED" = "True" ] && ok "表情回应添加" || bad "表情回应 added=$ADDED"
+
+        # 再点一次取消
+        ADDED2=$(curl -s -m 10 -X POST "$BASE/messages/$MSG_ID/reactions" -H "$AUTH"                  -H "Content-Type: application/json" -d '{"emoji":"+1"}' | json_field "['data']['added']")
+        [ "$ADDED2" = "False" ] && ok "表情回应可取消" || bad "取消回应 added=$ADDED2"
+
+        # 已读
+        UNREAD=$(curl -s -m 10 -X POST "$BASE/channels/$CH_ID/read" -H "$AUTH"                  -H "Content-Type: application/json" -d '{}' | json_field "['data']['unread']")
+        [ "$UNREAD" = "0" ] && ok "标记已读后未读归零" || bad "已读后未读=$UNREAD"
+
+        # 撤回
+        CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X POST "$BASE/messages/$MSG_ID/recall" -H "$AUTH")
+        [ "$CODE" = "200" ] && ok "撤回消息" || bad "撤回消息返回 $CODE"
+
+        # 撤回后不能再编辑
+        CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/messages/$MSG_ID" -H "$AUTH"                -H "Content-Type: application/json" -d '{"content":"x"}')
+        [ "$CODE" = "400" ] && ok "已撤回消息不可编辑（400）" || bad "撤回后编辑返回 $CODE（期望 400）"
+    fi
+else
+    bad "没有可用的项目频道"
+fi
+
+# 通知偏好
+PREF=$(curl -s -m 10 "$BASE/notification-preferences" -H "$AUTH")
+TYPES_N=$(echo "$PREF" | python -c "import sys,json;d=json.load(sys.stdin);print(len((d.get('data') or {}).get('types') or {}))" 2>/dev/null || echo 0)
+[ "${TYPES_N:-0}" -ge 5 ] && ok "读取通知偏好（$TYPES_N 个类型）" || bad "通知偏好类型数=$TYPES_N"
+
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/notification-preferences" -H "$AUTH"        -H "Content-Type: application/json" -d '{"types":{"COMMENT":false},"dndEnabled":true,"dndStart":"22:00","dndEnd":"08:00"}')
+[ "$CODE" = "200" ] && ok "保存通知偏好与免打扰" || bad "保存通知偏好返回 $CODE"
+
+# 校验回读
+DND=$(curl -s -m 10 "$BASE/notification-preferences" -H "$AUTH" | json_field "['data']['dndEnabled']")
+[ "$DND" = "True" ] && ok "免打扰设置已持久化" || bad "免打扰回读=$DND"
+
+# 全文索引
+FT=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema='$DB_NAME' AND index_type='FULLTEXT';")
+[ "${FT:-0}" -ge 4 ] && ok "全文索引已创建（$FT 个）" || bad "全文索引数=$FT（期望 ≥4）"
 
 # ============================================
 # 汇总

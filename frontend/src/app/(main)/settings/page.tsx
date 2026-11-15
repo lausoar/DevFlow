@@ -13,6 +13,7 @@ import { useUpdateProfile, useChangePassword, useUpdateAvatar } from '@/lib/hook
 import type { User as UserType } from '@/types';
 import { User, Lock, Save, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { MfaCard } from '@/components/auth/mfa-card';
+import { NotificationPreferencesCard } from '@/components/settings/notification-preferences-card';
 import { useMfaStatus } from '@/lib/hooks/use-security';
 
 // ============================================
@@ -38,6 +39,9 @@ export default function SettingsPage() {
 
           {/* 双因素认证 */}
           <MfaCard />
+
+          {/* 通知偏好 */}
+          <NotificationPreferencesCard />
         </div>
       </div>
     </MainLayout>

@@ -34,6 +34,7 @@ public class SearchServiceImpl implements SearchService {
     private final BugMapper bugMapper;
     private final RequirementMapper requirementMapper;
     private final DocumentMapper documentMapper;
+    private final com.devflow.service.FullTextSearchService fullTextSearchService;
 
     /** 每类结果上限 */
     private static final int LIMIT = 10;
@@ -62,41 +63,28 @@ public class SearchServiceImpl implements SearchService {
                 .stream().map(p -> item(p.getId(), p.getName(), p.getId(),
                         orEmpty(p.getDescription()), p.getCreatedAt())).toList());
 
-        // 任务：标题
-        result.put("tasks", taskMapper.selectList(new LambdaQueryWrapper<Task>()
-                        .in(Task::getProjectId, projectIds)
-                        .like(Task::getTitle, like)
-                        .orderByDesc(Task::getCreatedAt)
-                        .last("LIMIT " + LIMIT))
-                .stream().map(t -> item(t.getId(), t.getTitle(), t.getProjectId(),
-                        statusLabel(t.getStatus()), t.getCreatedAt())).toList());
+        // 任务 / Bug / 需求 / 文档：走全文检索（标题 + 正文/描述），
+        // 短查询与纯英文词在 fullTextSearchService 内部回落 LIKE。
+        List<Task> tasks = fullTextSearchService.fetchByIds("TASK",
+                fullTextSearchService.searchIds("TASK", q, projectIds, LIMIT));
+        result.put("tasks", tasks.stream().map(t -> item(t.getId(), t.getTitle(), t.getProjectId(),
+                statusLabel(t.getStatus()), t.getCreatedAt())).toList());
 
-        // Bug：标题
-        result.put("bugs", bugMapper.selectList(new LambdaQueryWrapper<Bug>()
-                        .in(Bug::getProjectId, projectIds)
-                        .like(Bug::getTitle, like)
-                        .orderByDesc(Bug::getCreatedAt)
-                        .last("LIMIT " + LIMIT))
-                .stream().map(b -> item(b.getId(), b.getTitle(), b.getProjectId(),
-                        statusLabel(b.getStatus()), b.getCreatedAt())).toList());
+        List<Bug> bugs = fullTextSearchService.fetchByIds("BUG",
+                fullTextSearchService.searchIds("BUG", q, projectIds, LIMIT));
+        result.put("bugs", bugs.stream().map(b -> item(b.getId(), b.getTitle(), b.getProjectId(),
+                statusLabel(b.getStatus()), b.getCreatedAt())).toList());
 
-        // 需求：标题
-        result.put("requirements", requirementMapper.selectList(new LambdaQueryWrapper<Requirement>()
-                        .in(Requirement::getProjectId, projectIds)
-                        .like(Requirement::getTitle, like)
-                        .orderByDesc(Requirement::getCreatedAt)
-                        .last("LIMIT " + LIMIT))
-                .stream().map(r -> item(r.getId(), r.getTitle(), r.getProjectId(),
-                        statusLabel(r.getStatus()), r.getCreatedAt())).toList());
+        List<Requirement> requirements = fullTextSearchService.fetchByIds("REQUIREMENT",
+                fullTextSearchService.searchIds("REQUIREMENT", q, projectIds, LIMIT));
+        result.put("requirements", requirements.stream().map(r -> item(r.getId(), r.getTitle(), r.getProjectId(),
+                statusLabel(r.getStatus()), r.getCreatedAt())).toList());
 
-        // 文档：标题
-        result.put("documents", documentMapper.selectList(new LambdaQueryWrapper<Document>()
-                        .in(Document::getProjectId, projectIds)
-                        .like(Document::getTitle, like)
-                        .orderByDesc(Document::getCreatedAt)
-                        .last("LIMIT " + LIMIT))
-                .stream().map(d -> item(d.getId(), d.getTitle(), d.getProjectId(),
-                        "文档", d.getCreatedAt())).toList());
+        // 文档：同时检索正文（此前只查标题，正文完全搜不到）
+        List<Document> documents = fullTextSearchService.fetchByIds("DOCUMENT",
+                fullTextSearchService.searchIds("DOCUMENT", q, projectIds, LIMIT));
+        result.put("documents", documents.stream().map(d -> item(d.getId(), d.getTitle(), d.getProjectId(),
+                "文档", d.getCreatedAt())).toList());
 
         return result;
     }

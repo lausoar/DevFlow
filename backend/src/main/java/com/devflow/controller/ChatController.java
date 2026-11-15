@@ -50,6 +50,7 @@ public class ChatController {
     private final SimpMessagingTemplate messagingTemplate;
     private final AiChatAssistantService aiAssistant;
     private final AccessGuard guard;
+    private final com.devflow.service.ChatMessageActionService messageActionService;
 
     // ==================== REST 接口 ====================
 
@@ -112,12 +113,20 @@ public class ChatController {
             @RequestParam(defaultValue = "50") Integer pageSize,
             Authentication authentication) {
 
-        requireChannel(guard.userId(authentication), channelId);
+        String userId = guard.userId(authentication);
+        requireChannel(userId, channelId);
         Page<ChatMessage> pageParam = new Page<>(page, pageSize);
         Page<ChatMessage> result = messageMapper.selectMessagesWithUser(pageParam, channelId);
         // SQL 按时间倒序取"最新一页"，这里翻回正序，前端按时间自上而下渲染
         result.setRecords(new java.util.ArrayList<>(result.getRecords()));
         java.util.Collections.reverse(result.getRecords());
+        result.getRecords().forEach(m -> {
+            // 撤回的消息不返回原文（服务端已置占位，这里再兜一层）
+            if (m.getRecalledAt() != null) {
+                m.setOriginalContent(null);
+            }
+        });
+        // 顺带返回未读数，前端可省一次请求
         return R.ok(result);
     }
 
@@ -168,6 +177,16 @@ public class ChatController {
     // ==================== 内部 ====================
 
     /** 频道必须存在且所属项目对当前用户可见，否则 404（不泄露存在性） */
+    /** 频道未读数（委托消息动作服务，避免前端为未读再打一个端点） */
+    @Operation(summary = "频道未读数")
+    @GetMapping("/channels/{channelId}/unread-count")
+    public R<java.util.Map<String, Integer>> unreadCount(@PathVariable String channelId,
+                                                         Authentication authentication) {
+        String userId = guard.userId(authentication);
+        requireChannel(userId, channelId);
+        return R.ok(java.util.Map.of("unread", messageActionService.unreadCount(channelId, userId)));
+    }
+
     private ChatChannel requireChannel(String userId, String channelId) {
         ChatChannel channel = StringUtils.hasText(channelId) ? channelMapper.selectById(channelId) : null;
         if (channel == null || !StringUtils.hasText(channel.getProjectId())

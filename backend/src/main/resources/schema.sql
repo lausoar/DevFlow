@@ -1180,3 +1180,58 @@ CREATE TABLE IF NOT EXISTS program (
 -- 项目挂项目集（一个项目至多属于一个项目集）
 ALTER TABLE project ADD COLUMN program_id VARCHAR(36) DEFAULT NULL COMMENT '所属项目集（program.id）';
 ALTER TABLE project ADD KEY idx_program (program_id);
+
+-- ============================================
+-- 第 6 批：IM 基础能力、通知偏好、全文检索（见 docs/BATCH6_COLLABORATION.md）
+-- ============================================
+
+-- 消息已读回执：按"频道 + 用户"记录已读位置，比逐条已读表省一个数量级
+CREATE TABLE IF NOT EXISTS chat_read_state (
+    id VARCHAR(36) PRIMARY KEY COMMENT 'ID',
+    channel_id VARCHAR(36) NOT NULL COMMENT '频道ID',
+    user_id VARCHAR(36) NOT NULL COMMENT '用户ID',
+    last_read_at DATETIME(3) NOT NULL COMMENT '已读至该时间点（含）',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    UNIQUE KEY uk_channel_user (channel_id, user_id),
+    KEY idx_user (user_id)
+) ENGINE=InnoDB COMMENT='频道已读位置';
+
+-- 消息表情回应：一条消息 × 一个用户 × 一个表情唯一
+CREATE TABLE IF NOT EXISTS chat_reaction (
+    id VARCHAR(36) PRIMARY KEY COMMENT 'ID',
+    message_id VARCHAR(36) NOT NULL COMMENT '消息ID',
+    user_id VARCHAR(36) NOT NULL COMMENT '用户ID',
+    emoji VARCHAR(16) NOT NULL COMMENT '表情（Unicode 字符或短码）',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    UNIQUE KEY uk_message_user_emoji (message_id, user_id, emoji),
+    KEY idx_message (message_id)
+) ENGINE=InnoDB COMMENT='消息表情回应';
+
+-- 消息编辑/撤回留痕（原内容不再对外，但审计可查）
+ALTER TABLE chat_message ADD COLUMN edited_at DATETIME(3) DEFAULT NULL COMMENT '编辑时间';
+ALTER TABLE chat_message ADD COLUMN recalled_at DATETIME(3) DEFAULT NULL COMMENT '撤回时间';
+ALTER TABLE chat_message ADD COLUMN recalled_by VARCHAR(36) DEFAULT NULL COMMENT '撤回操作人';
+ALTER TABLE chat_message ADD COLUMN original_content TEXT DEFAULT NULL COMMENT '撤回前的原文（仅审计可见）';
+
+-- 通知偏好：按类型开关 + 免打扰时段
+CREATE TABLE IF NOT EXISTS notification_preference (
+    id VARCHAR(36) PRIMARY KEY COMMENT 'ID',
+    user_id VARCHAR(36) NOT NULL COMMENT '用户ID',
+    type VARCHAR(20) NOT NULL COMMENT '通知类型（与 notification.type 对应）',
+    enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否接收该类型通知',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    UNIQUE KEY uk_user_type (user_id, type)
+) ENGINE=InnoDB COMMENT='通知类型偏好';
+
+-- 免打扰：全局时段（跨小时或跨天时 start > end 表示跨天）
+ALTER TABLE sys_user ADD COLUMN dnd_start TIME DEFAULT NULL COMMENT '免打扰开始时间';
+ALTER TABLE sys_user ADD COLUMN dnd_end TIME DEFAULT NULL COMMENT '免打扰结束时间';
+ALTER TABLE sys_user ADD COLUMN dnd_enabled TINYINT NOT NULL DEFAULT 0 COMMENT '是否启用免打扰';
+
+-- 全文检索：ngram 分词（中文按 2-gram 切分），替代 LIKE '%kw%' 的全表扫描。
+-- 注意：ngram_token_size 默认 2，若要支持单字检索需在 my.cnf 调成 1（代价是索引膨胀）。
+ALTER TABLE document ADD FULLTEXT KEY ft_document (title, content) WITH PARSER ngram;
+ALTER TABLE task ADD FULLTEXT KEY ft_task (title, description) WITH PARSER ngram;
+ALTER TABLE bug ADD FULLTEXT KEY ft_bug (title, description) WITH PARSER ngram;
+ALTER TABLE requirement ADD FULLTEXT KEY ft_requirement (title, description) WITH PARSER ngram;
+ALTER TABLE chat_message ADD FULLTEXT KEY ft_chat_message (content) WITH PARSER ngram;

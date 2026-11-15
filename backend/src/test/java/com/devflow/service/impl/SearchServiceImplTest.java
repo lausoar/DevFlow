@@ -23,6 +23,8 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -45,6 +47,8 @@ class SearchServiceImplTest {
     private RequirementMapper requirementMapper;
     @Mock
     private DocumentMapper documentMapper;
+    @Mock
+    private com.devflow.service.FullTextSearchService fullTextSearchService;
 
     @InjectMocks
     private SearchServiceImpl service;
@@ -107,27 +111,43 @@ class SearchServiceImplTest {
         task.setTitle("编写导出功能");
         task.setProjectId("p1");
         task.setStatus("DOING");
-        when(taskMapper.selectList(any())).thenReturn(List.of(task));
 
         Bug bug = new Bug();
         bug.setId("b1");
         bug.setTitle("导出乱码");
         bug.setProjectId("p1");
         bug.setStatus("NEW");
-        when(bugMapper.selectList(any())).thenReturn(List.of(bug));
 
         Requirement requirement = new Requirement();
         requirement.setId("r1");
         requirement.setTitle("支持导出");
         requirement.setProjectId("p1");
         requirement.setStatus("APPROVED");
-        when(requirementMapper.selectList(any())).thenReturn(List.of(requirement));
 
         Document document = new Document();
         document.setId("d1");
         document.setTitle("导出说明");
         document.setProjectId("p1");
-        when(documentMapper.selectList(any())).thenReturn(List.of(document));
+
+        // 全文检索：每类都命中所 stub 的 id，回表返回对应实体
+        when(fullTextSearchService.searchIds(eq("TASK"), any(), any(), anyInt())).thenReturn(List.of("t1"));
+        when(fullTextSearchService.searchIds(eq("BUG"), any(), any(), anyInt())).thenReturn(List.of("b1"));
+        when(fullTextSearchService.searchIds(eq("REQUIREMENT"), any(), any(), anyInt())).thenReturn(List.of("r1"));
+        when(fullTextSearchService.searchIds(eq("DOCUMENT"), any(), any(), anyInt())).thenReturn(List.of("d1"));
+        Task taskHit = new Task();
+        taskHit.setId("t1");
+        taskHit.setTitle("编写导出功能");
+        taskHit.setProjectId("p1");
+        taskHit.setStatus("DOING");
+        Bug bugHit = new Bug();
+        bugHit.setId("b1");
+        bugHit.setTitle("导出乱码");
+        bugHit.setProjectId("p1");
+        bugHit.setStatus("NEW");
+        when(fullTextSearchService.fetchByIds("TASK", List.of("t1"))).thenReturn(List.of(taskHit));
+        when(fullTextSearchService.fetchByIds("BUG", List.of("b1"))).thenReturn(List.of(bugHit));
+        when(fullTextSearchService.fetchByIds("REQUIREMENT", List.of("r1"))).thenReturn(List.of(requirement));
+        when(fullTextSearchService.fetchByIds("DOCUMENT", List.of("d1"))).thenReturn(List.of(document));
 
         Map<String, Object> result = service.search(USER_ID, "导出");
 
@@ -152,16 +172,21 @@ class SearchServiceImplTest {
         // 项目名称/描述搜索无命中
         when(projectMapper.selectList(any())).thenReturn(List.of());
 
-        when(taskMapper.selectList(any())).thenReturn(List.of());
-        when(bugMapper.selectList(any())).thenReturn(List.of());
-
         Requirement requirement = new Requirement();
         requirement.setId("r1");
         requirement.setTitle("关键词命中");
         requirement.setProjectId("p1");
         requirement.setStatus("APPROVED");
-        when(requirementMapper.selectList(any())).thenReturn(List.of(requirement));
-        when(documentMapper.selectList(any())).thenReturn(List.of());
+
+        // 只有需求类型命中，其余返回空
+        when(fullTextSearchService.searchIds(eq("TASK"), any(), any(), anyInt())).thenReturn(List.of());
+        when(fullTextSearchService.searchIds(eq("BUG"), any(), any(), anyInt())).thenReturn(List.of());
+        when(fullTextSearchService.searchIds(eq("REQUIREMENT"), any(), any(), anyInt())).thenReturn(List.of("r1"));
+        when(fullTextSearchService.searchIds(eq("DOCUMENT"), any(), any(), anyInt())).thenReturn(List.of());
+        when(fullTextSearchService.fetchByIds(eq("TASK"), any())).thenReturn(List.of());
+        when(fullTextSearchService.fetchByIds(eq("BUG"), any())).thenReturn(List.of());
+        when(fullTextSearchService.fetchByIds("REQUIREMENT", List.of("r1"))).thenReturn(List.of(requirement));
+        when(fullTextSearchService.fetchByIds(eq("DOCUMENT"), any())).thenReturn(List.of());
 
         Map<String, Object> result = service.search(USER_ID, "关键词");
         assertThat(result.get("requirements")).asList().hasSize(1);

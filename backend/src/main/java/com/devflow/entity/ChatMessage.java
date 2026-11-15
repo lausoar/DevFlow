@@ -25,6 +25,18 @@ public class ChatMessage {
     private Integer isEdited;
     private Integer isDeleted;
 
+    /** 编辑时间（为空表示未编辑） */
+    private LocalDateTime editedAt;
+
+    /** 撤回时间（不为空表示已撤回，内容不再对外） */
+    private LocalDateTime recalledAt;
+
+    /** 撤回操作人 */
+    private String recalledBy;
+
+    /** 撤回前的原文（仅审计可见，不返回给前端） */
+    private String originalContent;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

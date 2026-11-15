@@ -59,6 +59,15 @@ public class User {
     /** 上次改密时间 */
     private LocalDateTime passwordUpdatedAt;
 
+    /** 免打扰开始时间（与结束时间配合，start > end 表示跨天） */
+    private java.time.LocalTime dndStart;
+
+    /** 免打扰结束时间 */
+    private java.time.LocalTime dndEnd;
+
+    /** 是否启用免打扰 */
+    private Integer dndEnabled;
+
     /** 逻辑删除 */
     @TableLogic
     private Integer deleted;
