@@ -31,6 +31,7 @@ import {
   useDeleteWorklog,
 } from '@/lib/hooks/use-task-extras';
 import { Progress } from '@/components/ui/progress';
+import { Loader2 } from 'lucide-react';
 import { Plus, Search, GripVertical, Calendar, User, Zap, ChevronDown, ChevronRight, Pencil, Trash2, MessageSquare, X, Link2, Timer, Download } from 'lucide-react';
 import { downloadCsv } from '@/lib/csv';
 import { useProjectMembers } from '@/lib/hooks/use-projects';
@@ -50,6 +51,9 @@ import {
 import type { Task, TaskStatus, Priority, Sprint } from '@/types';
 import type { TaskChecklistItem } from '@/lib/api/task';
 import { TaskCommentsPanel } from './task-comments-panel';
+import { CustomFieldsSection } from './custom-fields-section';
+import { SavedFiltersPanel } from './saved-filters-panel';
+import { queryApi } from '@/lib/api/query';
 
 // ============================================
 // 看板列定义
@@ -129,6 +133,30 @@ export function TasksTab({ projectId }: { projectId: string }) {
   });
 
   // 导出当前看板任务为 CSV
+  // 执行保存视图：用 /query 取回命中任务的 id 集合，再看板内按 id 过滤。
+  // 这样看板本身（拖拽、分页）不受影响，只是把列表缩到视图范围内。
+  const [viewIds, setViewIds] = useState<Set<string> | null>(null);
+  const [viewLabel, setViewLabel] = useState<string | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+  const handleApplyView = async (expression: string) => {
+    setViewLoading(true);
+    try {
+      const res = await queryApi.run({
+        entity: 'TASK',
+        expression,
+        projectId,
+        pageSize: 200,
+      });
+      const ids = new Set((res.data.records || []).map((r) => String((r as { id?: string }).id)));
+      setViewIds(ids);
+      setViewLabel(expression);
+    } catch (e) {
+      alert((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '视图执行失败');
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
   const handleExportTasks = () => {
     downloadCsv(
       `任务列表-${new Date().toISOString().slice(0, 10)}`,
@@ -145,10 +173,10 @@ export function TasksTab({ projectId }: { projectId: string }) {
     );
   };
 
-  // 按搜索过滤
-  const filteredTasks = search
-    ? tasks.filter((t) => t.title.toLowerCase().includes(search.toLowerCase()))
-    : tasks;
+  // 按视图 + 搜索过滤
+  const filteredTasks = tasks
+    .filter((t) => !viewIds || viewIds.has(t.id))
+    .filter((t) => !search || t.title.toLowerCase().includes(search.toLowerCase()));
 
   // 按状态分组（列来自工作流配置）
   const tasksByStatus: Record<string, Task[]> = {};
@@ -246,6 +274,14 @@ export function TasksTab({ projectId }: { projectId: string }) {
             className="pl-9"
           />
         </div>
+        {viewLoading ? (
+          <Button variant="outline" size="sm" className="gap-1" disabled>
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            加载视图
+          </Button>
+        ) : (
+          <SavedFiltersPanel projectId={projectId} entity="TASK" onRun={handleApplyView} />
+        )}
         <Button variant="outline" size="sm" className="gap-1" onClick={handleExportTasks} title="导出当前看板任务">
           <Download className="h-3.5 w-3.5" />
           导出
@@ -338,6 +374,20 @@ export function TasksTab({ projectId }: { projectId: string }) {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* 当前生效的视图 */}
+      {viewIds && (
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs">
+          <span className="font-medium">视图生效</span>
+          <code className="flex-1 truncate text-muted-foreground">{viewLabel}</code>
+          <Button
+            variant="ghost" size="sm" className="h-6 text-xs"
+            onClick={() => { setViewIds(null); setViewLabel(null); }}
+          >
+            清除
+          </Button>
+        </div>
+      )}
 
       {/* Sprint 管理面板 */}
       <div className="mb-4 rounded-xl border bg-card">
@@ -710,6 +760,9 @@ function TaskEditDialog({
             </div>
           )}
         </div>
+
+        {/* 扩展字段（项目自定义） */}
+        <CustomFieldsSection projectId={projectId} issueType="TASK" issueId={task.id} editable />
 
         {/* 清单（子任务） */}
         <TaskChecklistSection taskId={task.id} />

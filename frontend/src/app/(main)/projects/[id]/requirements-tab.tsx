@@ -58,6 +58,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { BugDescriptionField } from './bug-description-field';
 import { RichDescription } from './rich-description';
 import { WalkthroughPanel } from './walkthrough-panel';
+import { CustomFieldsSection } from './custom-fields-section';
 import { useTasks } from '@/lib/hooks/use-tasks';
 import type { Requirement, RequirementStatus, Priority } from '@/types';
 
@@ -776,6 +777,14 @@ function RequirementDetailDialog({
               <p className="text-[11px] text-muted-foreground">项目中的任务都已关联（或暂无任务），可到任务页新建</p>
             )}
           </div>
+          {/* 扩展字段（项目自定义） */}
+          <CustomFieldsSection
+            projectId={projectId}
+            issueType="REQUIREMENT"
+            issueId={effectiveRequirement.id}
+            editable={canManageStatus}
+          />
+
           {/* UI 走查（只对参与需求管理的人可编辑） */}
           <WalkthroughPanel requirementId={effectiveRequirement.id} canManage={canManageStatus} />
 

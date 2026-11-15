@@ -1120,3 +1120,63 @@ ALTER TABLE activity_log ADD COLUMN record_hash VARCHAR(64) DEFAULT NULL COMMENT
 ALTER TABLE activity_log ADD COLUMN ip VARCHAR(64) DEFAULT NULL COMMENT '操作来源 IP';
 ALTER TABLE activity_log ADD COLUMN user_agent VARCHAR(300) DEFAULT NULL COMMENT '操作来源 UA';
 ALTER TABLE activity_log ADD KEY idx_enterprise_id_created (enterprise_id, id);
+
+-- ============================================
+-- 第 5 批：自定义字段（权威定义见 db/migration/V4__batch5_custom_fields.sql）
+-- 注意：Flyway 尚未接入，这里是启动时实际执行的位置
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS custom_field (
+    id VARCHAR(36) PRIMARY KEY COMMENT '字段ID',
+    project_id VARCHAR(36) NOT NULL COMMENT '所属项目',
+    issue_type VARCHAR(20) NOT NULL COMMENT '适用对象: TASK/BUG/REQUIREMENT',
+    field_key VARCHAR(60) NOT NULL COMMENT '字段标识（项目内同一对象类型唯一）',
+    name VARCHAR(100) NOT NULL COMMENT '展示名',
+    type VARCHAR(20) NOT NULL COMMENT '类型: TEXT/TEXTAREA/NUMBER/DATE/SELECT/MULTI_SELECT/USER/CHECKBOX',
+    options TEXT DEFAULT NULL COMMENT '选项 JSON 数组（SELECT/MULTI_SELECT 用）',
+    required TINYINT NOT NULL DEFAULT 0 COMMENT '是否必填',
+    default_value VARCHAR(500) DEFAULT NULL COMMENT '默认值',
+    sort INT NOT NULL DEFAULT 0 COMMENT '展示顺序',
+    description VARCHAR(255) DEFAULT NULL COMMENT '字段说明（表单提示）',
+    enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用（停用不删数据）',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    UNIQUE KEY uk_project_type_key (project_id, issue_type, field_key),
+    KEY idx_project_type (project_id, issue_type)
+) ENGINE=InnoDB COMMENT='自定义字段定义';
+
+CREATE TABLE IF NOT EXISTS custom_field_value (
+    id VARCHAR(36) PRIMARY KEY COMMENT 'ID',
+    field_id VARCHAR(36) NOT NULL COMMENT '字段ID',
+    issue_id VARCHAR(36) NOT NULL COMMENT '工作项ID',
+    issue_type VARCHAR(20) NOT NULL COMMENT '工作项类型',
+    project_id VARCHAR(36) NOT NULL COMMENT '项目ID（冗余，便于按项目清理）',
+    value TEXT DEFAULT NULL COMMENT '值（文本/数字/日期原样存；多选存 JSON 数组）',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    UNIQUE KEY uk_field_issue (field_id, issue_id),
+    KEY idx_issue (issue_id, issue_type),
+    KEY idx_project (project_id)
+) ENGINE=InnoDB COMMENT='自定义字段值';
+
+-- ============================================
+-- 第 5 批：项目集（Program）与备份说明（见 docs/BATCH5_ENTERPRISE_SCALE.md）
+-- ============================================
+
+-- 项目集：企业下的一组项目（产品线/业务线），支持跨项目里程碑与资源视图
+CREATE TABLE IF NOT EXISTS program (
+    id VARCHAR(36) PRIMARY KEY COMMENT '项目集ID',
+    enterprise_id VARCHAR(36) NOT NULL COMMENT '所属企业',
+    name VARCHAR(100) NOT NULL COMMENT '项目集名称',
+    description TEXT DEFAULT NULL COMMENT '说明',
+    owner_id VARCHAR(36) DEFAULT NULL COMMENT '负责人',
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态: ACTIVE/ARCHIVED',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    KEY idx_enterprise (enterprise_id)
+) ENGINE=InnoDB COMMENT='项目集';
+
+-- 项目挂项目集（一个项目至多属于一个项目集）
+ALTER TABLE project ADD COLUMN program_id VARCHAR(36) DEFAULT NULL COMMENT '所属项目集（program.id）';
+ALTER TABLE project ADD KEY idx_program (program_id);

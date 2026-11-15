@@ -41,6 +41,9 @@ public class Project {
     /** Git Webhook 密钥 */
     private String gitWebhookSecret;
 
+    /** 所属项目集（program.id，可空） */
+    private String programId;
+
     /** 状态: ACTIVE / ARCHIVED / PLANNING */
     private String status;
 

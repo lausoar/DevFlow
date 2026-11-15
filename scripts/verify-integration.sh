@@ -87,14 +87,14 @@ fi
 # 3. 新表必须真的存在（回归："新表从未创建"）
 # ============================================
 info "检查第 2-4 批新增的表"
-REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item"
+REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program"
 MISSING=""
 for t in $REQUIRED_TABLES; do
     n=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='$t';")
     [ "$n" = "1" ] || MISSING="$MISSING $t"
 done
 if [ -z "$MISSING" ]; then
-    ok "15 张新表全部创建"
+    ok "17 张新表全部创建"
 else
     bad "缺少表:$MISSING（schema.sql 里是否漏了 CREATE TABLE？）"
 fi
@@ -312,6 +312,68 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 5 "http://127.0.0.1:${MGMT_PORT
 [ "$CODE" = "200" ] && ok "Prometheus 指标可抓取（管理端口）" || bad "Prometheus 返回 $CODE"
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 5 "http://127.0.0.1:${APP_PORT}/actuator/prometheus")
 [ "$CODE" != "200" ] && ok "业务端口未暴露指标端点" || bad "业务端口暴露了 /actuator/prometheus"
+
+# ============================================
+# 第 5 批：自定义字段
+# ============================================
+FIELD=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/custom-fields?issueType=TASK" -H "$AUTH"         -H "Content-Type: application/json"         -d '{"fieldKey":"impact","name":"Impact Area","type":"SELECT","options":"[\"frontend\",\"backend\"]","required":1}')
+FIELD_ID=$(echo "$FIELD" | json_field "['data']['id']")
+[ -n "$FIELD_ID" ] && ok "创建自定义字段" || bad "创建自定义字段失败：$FIELD"
+
+# 重复 fieldKey → 409
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X POST "$BASE/projects/$PROJ_ID/custom-fields?issueType=TASK" -H "$AUTH"        -H "Content-Type: application/json"        -d '{"fieldKey":"impact","name":"Duplicate","type":"TEXT"}')
+[ "$CODE" = "409" ] && ok "重复字段标识被拒绝（409）" || bad "重复字段标识返回 $CODE"
+
+if [ -n "$FIELD_ID" ] && [ -n "$TASK_ID" ]; then
+    # 必填未填 → 400
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/TASK/$TASK_ID/custom-field-values" -H "$AUTH"            -H "Content-Type: application/json" -d '{"values":{}}')
+    [ "$CODE" = "400" ] && ok "必填字段缺失被拒绝（400）" || bad "必填校验返回 $CODE（期望 400）"
+
+    # 合法值 → 200
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/TASK/$TASK_ID/custom-field-values" -H "$AUTH"            -H "Content-Type: application/json" -d '{"values":{"impact":"frontend"}}')
+    [ "$CODE" = "200" ] && ok "保存自定义字段值" || bad "保存字段值返回 $CODE"
+
+    # 选项外的值 → 400
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/TASK/$TASK_ID/custom-field-values" -H "$AUTH"            -H "Content-Type: application/json" -d '{"values":{"impact":"not-an-option"}}')
+    [ "$CODE" = "400" ] && ok "非法选项被拒绝（400）" || bad "非法选项返回 $CODE（期望 400）"
+
+    # 未知字段 → 400
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/TASK/$TASK_ID/custom-field-values" -H "$AUTH"            -H "Content-Type: application/json" -d '{"values":{"nope":"x"}}')
+    [ "$CODE" = "400" ] && ok "未知字段被拒绝（400）" || bad "未知字段返回 $CODE（期望 400）"
+
+    # 读回
+    VAL=$(curl -s -m 10 "$BASE/TASK/$TASK_ID/custom-field-values" -H "$AUTH" | json_field "['data']['impact']")
+    [ "$VAL" = "frontend" ] && ok "自定义字段值可读回" || bad "读回值=$VAL（期望 frontend）"
+fi
+
+# ============================================
+# 第 5 批：项目集
+# ============================================
+PROG=$(curl -s -m 10 -X POST "$BASE/enterprises/$ENT_ID/programs" -H "$AUTH"        -H "Content-Type: application/json" -d '{"name":"CI Program"}')
+PROG_ID=$(echo "$PROG" | json_field "['data']['id']")
+[ -n "$PROG_ID" ] && ok "创建项目集" || bad "创建项目集失败：$PROG"
+
+if [ -n "$PROG_ID" ]; then
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/projects/$PROJ_ID/program" -H "$AUTH"            -H "Content-Type: application/json" -d "{\"programId\":\"$PROG_ID\"}")
+    [ "$CODE" = "200" ] && ok "项目归入项目集" || bad "项目归集返回 $CODE"
+
+    COUNT=$(curl -s -m 10 "$BASE/programs/$PROG_ID" -H "$AUTH" | json_field "['data']['projectCount']")
+    [ "$COUNT" = "1" ] && ok "项目集概览识别到 1 个项目" || bad "项目集项目数=$COUNT（期望 1）"
+fi
+
+# ============================================
+# 第 5 批：备份脚本可用性
+# ============================================
+if [ -x "$ROOT_DIR/scripts/db-backup.sh" ] || [ -f "$ROOT_DIR/scripts/db-backup.sh" ]; then
+    BK_DIR="$WORK_DIR/bktest"
+    if DB_NAME="$DB_NAME" BACKUP_DIR="$BK_DIR" bash "$ROOT_DIR/scripts/db-backup.sh" >/dev/null 2>&1        && ls "$BK_DIR"/*.sql.gz >/dev/null 2>&1; then
+        ok "数据库备份脚本可执行且产出备份文件"
+    else
+        bad "数据库备份脚本执行失败"
+    fi
+else
+    bad "缺少 scripts/db-backup.sh"
+fi
 
 # ============================================
 # 汇总
