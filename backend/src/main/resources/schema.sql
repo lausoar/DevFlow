@@ -807,6 +807,238 @@ ALTER TABLE chat_message ADD KEY idx_channel_created (channel_id, created_at);
 ALTER TABLE document ADD KEY idx_parent (parent_id);
 
 -- ============================================
+-- 第 2/3 批新增表（权威定义同时保留在 db/migration/ 下，供未来 Flyway 接入）
+-- 注意：Flyway 尚未接入，这里是启动时实际执行的位置；缺了这段，
+-- 对应的接口会在运行时报 "Table doesn't exist"
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS workflow (
+    id VARCHAR(36) PRIMARY KEY COMMENT '工作流ID',
+    project_id VARCHAR(36) DEFAULT NULL COMMENT '所属项目；NULL 表示全局默认模板',
+    name VARCHAR(100) NOT NULL COMMENT '工作流名称',
+    issue_type VARCHAR(20) NOT NULL COMMENT '适用问题类型: TASK/BUG/REQUIREMENT',
+    is_default TINYINT NOT NULL DEFAULT 0 COMMENT '是否该项目该类型的默认工作流',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    KEY idx_project_type (project_id, issue_type)
+) ENGINE=InnoDB COMMENT='工作流定义';
+
+CREATE TABLE IF NOT EXISTS workflow_status (
+    id VARCHAR(36) PRIMARY KEY COMMENT '状态ID',
+    workflow_id VARCHAR(36) NOT NULL COMMENT '所属工作流',
+    code VARCHAR(40) NOT NULL COMMENT '状态码（存进业务表 status 字段的值）',
+    name VARCHAR(40) NOT NULL COMMENT '展示名',
+    category VARCHAR(20) NOT NULL COMMENT '归一分类: TODO/IN_PROGRESS/DONE（报表口径依赖它）',
+    color VARCHAR(20) DEFAULT NULL COMMENT '看板列颜色',
+    sort INT NOT NULL DEFAULT 0 COMMENT '看板列顺序',
+    is_initial TINYINT NOT NULL DEFAULT 0 COMMENT '是否新建时的初始状态',
+    is_terminal TINYINT NOT NULL DEFAULT 0 COMMENT '是否终态',
+    UNIQUE KEY uk_workflow_code (workflow_id, code),
+    KEY idx_workflow_sort (workflow_id, sort)
+) ENGINE=InnoDB COMMENT='工作流状态';
+
+CREATE TABLE IF NOT EXISTS workflow_transition (
+    id VARCHAR(36) PRIMARY KEY COMMENT '流转ID',
+    workflow_id VARCHAR(36) NOT NULL COMMENT '所属工作流',
+    from_status VARCHAR(40) NOT NULL COMMENT '起始状态码',
+    to_status VARCHAR(40) NOT NULL COMMENT '目标状态码',
+    name VARCHAR(60) DEFAULT NULL COMMENT '流转动作名',
+    UNIQUE KEY uk_transition (workflow_id, from_status, to_status),
+    KEY idx_workflow (workflow_id)
+) ENGINE=InnoDB COMMENT='工作流流转规则';
+
+CREATE TABLE IF NOT EXISTS project_release (
+    id VARCHAR(36) PRIMARY KEY COMMENT '版本ID',
+    project_id VARCHAR(36) NOT NULL COMMENT '所属项目',
+    name VARCHAR(100) NOT NULL COMMENT '版本名称',
+    version VARCHAR(40) NOT NULL COMMENT '版本号（项目内唯一）',
+    status VARCHAR(20) NOT NULL DEFAULT 'UNRELEASED' COMMENT '状态: UNRELEASED/RELEASED/ARCHIVED',
+    description TEXT DEFAULT NULL COMMENT '版本说明',
+    release_date DATE DEFAULT NULL COMMENT '计划发布日期',
+    released_at DATETIME DEFAULT NULL COMMENT '实际发布时间',
+    released_by VARCHAR(36) DEFAULT NULL COMMENT '发布操作人',
+    release_notes TEXT DEFAULT NULL COMMENT '发布说明（Markdown）',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    UNIQUE KEY uk_project_version (project_id, version, deleted),
+    KEY idx_project_status (project_id, status)
+) ENGINE=InnoDB COMMENT='项目版本/发布';
+
+CREATE TABLE IF NOT EXISTS test_plan (
+    id VARCHAR(36) PRIMARY KEY COMMENT '测试计划ID',
+    project_id VARCHAR(36) NOT NULL COMMENT '所属项目',
+    name VARCHAR(200) NOT NULL COMMENT '计划名称',
+    description TEXT DEFAULT NULL COMMENT '计划说明',
+    status VARCHAR(20) NOT NULL DEFAULT 'PLANNING' COMMENT '状态: PLANNING/ACTIVE/COMPLETED',
+    owner_id VARCHAR(36) DEFAULT NULL COMMENT '负责人',
+    release_id VARCHAR(36) DEFAULT NULL COMMENT '关联版本',
+    start_date DATE DEFAULT NULL COMMENT '开始日期',
+    end_date DATE DEFAULT NULL COMMENT '结束日期',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    KEY idx_project (project_id)
+) ENGINE=InnoDB COMMENT='测试计划';
+
+CREATE TABLE IF NOT EXISTS test_cycle (
+    id VARCHAR(36) PRIMARY KEY COMMENT '测试轮次ID',
+    plan_id VARCHAR(36) NOT NULL COMMENT '所属测试计划',
+    project_id VARCHAR(36) NOT NULL COMMENT '所属项目',
+    name VARCHAR(200) NOT NULL COMMENT '轮次名称',
+    status VARCHAR(20) NOT NULL DEFAULT 'NOT_STARTED' COMMENT '状态: NOT_STARTED/IN_PROGRESS/COMPLETED',
+    start_date DATE DEFAULT NULL COMMENT '开始日期',
+    end_date DATE DEFAULT NULL COMMENT '结束日期',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    KEY idx_plan (plan_id),
+    KEY idx_project (project_id)
+) ENGINE=InnoDB COMMENT='测试轮次';
+
+CREATE TABLE IF NOT EXISTS test_cycle_case (
+    id VARCHAR(36) PRIMARY KEY COMMENT 'ID',
+    cycle_id VARCHAR(36) NOT NULL COMMENT '测试轮次',
+    case_id VARCHAR(36) NOT NULL COMMENT '测试用例',
+    project_id VARCHAR(36) NOT NULL COMMENT '所属项目',
+    assignee_id VARCHAR(36) DEFAULT NULL COMMENT '本轮执行人',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '加入时间',
+    UNIQUE KEY uk_cycle_case (cycle_id, case_id),
+    KEY idx_case (case_id)
+) ENGINE=InnoDB COMMENT='测试轮次包含的用例';
+
+CREATE TABLE IF NOT EXISTS test_case_version (
+    id VARCHAR(36) PRIMARY KEY COMMENT 'ID',
+    case_id VARCHAR(36) NOT NULL COMMENT '用例ID',
+    version INT NOT NULL COMMENT '版本号',
+    title VARCHAR(200) NOT NULL COMMENT '标题快照',
+    precondition TEXT COMMENT '前置条件快照',
+    steps TEXT COMMENT '步骤快照',
+    expected_result TEXT COMMENT '预期结果快照',
+    editor_id VARCHAR(36) NOT NULL COMMENT '编辑人',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '快照时间',
+    UNIQUE KEY uk_case_version (case_id, version)
+) ENGINE=InnoDB COMMENT='测试用例版本快照';
+
+CREATE TABLE IF NOT EXISTS design_asset (
+    id VARCHAR(36) PRIMARY KEY COMMENT '设计稿ID',
+    project_id VARCHAR(36) NOT NULL COMMENT '所属项目',
+    requirement_id VARCHAR(36) DEFAULT NULL COMMENT '关联需求',
+    task_id VARCHAR(36) DEFAULT NULL COMMENT '关联任务',
+    provider VARCHAR(30) NOT NULL DEFAULT 'OTHER' COMMENT '来源: FIGMA/LANHU/MASTERGO/OTHER',
+    title VARCHAR(200) NOT NULL COMMENT '设计稿标题',
+    file_key VARCHAR(200) DEFAULT NULL COMMENT '外部文件标识',
+    node_id VARCHAR(200) DEFAULT NULL COMMENT '外部节点标识',
+    embed_url VARCHAR(1000) DEFAULT NULL COMMENT '嵌入/预览链接',
+    thumbnail_url VARCHAR(1000) DEFAULT NULL COMMENT '缩略图链接',
+    is_primary TINYINT NOT NULL DEFAULT 0 COMMENT '是否主设计稿',
+    status VARCHAR(30) NOT NULL DEFAULT 'DESIGNING' COMMENT 'DESIGNING/IN_REVIEW/CHANGES_REQUESTED/APPROVED',
+    current_version INT NOT NULL DEFAULT 1 COMMENT '当前版本号',
+    sort INT NOT NULL DEFAULT 0 COMMENT '排序',
+    created_by VARCHAR(36) NOT NULL COMMENT '创建人',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    KEY idx_requirement (requirement_id),
+    KEY idx_project (project_id)
+) ENGINE=InnoDB COMMENT='设计稿（外部工具指针）';
+
+CREATE TABLE IF NOT EXISTS design_asset_version (
+    id VARCHAR(36) PRIMARY KEY COMMENT 'ID',
+    asset_id VARCHAR(36) NOT NULL COMMENT '设计稿ID',
+    version INT NOT NULL COMMENT '版本号',
+    snapshot_url VARCHAR(1000) DEFAULT NULL COMMENT '该版本的预览/快照链接',
+    note VARCHAR(500) DEFAULT NULL COMMENT '版本说明',
+    editor_id VARCHAR(36) NOT NULL COMMENT '提交人',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    UNIQUE KEY uk_asset_version (asset_id, version)
+) ENGINE=InnoDB COMMENT='设计稿版本快照';
+
+CREATE TABLE IF NOT EXISTS saved_filter (
+    id VARCHAR(36) PRIMARY KEY COMMENT '筛选器ID',
+    project_id VARCHAR(36) DEFAULT NULL COMMENT '所属项目；NULL 表示跨项目',
+    owner_id VARCHAR(36) NOT NULL COMMENT '创建人',
+    name VARCHAR(100) NOT NULL COMMENT '筛选器名称',
+    entity VARCHAR(20) NOT NULL COMMENT '查询对象: TASK/BUG/REQUIREMENT',
+    expression VARCHAR(2000) NOT NULL COMMENT '结构化查询表达式',
+    is_shared TINYINT NOT NULL DEFAULT 0 COMMENT '是否共享给项目成员',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    KEY idx_project_entity (project_id, entity),
+    KEY idx_owner (owner_id)
+) ENGINE=InnoDB COMMENT='保存的筛选器';
+
+CREATE TABLE IF NOT EXISTS deploy_environment (
+    id VARCHAR(36) PRIMARY KEY COMMENT '环境ID',
+    project_id VARCHAR(36) NOT NULL COMMENT '所属项目',
+    name VARCHAR(100) NOT NULL COMMENT '环境名称（如 测试环境/预发/生产）',
+    type VARCHAR(20) NOT NULL DEFAULT 'TEST' COMMENT '类型: DEV/TEST/STAGING/PROD',
+    requires_approval TINYINT NOT NULL DEFAULT 0 COMMENT '部署是否需要审批',
+    approval_roles VARCHAR(100) DEFAULT NULL COMMENT '可审批的项目角色（逗号分隔，空=OWNER/MANAGER）',
+    url VARCHAR(500) DEFAULT NULL COMMENT '环境访问地址',
+    sort INT NOT NULL DEFAULT 0 COMMENT '展示顺序',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    KEY idx_project (project_id)
+) ENGINE=InnoDB COMMENT='部署环境';
+
+CREATE TABLE IF NOT EXISTS deployment (
+    id VARCHAR(36) PRIMARY KEY COMMENT '部署记录ID',
+    project_id VARCHAR(36) NOT NULL COMMENT '所属项目',
+    environment_id VARCHAR(36) NOT NULL COMMENT '目标环境',
+    release_id VARCHAR(36) DEFAULT NULL COMMENT '部署的版本（project_release.id）',
+    version VARCHAR(40) DEFAULT NULL COMMENT '版本号快照（版本被删也不丢历史）',
+    commit_sha VARCHAR(64) DEFAULT NULL COMMENT '对应提交',
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING_APPROVAL' COMMENT '状态: PENDING_APPROVAL/APPROVED/DEPLOYING/SUCCEEDED/FAILED/ROLLED_BACK/CANCELLED',
+    triggered_by VARCHAR(36) NOT NULL COMMENT '发起人',
+    approved_by VARCHAR(36) DEFAULT NULL COMMENT '审批人',
+    approved_at DATETIME DEFAULT NULL COMMENT '审批时间',
+    approval_note VARCHAR(500) DEFAULT NULL COMMENT '审批意见',
+    started_at DATETIME DEFAULT NULL COMMENT '开始部署时间',
+    finished_at DATETIME DEFAULT NULL COMMENT '结束时间',
+    rollback_of VARCHAR(36) DEFAULT NULL COMMENT '回滚目标部署记录（本次回滚的是哪次部署）',
+    note VARCHAR(1000) DEFAULT NULL COMMENT '说明/失败原因',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    KEY idx_project_env (project_id, environment_id),
+    KEY idx_project_finished (project_id, finished_at),
+    KEY idx_release (release_id)
+) ENGINE=InnoDB COMMENT='部署记录';
+
+CREATE TABLE IF NOT EXISTS design_walkthrough (
+    id VARCHAR(36) PRIMARY KEY COMMENT '走查单ID',
+    project_id VARCHAR(36) NOT NULL COMMENT '所属项目',
+    requirement_id VARCHAR(36) NOT NULL COMMENT '关联需求',
+    design_asset_id VARCHAR(36) DEFAULT NULL COMMENT '走查依据的设计稿',
+    design_version INT DEFAULT NULL COMMENT '走查依据的设计稿版本（锁定基线）',
+    title VARCHAR(200) NOT NULL COMMENT '走查单标题',
+    status VARCHAR(20) NOT NULL DEFAULT 'OPEN' COMMENT '状态: OPEN/CLOSED',
+    created_by VARCHAR(36) NOT NULL COMMENT '创建人',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    KEY idx_requirement (requirement_id),
+    KEY idx_project (project_id)
+) ENGINE=InnoDB COMMENT='UI 走查单';
+
+CREATE TABLE IF NOT EXISTS design_walkthrough_item (
+    id VARCHAR(36) PRIMARY KEY COMMENT '走查项ID',
+    walkthrough_id VARCHAR(36) NOT NULL COMMENT '所属走查单',
+    title VARCHAR(300) NOT NULL COMMENT '走查项（如「按钮间距与设计稿一致」）',
+    result VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT '结果: PENDING/PASS/FAIL/NA',
+    note VARCHAR(1000) DEFAULT NULL COMMENT '备注',
+    screenshot_url VARCHAR(1000) DEFAULT NULL COMMENT '截图/证据链接',
+    bug_id VARCHAR(36) DEFAULT NULL COMMENT '失败项转出的缺陷',
+    sort INT NOT NULL DEFAULT 0 COMMENT '顺序',
+    checked_by VARCHAR(36) DEFAULT NULL COMMENT '检查人',
+    checked_at DATETIME DEFAULT NULL COMMENT '检查时间',
+    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    KEY idx_walkthrough (walkthrough_id)
+) ENGINE=InnoDB COMMENT='UI 走查项';
+
+-- ============================================
 -- 第 2 批地基改造（2026-11，见 docs/BATCH2_FOUNDATION.md）
 -- 新表的权威定义在 db/migration/V2__batch2_foundation.sql（幂等），这里补齐列级变更
 -- ============================================
@@ -827,14 +1059,35 @@ ALTER TABLE test_case ADD COLUMN review_status VARCHAR(20) NOT NULL DEFAULT 'DRA
 ALTER TABLE test_execution ADD COLUMN cycle_id VARCHAR(36) DEFAULT NULL COMMENT '所属测试轮次' AFTER project_id;
 ALTER TABLE test_execution ADD COLUMN case_version INT DEFAULT NULL COMMENT '执行时的用例版本号' AFTER case_id;
 
--- 高频索引
-CREATE INDEX idx_task_fix_version ON task (fix_version_id);
-CREATE INDEX idx_bug_fix_version ON bug (fix_version_id);
-CREATE INDEX idx_requirement_fix_version ON requirement (fix_version_id);
-CREATE INDEX idx_execution_cycle ON test_execution (cycle_id);
-CREATE INDEX idx_requirement_assignee ON requirement (assignee_id);
-ALTER TABLE design_asset ADD KEY idx_status (status);
-ALTER TABLE test_case ADD KEY idx_review_status (review_status);
+-- 高频索引（幂等：索引已存在时跳过，避免 continue-on-error 之外的裸报错）
+DROP PROCEDURE IF EXISTS devflow_add_index_if_absent;
+DELIMITER $$
+CREATE PROCEDURE devflow_add_index_if_absent(IN tbl VARCHAR(64), IN idx VARCHAR(64), IN coldef VARCHAR(255))
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.statistics
+                   WHERE table_schema = DATABASE() AND table_name = tbl AND index_name = idx) THEN
+        SET @ddl = CONCAT('ALTER TABLE `', tbl, '` ADD KEY `', idx, '` (', coldef, ')');
+        PREPARE stmt FROM @ddl;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+    END IF;
+END$$
+DELIMITER ;
+
+CALL devflow_add_index_if_absent('task', 'idx_task_fix_version', 'fix_version_id');
+CALL devflow_add_index_if_absent('bug', 'idx_bug_fix_version', 'fix_version_id');
+CALL devflow_add_index_if_absent('requirement', 'idx_requirement_fix_version', 'fix_version_id');
+CALL devflow_add_index_if_absent('test_execution', 'idx_execution_cycle', 'cycle_id');
+CALL devflow_add_index_if_absent('requirement', 'idx_requirement_assignee', 'assignee_id');
+CALL devflow_add_index_if_absent('design_asset', 'idx_status', 'status');
+CALL devflow_add_index_if_absent('test_case', 'idx_review_status', 'review_status');
+DROP PROCEDURE IF EXISTS devflow_add_index_if_absent;
+
+-- 历史任务状态归一：早期代码用过 IN_PROGRESS / IN_REVIEW，与 schema/前端约定的
+-- TODO/DOING/TESTING/DONE 不一致（审计报告 §C7）。不归一的话这些任务会落到
+-- 工作流之外的"未知状态"桶里，看板和报表都统计不进去。
+UPDATE task SET status = 'DOING' WHERE status = 'IN_PROGRESS';
+UPDATE task SET status = 'TESTING' WHERE status = 'IN_REVIEW';
 
 -- ============================================
 -- 第 3 批：部署与发布闭环、UI 走查（2026-11，见 docs/BATCH3_DELIVERY.md）

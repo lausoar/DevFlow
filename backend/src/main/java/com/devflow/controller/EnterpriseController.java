@@ -248,9 +248,11 @@ public class EnterpriseController {
                 java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20");
         response.setContentType("text/csv;charset=UTF-8");
         response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + fileName);
-        // BOM：Excel 打开中文不乱码
-        response.getOutputStream().write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+        // BOM：Excel 打开中文不乱码。
+        // 注意只能用 writer（先 getOutputStream 再 getWriter 会抛 IllegalStateException）
+        response.setCharacterEncoding("UTF-8");
         var writer = new java.io.PrintWriter(response.getWriter());
+        writer.write('﻿');
         writer.println("时间,操作人,操作,目标类型,目标ID,IP,用户代理,详情,记录哈希");
         for (var log : logs) {
             writer.println(String.join(",",

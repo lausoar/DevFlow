@@ -31,8 +31,19 @@ public class AuditServiceImpl implements AuditService {
 
     private final AuditLogMapper auditLogMapper;
 
+    /** 链头标记 */
+    private static final String GENESIS = "GENESIS";
+
     /** 链式写入串行化：并发写会让 prev_hash 指向错误的前驱 */
     private final Object chainLock = new Object();
+
+    /**
+     * 当前链头哈希（本进程内维护）。
+     * 不能靠 "ORDER BY created_at DESC LIMIT 1" 找前驱：created_at 只有秒精度，
+     * 同一秒内写入的多条记录会取到同一个前驱，链就分叉了 —— 分叉之后
+     * 删除中间记录将无法被检测出来。
+     */
+    private String chainHead;
 
     @Override
     public void log(String userId, String enterpriseId, String projectId,
@@ -47,14 +58,17 @@ public class AuditServiceImpl implements AuditService {
             auditLog.setTargetId(targetId);
             auditLog.setDetail(detail);
             fillRequestContext(auditLog);
+            // 显式固定到秒再落库：activity_log.created_at 是 DATETIME(0)，
+            // MySQL 插入带小数秒的值时会「四舍五入」（37.9 → 38），
+            // 若哈希用内存值（37）而校验读回 38，每条新记录都会被判为篡改。
+            auditLog.setCreatedAt(java.time.LocalDateTime.now()
+                    .truncatedTo(java.time.temporal.ChronoUnit.SECONDS));
 
             synchronized (chainLock) {
-                AuditLog previous = auditLogMapper.selectOne(new LambdaQueryWrapper<AuditLog>()
-                        .orderByDesc(AuditLog::getCreatedAt)
-                        .orderByDesc(AuditLog::getId)
-                        .last("LIMIT 1"));
-                String prevHash = previous != null && previous.getRecordHash() != null
-                        ? previous.getRecordHash() : "GENESIS";
+                if (chainHead == null) {
+                    chainHead = loadChainHead();
+                }
+                String prevHash = chainHead;
                 auditLog.setPrevHash(prevHash);
                 auditLogMapper.insert(auditLog);
                 // 插入后才能拿到自增/生成的 id 与 createdAt，这里回填哈希
@@ -63,11 +77,36 @@ public class AuditServiceImpl implements AuditService {
                 patch.setId(auditLog.getId());
                 patch.setRecordHash(auditLog.getRecordHash());
                 auditLogMapper.updateById(patch);
+                // 推进链头（仅在落库成功后）
+                chainHead = auditLog.getRecordHash();
             }
         } catch (Exception e) {
             // 审计失败不能影响业务主流程
             log.warn("审计日志写入失败: action={}, user={}, err={}", action, userId, e.getMessage());
         }
+    }
+
+    /**
+     * 冷启动时确定链头：取"没有被任何记录当作 prev_hash 引用"的链式记录。
+     * 正常情况下只有一条（真链头），取它的 record_hash 作为下一个前驱。
+     */
+    private String loadChainHead() {
+        List<AuditLog> chained = auditLogMapper.selectList(new LambdaQueryWrapper<AuditLog>()
+                .isNotNull(AuditLog::getRecordHash));
+        if (chained.isEmpty()) {
+            return GENESIS;
+        }
+        java.util.Set<String> referenced = new java.util.HashSet<>();
+        for (AuditLog e : chained) {
+            if (e.getPrevHash() != null) {
+                referenced.add(e.getPrevHash());
+            }
+        }
+        return chained.stream()
+                .map(AuditLog::getRecordHash)
+                .filter(h -> !referenced.contains(h))
+                .findFirst()
+                .orElse(GENESIS);
     }
 
     @Override
@@ -88,34 +127,50 @@ public class AuditServiceImpl implements AuditService {
 
     @Override
     public ChainVerifyResult verifyChain(String enterpriseId) {
-        List<AuditLog> logs = auditLogMapper.selectList(new LambdaQueryWrapper<AuditLog>()
+        List<AuditLog> chained = auditLogMapper.selectList(new LambdaQueryWrapper<AuditLog>()
                 .eq(AuditLog::getEnterpriseId, enterpriseId)
-                .orderByAsc(AuditLog::getCreatedAt)
-                .orderByAsc(AuditLog::getId));
-        if (logs.isEmpty()) {
-            return new ChainVerifyResult(true, 0, null, "该企业暂无审计记录");
+                .isNotNull(AuditLog::getRecordHash));
+        if (chained.isEmpty()) {
+            return new ChainVerifyResult(true, 0, null,
+                    "该企业暂无哈希链记录（历史记录产生于哈希链启用之前）");
         }
-        String expectedPrev = "GENESIS";
+
+        // 按链结构遍历，而不是按时间排序：created_at 只有秒精度，
+        // 同一秒内写入的多条记录排序会乱，靠排序校验会误判为"断链"。
+        java.util.Map<String, AuditLog> byPrev = new java.util.HashMap<>();
+        AuditLog genesis = null;
+        for (AuditLog entry : chained) {
+            if (GENESIS.equals(entry.getPrevHash())) {
+                genesis = entry;
+            } else {
+                byPrev.put(entry.getPrevHash(), entry);
+            }
+        }
+        if (genesis == null) {
+            return new ChainVerifyResult(false, 0, null,
+                    "找不到链头（prev_hash = GENESIS 的记录），历史记录可能被删除");
+        }
+
         int checked = 0;
-        for (AuditLog entry : logs) {
-            // 早期记录没有哈希（本批次之前写入的），跳过并提示，而不是直接判定"被篡改"
-            if (entry.getRecordHash() == null) {
-                continue;
+        AuditLog cursor = genesis;
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        while (cursor != null) {
+            if (!visited.add(cursor.getId())) {
+                return new ChainVerifyResult(false, checked, cursor.getId(), "检测到环形引用");
             }
-            if (!expectedPrev.equals(entry.getPrevHash())) {
-                return new ChainVerifyResult(false, checked, entry.getId(),
-                        "第 " + (checked + 1) + " 条记录的链接与前一条不匹配（可能被删除或篡改）");
-            }
-            String recomputed = hashOf(entry);
-            if (!recomputed.equals(entry.getRecordHash())) {
-                return new ChainVerifyResult(false, checked, entry.getId(),
+            String recomputed = hashOf(cursor);
+            if (!recomputed.equals(cursor.getRecordHash())) {
+                return new ChainVerifyResult(false, checked, cursor.getId(),
                         "第 " + (checked + 1) + " 条记录的内容与哈希不符（记录被修改）");
             }
-            expectedPrev = entry.getRecordHash();
             checked++;
+            cursor = byPrev.get(cursor.getRecordHash());
         }
-        return new ChainVerifyResult(true, checked, null,
-                checked == 0 ? "该企业的审计记录均产生于哈希链启用之前" : "校验通过");
+        if (checked < chained.size()) {
+            return new ChainVerifyResult(false, checked, null,
+                    "有 " + (chained.size() - checked) + " 条记录不在这条链上（可能被插入或删改）");
+        }
+        return new ChainVerifyResult(true, checked, null, "校验通过");
     }
 
     /** 哈希 = SHA-256(prevHash | 关键字段)，字段用 \u0001 分隔避免拼接歧义 */
@@ -124,7 +179,10 @@ public class AuditServiceImpl implements AuditService {
                 nz(e.getPrevHash()), nz(e.getId()), nz(e.getUserId()), nz(e.getEnterpriseId()),
                 nz(e.getProjectId()), nz(e.getAction()), nz(e.getTargetType()),
                 nz(e.getTargetId()), nz(e.getDetail()),
-                e.getCreatedAt() == null ? "" : e.getCreatedAt().toString());
+                // 必须截断到秒：DB 列是 DATETIME（秒精度），内存值带纳秒，
+                // 不截断会导致写入与校验算出不同哈希，每条新记录都判定为"被篡改"
+                e.getCreatedAt() == null ? ""
+                        : e.getCreatedAt().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString());
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(payload.getBytes(StandardCharsets.UTF_8));
