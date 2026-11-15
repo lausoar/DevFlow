@@ -1,0 +1,100 @@
+flowchart TD
+  classDef state fill:#EEF2FF,stroke:#6366F1,stroke-width:1.5px,color:#1E1B4B
+  classDef start fill:#E0E7FF,stroke:#4F46E5,stroke-width:2px,color:#1E1B4B
+  classDef end_ fill:#ECFDF5,stroke:#10B981,stroke-width:2px,color:#064E3B
+  classDef warn fill:#FEF2F2,stroke:#EF4444,stroke-width:1.5px,color:#7F1D1D
+  classDef stage fill:#FFFBEB,stroke:#F59E0B,stroke-width:1.5px,color:#78350F
+
+  subgraph L1["需求 Requirement"]
+    r0(["OPEN 开放"]):::start
+    r1(["COMPLETED 已完成"]):::end_
+    r2(["CLOSED 已关闭"]):::end_
+    r0 -->|验收通过| r1
+    r0 -->|不做 / 过期| r2
+    r1 -.->|重新打开| r0
+  end
+
+  subgraph L2["任务 Task（按项目工作流）"]
+    t0(["TODO 待办"]):::start
+    t1(["DOING 进行中"]):::state
+    t2(["TESTING 测试中"]):::state
+    t3(["DONE 已完成"]):::end_
+    t0 -->|开始开发| t1
+    t1 -->|自测完成| t2
+    t2 -->|测试通过| t3
+    t2 -->|发现问题| t1
+    t3 -.->|验收不通过| t1
+  end
+
+  subgraph L3["缺陷 Bug"]
+    b0(["NEW 新提出"]):::start
+    b1(["ASSIGNED 已分配"]):::state
+    b2(["DOING 解决中"]):::state
+    b3(["RESOLVED 已解决"]):::state
+    b4(["REOPENED 重新打开"]):::warn
+    b5(["CLOSED 已关闭"]):::end_
+    b0 -->|指派| b1
+    b1 -->|开始修| b2
+    b2 -->|修复完成| b3
+    b3 -->|验证不通过| b4
+    b4 -->|再次修复| b2
+    b3 -->|验证通过| b5
+    b0 -->|游客提交待确认| b0
+  end
+
+  subgraph L4["测试用例 / 执行"]
+    c0(["DRAFT 草稿"]):::start
+    c1(["PENDING 待评审"]):::state
+    c2(["APPROVED 已通过"]):::end_
+    c3(["REJECTED 已驳回"]):::warn
+    c0 -->|提交评审| c1
+    c1 -->|通过| c2
+    c1 -->|驳回| c3
+    c3 -->|修改后重提| c1
+    c2 -.->|编辑即回草稿并可升版本| c1
+  end
+
+  subgraph L5["设计稿"]
+    s0(["DESIGNING 设计中"]):::start
+    s1(["IN_REVIEW 评审中"]):::state
+    s2(["APPROVED 已通过"]):::end_
+    s3(["CHANGES_REQUESTED 待修改"]):::warn
+    s0 -->|提交评审| s1
+    s1 -->|通过| s2
+    s1 -->|打回| s3
+    s3 -->|修改| s1
+    s2 -->|改稿| s0
+  end
+
+  subgraph L6["部署 Deployment"]
+    p0(["PENDING_APPROVAL 待审批"]):::stage
+    p1(["APPROVED 已批准"]):::state
+    p2(["DEPLOYING 部署中"]):::state
+    p3(["SUCCEEDED 成功"]):::end_
+    p4(["FAILED 失败"]):::warn
+    p5(["ROLLED_BACK 已回滚"]):::warn
+    p6(["REJECTED 已驳回"]):::warn
+    p0 -->|他人审批| p1
+    p0 -->|驳回| p6
+    p1 -->|开始| p2
+    p2 -->|成功| p3
+    p2 -->|失败| p4
+    p3 -->|回滚（非保护环境）| p5
+    p4 -->|重新发起| p0
+  end
+
+  subgraph L7["迭代 Sprint"]
+    q0(["PLANNING 规划中"]):::start
+    q1(["ACTIVE 进行中"]):::state
+    q2(["COMPLETED 已结束"]):::end_
+    q0 -->|激活（同项目仅一个 ACTIVE）| q1
+    q1 -->|完成（未完成任务迁出）| q2
+  end
+
+  %% 布局辅助：不可见连接，让各生命周期自上而下排列
+  r2 ~~~ t0
+  t3 ~~~ b0
+  b5 ~~~ c0
+  c2 ~~~ s0
+  s2 ~~~ p0
+  p5 ~~~ q0

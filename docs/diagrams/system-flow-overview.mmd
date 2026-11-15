@@ -1,0 +1,59 @@
+flowchart TD
+  classDef actor fill:#EEF2FF,stroke:#6366F1,stroke-width:2px,color:#1E1B4B
+  classDef stage fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#0F172A
+  classDef core fill:#E0E7FF,stroke:#4F46E5,stroke-width:2px,color:#1E1B4B
+  classDef gate fill:#FFF7ED,stroke:#F59E0B,stroke-width:2px,color:#7C2D12
+  classDef done fill:#ECFDF5,stroke:#10B981,stroke-width:2px,color:#064E3B
+  classDef ai fill:#F5F3FF,stroke:#8B5CF6,stroke-width:2px,color:#3B0764
+  classDef out fill:#FEF2F2,stroke:#EF4444,stroke-width:1.8px,color:#7F1D1D
+
+  START(["团队成员登录<br/>JWT · 双因素可选"]):::actor
+
+  A["① 账号与企业<br/><br/>注册 / 登录 · 创建或加入企业<br/>四级职级 · 部门树 · 成员调岗<br/>权限矩阵（企业域 × 项目域）"]:::stage
+
+  B["② 项目与团队<br/><br/>创建项目（邀请码 · 群聊 · Webhook 密钥）<br/>项目集（多产品线）· 项目角色<br/>自定义字段"]:::stage
+
+  C["③ 需求与规划<br/><br/>需求生命周期 · 字段变更留痕<br/>迭代 Sprint · 设计稿 · 设计走查"]:::core
+
+  D["④ 任务执行<br/><br/>四列看板 · 拖拽流转<br/>子任务清单 · 任务依赖（环检测）<br/>工时登记 · 评论 @提及"]:::core
+
+  E["⑤ 缺陷与测试<br/><br/>Bug 六态流转<br/>用例库 · 评审 · 执行<br/>失败一键转缺陷"]:::core
+
+  F["⑥ 协作与知识<br/><br/>项目群聊（实时）· 通知中心<br/>文档 / Wiki（版本快照）<br/>文件中心 · 订阅 · 在线状态"]:::stage
+
+  G["⑦ AI 平台（独立 FastAPI）<br/><br/>RAG 知识库 · 多模型路由<br/>Agent 工具调用 · @AI 助手<br/>代码审查 / Bug 分析 / 日报"]:::ai
+
+  H["⑧ 版本与发布<br/><br/>版本聚合需求/任务/缺陷<br/>自动生成发布说明<br/>环境 → 部署审批 → 上线"]:::stage
+
+  I{"⑨ 受保护环境<br/>不能自审"}:::gate
+
+  J["部署执行<br/>开始 → 完成 / 失败 → 回滚"]:::stage
+
+  K(["DORA 四指标<br/>频率 · 前置时间 · 失败率 · MTTR"]):::done
+
+  L["⑩ 外部接入<br/><br/>游客免登录反馈 · Git Webhook<br/>自动化规则 · 企业微信推送"]:::stage
+
+  M(["审计日志<br/>哈希链 · 拒绝即审计<br/>导出 CSV"]):::done
+
+  START --> A --> B --> C --> D
+  D -->|发现缺陷| E
+  C --> E
+  D --> F
+  E --> F
+  F --> G
+  D --> H
+  E --> H
+  C --> H
+  H --> I
+  I -->|他人审批| J
+  I -->|发起人自己| OUT["退回：需他人审批"]:::out
+  OUT --> I
+  J --> K
+  K -.->|上线复盘，回到需求| C
+  C --> L
+  E --> L
+  L --> E
+  A -.->|任意写操作被拒| M
+  L --> M
+
+  class START actor

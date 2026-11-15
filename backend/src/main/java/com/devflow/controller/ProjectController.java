@@ -159,6 +159,11 @@ public class ProjectController {
         project.setDescription(request.getDescription());
         project.setIcon(request.getIcon());
         project.setGitRepoUrl(request.getGitRepoUrl());
+        // Webhook 密钥必须在创建时生成：详情接口只对"有 project:edit 的成员"返回它，
+        // 而它又是拼 webhook 地址的唯一来源。之前只有迁移脚本给存量项目补过，
+        // 新建项目的该列一直是 NULL —— 前端拿到的地址是 secret=null，
+        // 平台侧配好 webhook 也永远 401，Git 集成对新项目完全不可用。
+        project.setGitWebhookSecret(randomWebhookSecret());
         project.setOwnerId(userId);
         project.setStatus("ACTIVE");
         project.setDeleted(0);
@@ -329,6 +334,18 @@ public class ProjectController {
 
     private static final String INVITE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final SecureRandom INVITE_RANDOM = new SecureRandom();
+
+    /** Webhook 密钥：32 位小写十六进制，与列宽 varchar(32) 一致 */
+    private static String randomWebhookSecret() {
+        byte[] bytes = new byte[16];
+        INVITE_RANDOM.nextBytes(bytes);
+        StringBuilder sb = new StringBuilder(32);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
+    }
 
     /**
      * 获取项目邀请码（首次调用时懒生成）
