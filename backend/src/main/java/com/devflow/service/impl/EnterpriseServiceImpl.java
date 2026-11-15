@@ -726,11 +726,14 @@ public class EnterpriseServiceImpl implements EnterpriseService {
 
         String tempPassword = generateTempPassword();
         member.setPassword(passwordEncoder.encode(tempPassword));
+        // 强制下次登录改密：临时密码不应长期有效（本次回应中明文可见属正常，仅此一次）
+        member.setMustChangePassword(1);
+        member.setPasswordUpdatedAt(java.time.LocalDateTime.now());
         userMapper.updateById(member);
 
         // 审计只记动作，绝不记录密码明文
         auditService.log(operatorId, enterpriseId, null, "member.password.reset",
-                "user", memberId, "重置成员「" + member.displayName() + "」的密码");
+                "user", memberId, "重置成员「" + member.displayName() + "」的密码（要求下次登录修改）");
 
         return tempPassword;
     }

@@ -43,6 +43,22 @@ public class User {
     /** 所属企业 ID */
     private String enterpriseId;
 
+    /** TOTP 密钥（Base32）；仅在启用双因素时写入 */
+    @JsonIgnore
+    private String totpSecret;
+
+    /** 是否启用双因素认证 */
+    private Integer totpEnabled;
+
+    /** 双因素绑定时间 */
+    private LocalDateTime totpBoundAt;
+
+    /** 下次登录必须修改密码（首次登录 / 超管重置后） */
+    private Integer mustChangePassword;
+
+    /** 上次改密时间 */
+    private LocalDateTime passwordUpdatedAt;
+
     /** 逻辑删除 */
     @TableLogic
     private Integer deleted;

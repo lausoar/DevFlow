@@ -36,6 +36,18 @@ public class AuditLog {
     /** 操作详情 */
     private String detail;
 
+    /** 操作来源 IP */
+    private String ip;
+
+    /** 操作来源 UA */
+    private String userAgent;
+
+    /** 上一条审计记录的哈希（链式：任何一条被改都会断链） */
+    private String prevHash;
+
+    /** 本条记录的哈希 = SHA-256(prevHash + 字段拼接) */
+    private String recordHash;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 }

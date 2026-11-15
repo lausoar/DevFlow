@@ -844,3 +844,23 @@ ALTER TABLE test_case ADD KEY idx_review_status (review_status);
 -- 部署记录关联提交（DORA 变更前置时间需要"提交→部署"的对应关系）
 ALTER TABLE deployment ADD COLUMN first_commit_at DATETIME DEFAULT NULL COMMENT '本版本首个提交时间（变更前置时间起点）';
 ALTER TABLE deployment ADD KEY idx_env_finished (environment_id, finished_at);
+
+-- ============================================
+-- 第 4 批：企业级门槛（2026-11，见 docs/BATCH4_ENTERPRISE.md）
+-- ============================================
+
+-- 双因素认证（TOTP，RFC 6238）
+ALTER TABLE sys_user ADD COLUMN totp_secret VARCHAR(64) DEFAULT NULL COMMENT 'TOTP 密钥（Base32，启用后才写入）';
+ALTER TABLE sys_user ADD COLUMN totp_enabled TINYINT NOT NULL DEFAULT 0 COMMENT '是否启用双因素认证';
+ALTER TABLE sys_user ADD COLUMN totp_bound_at DATETIME DEFAULT NULL COMMENT '绑定时间';
+
+-- 密码策略：首次登录 / 超管重置后强制改密
+ALTER TABLE sys_user ADD COLUMN must_change_password TINYINT NOT NULL DEFAULT 0 COMMENT '下次登录必须修改密码';
+ALTER TABLE sys_user ADD COLUMN password_updated_at DATETIME DEFAULT NULL COMMENT '上次改密时间（密码过期策略用）';
+
+-- 审计防篡改：哈希链
+ALTER TABLE activity_log ADD COLUMN prev_hash VARCHAR(64) DEFAULT NULL COMMENT '上一条审计记录的哈希（链式防篡改）';
+ALTER TABLE activity_log ADD COLUMN record_hash VARCHAR(64) DEFAULT NULL COMMENT '本条记录的哈希';
+ALTER TABLE activity_log ADD COLUMN ip VARCHAR(64) DEFAULT NULL COMMENT '操作来源 IP';
+ALTER TABLE activity_log ADD COLUMN user_agent VARCHAR(300) DEFAULT NULL COMMENT '操作来源 UA';
+ALTER TABLE activity_log ADD KEY idx_enterprise_id_created (enterprise_id, id);

@@ -10,10 +10,12 @@ import com.devflow.entity.User;
 import com.devflow.mapper.EnterpriseMapper;
 import com.devflow.mapper.UserMapper;
 import com.devflow.service.AuthService;
+import com.devflow.service.MfaService;
 import com.devflow.service.TokenBlacklistService;
 import com.devflow.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +37,7 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final TokenBlacklistService tokenBlacklistService;
+    private final MfaService mfaService;
 
     @Override
     public AuthResponse login(LoginRequest request) {
@@ -68,6 +71,24 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(403, "账号已被禁用");
         }
 
+        // 双因素：已启用 TOTP 的用户，密码正确只算第一因子，先发短期凭证
+        if (Integer.valueOf(1).equals(user.getTotpEnabled())) {
+            if (!StringUtils.hasText(request.getMfaCode())) {
+                return AuthResponse.builder()
+                        .mfaRequired(true)
+                        .mfaToken(mfaService.issueChallenge(user.getId()))
+                        .build();
+            }
+            // 同一接口第二次提交（带 mfaCode）：校验动态码
+            // 动态码错误同样计入失败次数：避免攻击者绕过之后的无限次尝试
+            try {
+                mfaService.verifyChallenge(request.getMfaToken(), user.getId(), request.getMfaCode());
+            } catch (BusinessException e) {
+                recordFailedLogin(bruteKey);
+                throw e;
+            }
+        }
+
         // 生成 Token
         String accessToken = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
         String refreshToken = jwtUtil.generateRefreshToken(user.getId());
@@ -79,6 +100,7 @@ public class AuthServiceImpl implements AuthService {
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .user(user)
+                .mustChangePassword(Integer.valueOf(1).equals(user.getMustChangePassword()))
                 .build();
     }
 
@@ -106,12 +128,19 @@ public class AuthServiceImpl implements AuthService {
         // 注册只创建普通用户；企业通过邀请码加入，或登录后在企业页自行创建
         String enterpriseId = null;
 
+        // 密码强度：与改密共用同一套规则，避免"注册松、改密严"的漏洞
+        java.util.List<String> problems = com.devflow.util.PasswordPolicy.validate(request.getPassword());
+        if (!problems.isEmpty()) {
+            throw new BusinessException(400, String.join("；", problems));
+        }
+
         // 创建用户
         User user = new User();
         user.setUsername(request.getUsername());
         user.setRealName(request.getRealName());
         user.setEmail(request.getEmail());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setPasswordUpdatedAt(java.time.LocalDateTime.now());
         user.setRole("MEMBER");
         user.setStatus("ACTIVE");
         user.setEnterpriseId(null);

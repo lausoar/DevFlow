@@ -12,6 +12,8 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useUpdateProfile, useChangePassword, useUpdateAvatar } from '@/lib/hooks';
 import type { User as UserType } from '@/types';
 import { User, Lock, Save, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { MfaCard } from '@/components/auth/mfa-card';
+import { useMfaStatus } from '@/lib/hooks/use-security';
 
 // ============================================
 // 设置页面 - 个人信息和密码修改
@@ -33,6 +35,9 @@ export default function SettingsPage() {
 
           {/* 修改密码 */}
           <PasswordCard />
+
+          {/* 双因素认证 */}
+          <MfaCard />
         </div>
       </div>
     </MainLayout>
@@ -180,6 +185,8 @@ function ProfileCard({ user, setUser }: {
 // 修改密码卡片
 // ============================================
 function PasswordCard() {
+  const { data: policyRes } = useMfaStatus();
+  const mustChange = !!policyRes?.data?.mustChangePassword;
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -198,8 +205,13 @@ function PasswordCard() {
       setError('请填写完整');
       return;
     }
-    if (newPassword.length < 6) {
-      setError('新密码至少 6 位');
+    // 与后端 PasswordPolicy 对齐：至少 8 位，且需字母 + 数字
+    if (newPassword.length < 8) {
+      setError('新密码至少 8 位');
+      return;
+    }
+    if (!/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword)) {
+      setError('新密码需同时包含字母和数字');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -223,6 +235,11 @@ function PasswordCard() {
   return (
     <Card>
       <CardHeader>
+        {mustChange && (
+          <div className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+            当前使用的是临时密码或管理员重置的密码，请先修改为新密码。
+          </div>
+        )}
         <CardTitle className="text-base flex items-center gap-2">
           <Lock className="h-4 w-4" />
           安全设置

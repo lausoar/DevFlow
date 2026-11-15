@@ -77,6 +77,9 @@ export type UserStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
 
 // 认证相关类型
 export interface LoginRequest {
+  /** 双因素短期凭证与动态码（第二次提交时携带） */
+  mfaToken?: string;
+  mfaCode?: string;
   username: string;
   password: string;
 }
@@ -95,6 +98,12 @@ export interface AuthResponse {
   accessToken: string;
   refreshToken: string;
   user: User;
+  /** 需要继续完成双因素校验（此时 accessToken 为空） */
+  mfaRequired?: boolean;
+  /** 双因素短期凭证，随 mfaCode 再次提交 /auth/login */
+  mfaToken?: string;
+  /** 密码待修改（首次登录 / 超管重置后） */
+  mustChangePassword?: boolean;
 }
 
 // 企业相关类型

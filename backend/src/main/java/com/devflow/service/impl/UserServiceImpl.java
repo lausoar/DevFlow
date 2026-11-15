@@ -5,6 +5,8 @@ import com.devflow.mapper.UserMapper;
 import com.devflow.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.devflow.common.exception.BusinessException;
+import com.devflow.util.PasswordPolicy;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -51,6 +53,13 @@ public class UserServiceImpl implements UserService {
         return userMapper.selectById(userId);
     }
 
+    /** 改密成功后的公共收尾：记录时间、清除强制改密标记 */
+    private void afterPasswordChange(User user) {
+        user.setMustChangePassword(0);
+        user.setPasswordUpdatedAt(java.time.LocalDateTime.now());
+        userMapper.updateById(user);
+    }
+
     @Override
     public void changePassword(String userId, String oldPassword, String newPassword) {
         User user = userMapper.selectById(userId);
@@ -60,12 +69,21 @@ public class UserServiceImpl implements UserService {
 
         // 验证旧密码
         if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
-            throw new RuntimeException("原密码错误");
+            throw new BusinessException(400, "原密码错误");
+        }
+
+        // 强度校验：注册 / 改密 / 重置共用同一套规则
+        java.util.List<String> problems = PasswordPolicy.validate(newPassword);
+        if (!problems.isEmpty()) {
+            throw new BusinessException(400, String.join("；", problems));
+        }
+        if (passwordEncoder.matches(newPassword, user.getPassword())) {
+            throw new BusinessException(400, "新密码不能与原密码相同");
         }
 
         // 更新密码
         user.setPassword(passwordEncoder.encode(newPassword));
-        userMapper.updateById(user);
+        afterPasswordChange(user);
         log.info("用户 {} 修改密码成功", userId);
     }
 

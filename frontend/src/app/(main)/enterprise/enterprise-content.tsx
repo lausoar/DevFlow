@@ -1147,17 +1147,47 @@ export default function EnterpriseContent() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-base">审计日志</CardTitle>
-                  <CardDescription>敏感操作与权限拒绝记录（最近 10 条）</CardDescription>
+                  <CardDescription>
+                    敏感操作与权限拒绝记录（最近 10 条）· 已启用哈希链防篡改
+                  </CardDescription>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={auditLogsQuery.isFetching}
-                  onClick={() => auditLogsQuery.refetch()}
-                >
-                  {auditLogsQuery.isFetching ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
-                  刷新
-                </Button>
+                <div className="flex gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      if (!enterprise?.id) return;
+                      try {
+                        const res = await permissionApi.verifyAuditChain(enterprise.id);
+                        const v = res.data;
+                        alert(v.valid
+                          ? `哈希链校验通过（已校验 ${v.checkedRecords} 条）
+${v.message}`
+                          : `⚠️ 审计链异常：${v.message}`);
+                      } catch {
+                        alert('校验失败，请稍后重试');
+                      }
+                    }}
+                  >
+                    校验链
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => enterprise?.id && permissionApi.exportAuditLogs(enterprise.id)}
+                  >
+                    导出
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={auditLogsQuery.isFetching}
+                    onClick={() => auditLogsQuery.refetch()}
+                  >
+                    {auditLogsQuery.isFetching ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                    刷新
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>

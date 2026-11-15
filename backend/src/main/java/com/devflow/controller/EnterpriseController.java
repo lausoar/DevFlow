@@ -78,19 +78,64 @@ public class EnterpriseController {
         String userId = guard.userId(authentication);
         guard.requireEnterpriseMember(userId, id);
         EnterpriseDetailResponse detail = enterpriseService.getEnterpriseDetail(id);
-        if (detail != null && detail.getEnterprise() != null) {
-            detail.setEnterprise(maskSensitive(detail.getEnterprise(), userId));
+        if (detail != null) {
+            if (detail.getEnterprise() != null) {
+                detail.setEnterprise(maskSensitive(detail.getEnterprise(), userId));
+            }
+            // 详情里内嵌的成员列表与实际成员接口保持同一口径，避免绕开脱敏
+            if (!canSeeContactInfo(userId) && detail.getMembers() != null) {
+                detail.getMembers().forEach(m -> {
+                    m.setEmail(com.devflow.util.Masking.email(m.getEmail()));
+                    m.setPhone(com.devflow.util.Masking.phone(m.getPhone()));
+                });
+                maskDepartmentMembers(detail.getDepartments(), true);
+            }
         }
         return R.ok(detail);
     }
 
-    /** 获取企业成员列表（仅本企业成员） */
+    /**
+     * 获取企业成员列表（仅本企业成员）。
+     * 无成员管理权限的调用者看到的是脱敏后的邮箱与手机号 ——
+     * 组织架构对全员可见是合理的，但联系方式不是。
+     */
     @Operation(summary = "获取企业成员列表")
     @GetMapping("/{id}/members")
     public R<List<User>> getMembers(@PathVariable String id, Authentication authentication) {
         String userId = guard.userId(authentication);
         guard.requireEnterpriseMember(userId, id);
-        return R.ok(enterpriseService.getMembers(id));
+        List<User> members = enterpriseService.getMembers(id);
+        if (!canSeeContactInfo(userId)) {
+            members.forEach(m -> {
+                m.setEmail(com.devflow.util.Masking.email(m.getEmail()));
+                m.setPhone(com.devflow.util.Masking.phone(m.getPhone()));
+            });
+        }
+        return R.ok(members);
+    }
+
+    /** 部门树里的成员同样脱敏（递归） */
+    private void maskDepartmentMembers(List<EnterpriseDetailResponse.DepartmentTree> departments, boolean mask) {
+        if (departments == null) {
+            return;
+        }
+        for (EnterpriseDetailResponse.DepartmentTree dept : departments) {
+            if (dept.getMembers() != null) {
+                dept.getMembers().forEach(m -> {
+                    m.setEmail(com.devflow.util.Masking.email(m.getEmail()));
+                    m.setPhone(com.devflow.util.Masking.phone(m.getPhone()));
+                });
+            }
+            maskDepartmentMembers(dept.getChildren(), mask);
+        }
+    }
+
+    /** 能否看到成员完整联系方式：拥有成员管理或企业设置权限 */
+    private boolean canSeeContactInfo(String userId) {
+        var codes = permissionService.enterprisePermissions(userId);
+        return codes.contains(PermissionCodes.MEMBER_MANAGE)
+                || codes.contains(PermissionCodes.MEMBER_INVITE)
+                || codes.contains(PermissionCodes.ENTERPRISE_MANAGE);
     }
 
     /** 邀请成员 */
@@ -186,6 +231,62 @@ public class EnterpriseController {
         // 关键：先校验路径企业在调用者企业范围内，再校验权限点，避免跨租户读日志
         guard.requireEnterprisePermission(userId, id, PermissionCodes.AUDIT_READ);
         return R.ok(auditService.pageByEnterprise(id, page, pageSize));
+    }
+
+    /** 审计日志导出（CSV，含哈希链字段，便于离线取证） */
+    @Operation(summary = "导出企业审计日志（CSV）")
+    @GetMapping("/{id}/audit-logs/export")
+    public void exportAuditLogs(@PathVariable String id,
+                                @RequestParam(defaultValue = "5000") Integer limit,
+                                Authentication authentication,
+                                jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
+        String userId = guard.userId(authentication);
+        guard.requireEnterprisePermission(userId, id, PermissionCodes.AUDIT_READ);
+
+        var logs = auditService.listForExport(id, limit);
+        String fileName = java.net.URLEncoder.encode("审计日志-" + id + ".csv",
+                java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20");
+        response.setContentType("text/csv;charset=UTF-8");
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + fileName);
+        // BOM：Excel 打开中文不乱码
+        response.getOutputStream().write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+        var writer = new java.io.PrintWriter(response.getWriter());
+        writer.println("时间,操作人,操作,目标类型,目标ID,IP,用户代理,详情,记录哈希");
+        for (var log : logs) {
+            writer.println(String.join(",",
+                    csv(log.getCreatedAt() == null ? "" : log.getCreatedAt().toString()),
+                    csv(log.getUserId()), csv(log.getAction()),
+                    csv(log.getTargetType()), csv(log.getTargetId()),
+                    csv(log.getIp()), csv(log.getUserAgent()),
+                    csv(log.getDetail()), csv(log.getRecordHash())));
+        }
+        writer.flush();
+        auditService.log(userId, id, null, "audit.export", "audit_log", id,
+                "导出审计日志 " + logs.size() + " 条");
+    }
+
+    /** 校验审计哈希链（发现"被删除/被修改"的证据） */
+    @Operation(summary = "校验审计日志哈希链完整性")
+    @GetMapping("/{id}/audit-logs/verify")
+    public R<AuditService.ChainVerifyResult> verifyAuditChain(@PathVariable String id,
+                                                              Authentication authentication) {
+        String userId = guard.userId(authentication);
+        guard.requireEnterprisePermission(userId, id, PermissionCodes.AUDIT_READ);
+        return R.ok(auditService.verifyChain(id));
+    }
+
+    /** CSV 字段转义：含逗号/引号/换行时用双引号包裹并转义 */
+    /** CSV 字段转义：含逗号/引号/换行时用双引号包裹并转义 */
+    /** CSV 字段转义：含逗号/引号/换行时用双引号包裹并转义 */
+    private String csv(String value) {
+        if (value == null) {
+            return "";
+        }
+        String v = value.replace("\r", " ").replace("\n", " ");
+        if (v.contains(",") || v.contains("\"") || v.contains(";")) {
+            return "\"" + v.replace("\"", "\"\"") + "\"";
+        }
+        return v;
     }
 
     /** 通过邀请码加入企业 */

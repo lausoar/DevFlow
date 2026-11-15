@@ -3,6 +3,8 @@ package com.devflow.service;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.devflow.entity.AuditLog;
 
+import java.util.List;
+
 /**
  * 操作审计日志服务
  */
@@ -24,4 +26,14 @@ public interface AuditService {
 
     /** 按企业分页查询审计日志（时间倒序） */
     Page<AuditLog> pageByEnterprise(String enterpriseId, int page, int pageSize);
+
+    /** 导出用：按企业取一批审计记录（上限 10000） */
+    List<AuditLog> listForExport(String enterpriseId, int limit);
+
+    /** 校验哈希链完整性：返回是否连续、校验了多少条、断点位置 */
+    ChainVerifyResult verifyChain(String enterpriseId);
+
+    /** 链校验结果 */
+    record ChainVerifyResult(boolean valid, int checkedRecords, String brokenAtId, String message) {
+    }
 }

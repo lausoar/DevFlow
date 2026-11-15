@@ -31,6 +31,9 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 双因素：密码通过后需要再提交一次 6 位动态码
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
 
   const {
     register,
@@ -45,8 +48,20 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      // 调用后端登录接口
-      const res = await authApi.login(data);
+      // 已进入双因素挑战时，第二次提交带上动态码
+      const payload = mfaToken
+        ? { ...data, mfaToken, mfaCode }
+        : data;
+      const res = await authApi.login(payload);
+
+      // 密码正确但需要双因素：停留在本页，等待用户输入动态码
+      if (res.data.mfaRequired) {
+        setMfaToken(res.data.mfaToken || null);
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
+
       // 清除退出标记，允许后续自动登录
       if (typeof window !== 'undefined') {
         localStorage.removeItem('devflow-logged-out');
@@ -56,9 +71,13 @@ export default function LoginPage() {
       // 登录前被守卫重定向过来时（?redirect=...），登录后回跳原页面
       const redirect = new URLSearchParams(window.location.search).get('redirect');
       // 只接受站内路径，防开放重定向
-      const target = redirect && redirect.startsWith('/') && !redirect.startsWith('//')
+      let target = redirect && redirect.startsWith('/') && !redirect.startsWith('//')
         ? redirect
         : '/workspace';
+      // 临时密码 / 超管重置后强制改密：先进设置页
+      if (res.data.mustChangePassword) {
+        target = '/settings?tab=security&forceChange=1';
+      }
       router.push(target);
     } catch (err) {
       // 后端已按 HTTP 状态返回错误，优先展示服务端提示（如"账号已被锁定，请稍后再试"）

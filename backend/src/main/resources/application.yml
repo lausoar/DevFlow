@@ -105,6 +105,30 @@ websocket:
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001}
 
+# 可观测性：健康探针与指标
+# 管理端点独立端口（9090），不与业务端口共用：
+# 生产环境只把 9090 暴露给内网/监控系统，业务端口不对外提供 /actuator
+management:
+  server:
+    port: ${MANAGEMENT_PORT:9090}
+  endpoints:
+    web:
+      exposure:
+        # health/info 公开；prometheus 供抓取；其余默认不暴露
+        include: ${MANAGEMENT_ENDPOINTS:health,info,prometheus}
+  endpoint:
+    health:
+      probes:
+        enabled: true          # K8s liveness/readiness
+      show-details: ${HEALTH_SHOW_DETAILS:never}
+  metrics:
+    tags:
+      application: devflow-backend
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
 # 日志配置
 logging:
   level:
