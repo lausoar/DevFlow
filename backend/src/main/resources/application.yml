@@ -15,6 +15,17 @@ spring:
   application:
     name: devflow-backend
 
+  # 读取仓库根目录的 .env（README 让用户 cp .env.example .env）。
+  # Spring 本身不认 .env 文件：不显式 import 的话，用户按 README 建好的
+  # JWT_SECRET / AI_SERVICE_TOKEN 根本不会生效 —— 后端用一次性随机密钥，
+  # 而 AI 服务按 .env 里的密钥验签，结果是 AI 侧所有请求 401。
+  # 两个候选路径覆盖"在 backend/ 下启动"和"在仓库根启动"；都 optional，
+  # 没有 .env 时不影响启动（CI/生产用真实环境变量注入）。
+  config:
+    import:
+      - optional:file:../.env[.properties]
+      - optional:file:./.env[.properties]
+
   lifecycle:
     timeout-per-shutdown-phase: 20s
 

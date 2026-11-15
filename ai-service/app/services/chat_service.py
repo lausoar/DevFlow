@@ -166,15 +166,32 @@ class ChatService:
         """
         provider = provider or settings.ai_provider
         model = model or self._model(provider)
+
+        # 与 chat() 保持同一套降级口径：未配置 Key 或调用失败时都要给出降级回复，
+        # 否则 Agent 会拿占位 Key 真去请求厂商，直接把 401 冒到用户面前
+        if not self._configured(provider):
+            return ToolResponse(content=self._build_fallback_text(messages), tool_calls=[], model="offline-fallback")
+
         client = self._client(provider)
 
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            temperature=self._clamp_temperature(0.4, provider),
-        )
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=self._clamp_temperature(0.4, provider),
+            )
+        except Exception as e:  # noqa: BLE001 - LLM 侧任何失败都按降级处理
+            return ToolResponse(
+                content=(
+                    f"⚠️ LLM 调用失败（{type(e).__name__}）：{str(e)[:200]}\n\n"
+                    f"请检查 ai-service/.env 中 {provider} 厂商的 API_KEY / BASE_URL / MODEL 配置。\n\n---\n\n"
+                    + self._build_fallback_text(messages)
+                ),
+                tool_calls=[],
+                model="offline-fallback",
+            )
 
         choice = response.choices[0]
         content = choice.message.content or ""

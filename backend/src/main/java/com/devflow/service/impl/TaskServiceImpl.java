@@ -77,6 +77,11 @@ public class TaskServiceImpl implements TaskService {
         if (!StringUtils.hasText(task.getStatus())) {
             task.setStatus("TODO"); // 兜底：正常路径由 Controller 按工作流初始状态赋值
         }
+        // 与 Bug 同理：@Version 为 null 时插入会跳过该列，库里是默认值 1，
+        // 返回给前端的实体却是 null，导致首次编辑时乐观锁失效。
+        if (task.getVersion() == null) {
+            task.setVersion(1);
+        }
         taskMapper.insert(task);
 
         // 自动关注：创建人与被指派人（否则用户会漏掉与自己直接相关的事）

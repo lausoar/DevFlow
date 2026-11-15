@@ -5,13 +5,19 @@ import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.BindException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理器
@@ -87,6 +93,50 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public R<Void> handleAccessDenied(AccessDeniedException e) {
         return R.forbidden("权限不足");
+    }
+
+    /**
+     * 框架层的 4xx 异常。
+     *
+     * 这些异常原先全部落进兜底分支变成 500「系统内部错误」，把"客户端请求写错了"
+     * 显示成"服务器坏了"：调错方法、缺必填参数、body JSON 类型不对、路径不存在，
+     * 用户和前端都无从判断该怎么修。统一映射到对应状态码并给出可行动的提示。
+     */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+    public R<Void> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        return R.fail(405, "该地址不支持 " + e.getMethod() + " 方法");
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public R<Void> handleMissingParam(MissingServletRequestParameterException e) {
+        return R.fail(400, "缺少必填参数: " + e.getParameterName());
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public R<Void> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        return R.fail(400, "参数 " + e.getName() + " 取值格式不正确");
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public R<Void> handleNotReadable(HttpMessageNotReadableException e) {
+        log.warn("请求体解析失败: {}", e.getMessage());
+        return R.fail(400, "请求体格式不正确（JSON 语法错误或字段类型不匹配）");
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    @ResponseStatus(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+    public R<Void> handleMediaType(HttpMediaTypeNotSupportedException e) {
+        return R.fail(415, "不支持的 Content-Type，请使用 application/json");
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public R<Void> handleNoResource(NoResourceFoundException e) {
+        return R.fail(404, "接口不存在: /" + e.getResourcePath());
     }
 
     /** 兜底异常 */

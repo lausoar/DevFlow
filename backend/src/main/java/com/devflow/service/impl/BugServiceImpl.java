@@ -71,6 +71,12 @@ public class BugServiceImpl implements BugService {
         // 状态枚举与 schema/前端保持一致: NEW/ASSIGNED/DOING/RESOLVED/REOPENED/CLOSED
         // 创建时已指派直接进入"已分配"
         bug.setStatus(StringUtils.hasText(bug.getAssigneeId()) ? "ASSIGNED" : "NEW");
+        // 显式给初值：@Version 字段为 null 时插入语句会跳过该列，库里落默认值 1，
+        // 但返回给客户端的实体仍是 null —— 前端拿不到版本号，首次编辑时
+        // expectedVersion 就是 undefined，乐观锁形同失效。
+        if (bug.getVersion() == null) {
+            bug.setVersion(1);
+        }
         bugMapper.insert(bug);
 
         // 自动关注：报告人与被指派人

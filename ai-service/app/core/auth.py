@@ -30,7 +30,13 @@ def _extract_bearer(authorization: Optional[str]) -> Optional[str]:
 
 
 def _verify_jwt(token: str) -> dict:
-    """校验用户 JWT（与 Java 后端同一 HMAC 密钥，Base64 编码与 Java 侧一致）"""
+    """校验用户 JWT（与 Java 后端同一 HMAC 密钥，Base64 编码与 Java 侧一致）
+
+    Java 侧用 JJWT 的 signWith(SecretKey)，算法由密钥长度决定：
+    48~63 字节选 HS384、>=64 字节选 HS512。这里只放开 HS256 会让所有
+    53 字节密钥签出的 Token 一律 401（AI 服务整体不可用），所以三种 HMAC
+    算法都要接受——具体用哪一种仍由 Token 头部声明，非 HMAC 家族一律拒绝。
+    """
     from jose import JWTError, jwt
 
     secret = (settings.jwt_secret or "").strip()
@@ -38,7 +44,7 @@ def _verify_jwt(token: str) -> dict:
         raise HTTPException(status_code=503, detail="AI 服务未配置 JWT_SECRET，拒绝提供服务")
     try:
         key = base64.b64decode(secret)
-        return jwt.decode(token, key, algorithms=["HS256"])
+        return jwt.decode(token, key, algorithms=["HS256", "HS384", "HS512"])
     except JWTError as e:
         raise HTTPException(status_code=401, detail="登录凭证无效或已过期") from e
     except Exception as e:  # noqa: BLE001 - 密钥格式错误同样按认证失败处理

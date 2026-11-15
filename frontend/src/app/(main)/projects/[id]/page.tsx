@@ -7,8 +7,19 @@ export const metadata = {
   description: 'DevFlow 项目管理',
 };
 
-// 允许的标签页，防止任意值注入
-const TABS = new Set(['dashboard', 'requirements', 'tasks', 'bugs', 'feedback', 'testing']);
+// 允许的标签页，防止任意值注入。
+// 必须与 project-detail-content.tsx 里的 TabsTrigger value 保持一致，
+// 否则对应标签页的深链会静默回落到概览页。
+const TABS = new Set([
+  'dashboard',
+  'requirements',
+  'tasks',
+  'bugs',
+  'feedback',
+  'testing',
+  'releases',
+  'deployments',
+]);
 
 // ============================================
 // 项目详情页面（支持 ?tab= 直达指定标签页，供全局搜索跳转）

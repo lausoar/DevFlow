@@ -155,7 +155,8 @@ public class GuestServiceImpl implements GuestService {
 
     @Override
     public ProjectFeedback updateFeedbackStatus(String feedbackId, String status, String operatorId) {
-        if (!List.of("ACCEPTED", "REJECTED").contains(status)) {
+        // List.of(...).contains(null) 会抛 NPE：缺 status 应先当作客户端错误
+        if (status == null || !List.of("ACCEPTED", "REJECTED").contains(status)) {
             throw new BusinessException(400, "无效的反馈状态");
         }
         ProjectFeedback feedback = projectFeedbackMapper.selectById(feedbackId);
@@ -293,7 +294,10 @@ public class GuestServiceImpl implements GuestService {
         checkRateLimit(guest.getTokenHash(), ip);
         validateSubmission(title, nickname);
 
-        String feedbackType = List.of("SUGGESTION", "IMPROVEMENT", "OTHER").contains(type) ? type : "SUGGESTION";
+        // 未传或非法类型一律归为 SUGGESTION；注意 type 可能为 null，
+        // 而 List.of(...).contains(null) 会抛 NPE
+        String feedbackType = type != null && List.of("SUGGESTION", "IMPROVEMENT", "OTHER").contains(type.toUpperCase())
+                ? type.toUpperCase() : "SUGGESTION";
         ProjectFeedback feedback = new ProjectFeedback();
         feedback.setProjectId(guest.getProjectId());
         feedback.setType(feedbackType);

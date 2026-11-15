@@ -226,7 +226,8 @@ public class TestCaseController {
                               Authentication authentication) {
         requireCaseManageable(id, authentication);
         String target = body.get("reviewStatus");
-        if (!List.of("DRAFT", "PENDING", "APPROVED", "REJECTED").contains(target)) {
+        // List.of(...).contains(null) 会抛 NPE：缺字段是客户端错误，必须先判空
+        if (target == null || !List.of("DRAFT", "PENDING", "APPROVED", "REJECTED").contains(target)) {
             throw new BusinessException(400, "无效的评审状态");
         }
         TestCase patch = new TestCase();
