@@ -39,12 +39,30 @@ spring:
     time-zone: Asia/Shanghai
     default-property-inclusion: non_null
 
-  # SQL 初始化（自动执行 schema.sql；必须显式指定编码，否则 Windows 默认 GBK 读取导致中文乱码）
+  # 结构迁移改为 Flyway（审计报告 §C11）。
+  # schema.sql 不再是执行入口 —— 它保留为"人类可读的结构总览"，
+  # 真正生效的是 db/migration/V1..V4。
+  #
+  # baseline-on-migrate：老库里表已经存在、且没有 flyway_schema_history，
+  #   不加这个 Flyway 会直接拒绝启动（"found non-empty schema without schema history table"）。
+  #   它会先写一条 baseline 记录再顺序执行后续迁移。
+  # baseline-version=0：让 V1 在**老库上也执行**。V1 全是 CREATE TABLE IF NOT EXISTS，
+  #   对老库是空操作；这样"全新库"和"老库"走完全一样的路径，不产生两套状态。
+  # validate-on-migrate：迁移文件被改动过就拒绝启动，避免"本机跑过、线上没跑过"。
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-on-migrate: true
+
+  # schema.sql / data.sql 的自动执行已下线。
+  # 历史上靠 spring.sql.init 执行 schema.sql，问题是：没有版本号、
+  # continue-on-error 吞掉所有失败、多实例并发执行 DDL。
+  # 现在结构由 Flyway 管，这里显式关掉，避免两条路径同时改库。
   sql:
     init:
-      mode: always
-      continue-on-error: true
-      encoding: utf-8
+      mode: never
 
   # 文件上传限制
   servlet:

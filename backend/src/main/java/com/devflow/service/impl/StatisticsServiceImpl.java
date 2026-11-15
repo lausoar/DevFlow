@@ -5,6 +5,7 @@ import com.devflow.dto.response.*;
 import com.devflow.entity.*;
 import com.devflow.mapper.*;
 import com.devflow.service.StatisticsService;
+import com.devflow.service.WorkflowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class StatisticsServiceImpl implements StatisticsService {
     private final ProjectMemberMapper projectMemberMapper;
     private final UserMapper userMapper;
     private final com.devflow.service.WorkflowService workflowService;
+    private final StatisticsAggregateMapper statisticsAggregateMapper;
 
     /**
      * 任务的完成日期。优先用 completed_at；老数据没有这个值时回落到 updated_at
@@ -43,12 +45,56 @@ public class StatisticsServiceImpl implements StatisticsService {
         return t.getUpdatedAt() != null ? t.getUpdatedAt().toLocalDate() : null;
     }
 
+
+    // ============================================
+    // 聚合查询的辅助方法
+    // ============================================
+
+    private Set<String> doneCodesOf(String projectId) {
+        return new HashSet<>(workflowService.statusCodesInCategory(
+                projectId, WorkflowService.TYPE_TASK, WorkflowStatus.CATEGORY_DONE));
+    }
+
+    private Set<String> progCodesOf(String projectId) {
+        return new HashSet<>(workflowService.statusCodesInCategory(
+                projectId, WorkflowService.TYPE_TASK, WorkflowStatus.CATEGORY_IN_PROGRESS));
+    }
+
+    /**
+     * 缺陷的"已解决"口径。
+     *
+     * 默认工作流里 RESOLVED 属于 IN_PROGRESS 分类（还要回归），所以不能直接用
+     * DONE 分类；但 RESOLVED/CLOSED 一定是"已解决/已关闭"。两者取并集。
+     */
+    private Set<String> resolvedBugCodesOf(String projectId) {
+        Set<String> codes = new HashSet<>(workflowService.statusCodesInCategory(
+                projectId, WorkflowService.TYPE_BUG, WorkflowStatus.CATEGORY_DONE));
+        codes.add("RESOLVED");
+        codes.add("CLOSED");
+        return codes;
+    }
+
+    private Map<String, Integer> toIntMap(List<Map<String, Object>> rows, String keyField) {
+        Map<String, Integer> out = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            out.put(asString(row.get(keyField)), asInt(row.get("n")));
+        }
+        return out;
+    }
+
+    private String asString(Object v) {
+        return v == null ? null : String.valueOf(v);
+    }
+
+    private int asInt(Object v) {
+        return v instanceof Number n ? n.intValue() : 0;
+    }
+
     // ============================================
     // 企业级统计
     // ============================================
     @Override
     public EnterpriseStatsResponse getEnterpriseStats(String enterpriseId) {
-        // 查询企业下所有项目
         List<Project> projects = projectMapper.selectList(
             new LambdaQueryWrapper<Project>()
                 .eq(Project::getEnterpriseId, enterpriseId)
@@ -70,141 +116,136 @@ public class StatisticsServiceImpl implements StatisticsService {
                 .build();
         }
 
-        // 查询所有任务、Bug、需求
-        List<Task> allTasks = taskMapper.selectList(
-            new LambdaQueryWrapper<Task>().in(Task::getProjectId, projectIds)
-        );
-        List<Bug> allBugs = bugMapper.selectList(
-            new LambdaQueryWrapper<Bug>().in(Bug::getProjectId, projectIds)
-        );
-        List<Requirement> allRequirements = requirementMapper.selectList(
-            new LambdaQueryWrapper<Requirement>().in(Requirement::getProjectId, projectIds)
-        );
+        // 所有计数都下推给数据库（GROUP BY），返回行数上限是「项目数 x 状态数」。
+        // 原实现把企业全部任务/Bug/需求加载进内存再逐条过滤，万级任务时是数十 MB 堆内存，
+        // 且前端每次刷新都会重算一遍。
+        List<Map<String, Object>> taskRows =
+                statisticsAggregateMapper.taskCountByProjectAndStatus(projectIds);
+        List<Map<String, Object>> bugRows =
+                statisticsAggregateMapper.bugCountByProjectSeverityStatus(projectIds);
+        List<Map<String, Object>> reqRows =
+                statisticsAggregateMapper.requirementCountByProjectAndStatus(projectIds);
+        Map<String, Integer> memberCountByProject =
+                toIntMap(statisticsAggregateMapper.memberCountByProject(projectIds), "projectId");
 
-        // 项目总览
+        // ---- 项目总览 ----
         int activeProjects = (int) projects.stream().filter(p -> "ACTIVE".equals(p.getStatus())).count();
         int planningProjects = (int) projects.stream().filter(p -> "PLANNING".equals(p.getStatus())).count();
         int archivedProjects = (int) projects.stream().filter(p -> "ARCHIVED".equals(p.getStatus())).count();
+        Integer distinctMembers = statisticsAggregateMapper.distinctMemberCount(projectIds);
 
-        // 统计总成员数（去重）
-        Set<String> memberIds = new HashSet<>();
-        for (String pid : projectIds) {
-            List<ProjectMember> members = projectMemberMapper.selectList(
-                new LambdaQueryWrapper<ProjectMember>().eq(ProjectMember::getProjectId, pid)
-            );
-            members.forEach(m -> memberIds.add(m.getUserId()));
+        // ---- 任务总览 ----
+        // 每个项目有自己的工作流，所以"完成/进行中"要按项目自己的状态分类判定。
+        // 聚合行只给 (project, status, count)，归类在 Java 侧做 —— 见 mapper 上的说明。
+        int totalTasks = 0, completedTasks = 0, inProgressTasks = 0, todoTasks = 0, overdueTasks = 0;
+        Map<String, Integer> taskStatusDist = new LinkedHashMap<>();
+        Map<String, Map<String, int[]>> perProjectTask = new HashMap<>();
+
+        for (Map<String, Object> row : taskRows) {
+            String pid = asString(row.get("projectId"));
+            String status = asString(row.get("status"));
+            int n = asInt(row.get("n"));
+            int overdue = asInt(row.get("overdue"));
+
+            totalTasks += n;
+            if (status != null) {
+                taskStatusDist.merge(status, n, Integer::sum);
+            }
+            perProjectTask.computeIfAbsent(pid, k -> new HashMap<>()).put(status, new int[]{n, overdue});
+
+            Set<String> doneCodes = doneCodesOf(pid);
+            Set<String> progCodes = progCodesOf(pid);
+            if (doneCodes.contains(status)) {
+                completedTasks += n;
+            } else if (progCodes.contains(status)) {
+                inProgressTasks += n;
+            } else {
+                todoTasks += n;
+            }
+            if (!doneCodes.contains(status)) {
+                overdueTasks += overdue;
+            }
         }
 
-        // 任务总览：按工作流分类聚合（项目可能自定义状态码，不能按状态码硬编码）
-        int totalTasks = allTasks.size();
-        int completedTasks = 0;
-        int inProgressTasks = 0;
-        int todoTasks = 0;
-        int overdueTasks = 0;
-        for (String pid : projectIds) {
-            java.util.Set<String> doneCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
-                    pid, com.devflow.service.WorkflowService.TYPE_TASK, com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
-            java.util.Set<String> progCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
-                    pid, com.devflow.service.WorkflowService.TYPE_TASK, com.devflow.entity.WorkflowStatus.CATEGORY_IN_PROGRESS));
-            List<com.devflow.entity.Task> projectTasks = allTasks.stream()
-                    .filter(t -> pid.equals(t.getProjectId())).toList();
-            completedTasks += (int) projectTasks.stream().filter(t -> doneCodes.contains(t.getStatus())).count();
-            inProgressTasks += (int) projectTasks.stream().filter(t -> progCodes.contains(t.getStatus())).count();
-            todoTasks += (int) projectTasks.stream()
-                    .filter(t -> !doneCodes.contains(t.getStatus()) && !progCodes.contains(t.getStatus())).count();
-            overdueTasks += (int) projectTasks.stream()
-                    .filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(LocalDateTime.now())
-                            && !doneCodes.contains(t.getStatus()))
-                    .count();
+        // ---- Bug 总览 ----
+        int totalBugs = 0, openBugs = 0, resolvedBugs = 0, criticalBugs = 0;
+        Map<String, Integer> bugSeverityDist = new LinkedHashMap<>();
+        bugSeverityDist.put("BLOCKER", 0);
+        bugSeverityDist.put("CRITICAL", 0);
+        bugSeverityDist.put("MAJOR", 0);
+        bugSeverityDist.put("MINOR", 0);
+        bugSeverityDist.put("TRIVIAL", 0);
+        Map<String, Map<String, Integer>> perProjectBugs = new HashMap<>();
+
+        for (Map<String, Object> row : bugRows) {
+            String pid = asString(row.get("projectId"));
+            String severity = asString(row.get("severity"));
+            String status = asString(row.get("status"));
+            int n = asInt(row.get("n"));
+
+            totalBugs += n;
+            // 缺陷的"已解决"口径：RESOLVED/CLOSED，加上项目工作流里属于 DONE 分类的状态
+            Set<String> resolvedCodes = resolvedBugCodesOf(pid);
+            if (resolvedCodes.contains(status)) {
+                resolvedBugs += n;
+            } else {
+                openBugs += n;
+            }
+            if ("BLOCKER".equals(severity) || "CRITICAL".equals(severity)) {
+                criticalBugs += n;
+            }
+            if (severity != null) {
+                bugSeverityDist.merge(severity, n, Integer::sum);
+            }
+            perProjectBugs.computeIfAbsent(pid, k -> new HashMap<>()).merge(status, n, Integer::sum);
         }
 
-        // Bug 总览
-        int totalBugs = allBugs.size();
-        int openBugs = (int) allBugs.stream()
-            .filter(b -> !"RESOLVED".equals(b.getStatus()) && !"CLOSED".equals(b.getStatus()))
-            .count();
-        int resolvedBugs = (int) allBugs.stream()
-            .filter(b -> "RESOLVED".equals(b.getStatus()) || "CLOSED".equals(b.getStatus()))
-            .count();
-        int criticalBugs = (int) allBugs.stream()
-            .filter(b -> "BLOCKER".equals(b.getSeverity()) || "CRITICAL".equals(b.getSeverity()))
-            .count();
+        // ---- 需求总览 ----
+        int totalRequirements = 0, openRequirements = 0, completedRequirements = 0, closedRequirements = 0;
+        for (Map<String, Object> row : reqRows) {
+            int n = asInt(row.get("n"));
+            String status = asString(row.get("status"));
+            totalRequirements += n;
+            if ("OPEN".equals(status)) openRequirements += n;
+            else if ("COMPLETED".equals(status)) completedRequirements += n;
+            else if ("CLOSED".equals(status)) closedRequirements += n;
+        }
 
-        // 需求总览
-        int totalRequirements = allRequirements.size();
-        int openRequirements = (int) allRequirements.stream().filter(r -> "OPEN".equals(r.getStatus())).count();
-        int completedRequirements = (int) allRequirements.stream().filter(r -> "COMPLETED".equals(r.getStatus())).count();
-        int closedRequirements = (int) allRequirements.stream().filter(r -> "CLOSED".equals(r.getStatus())).count();
-
-        // 各项目进度
+        // ---- 各项目进度 ----
         List<EnterpriseStatsResponse.ProjectProgress> projectProgressList = projects.stream()
             .map(project -> {
-                List<Task> projectTasks = allTasks.stream()
-                    .filter(t -> project.getId().equals(t.getProjectId()))
-                    .collect(Collectors.toList());
-                List<Bug> projectBugs = allBugs.stream()
-                    .filter(b -> project.getId().equals(b.getProjectId()))
-                    .collect(Collectors.toList());
+                String pid = project.getId();
+                Map<String, int[]> statusCounts = perProjectTask.getOrDefault(pid, Map.of());
+                Map<String, Integer> bugCounts = perProjectBugs.getOrDefault(pid, Map.of());
 
-                int pTotal = projectTasks.size();
-                java.util.Set<String> pDoneCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
-                        project.getId(), com.devflow.service.WorkflowService.TYPE_TASK,
-                        com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
-                java.util.Set<String> pResolvedBugCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
-                        project.getId(), com.devflow.service.WorkflowService.TYPE_BUG,
-                        com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
-                pResolvedBugCodes.add("RESOLVED");
-                int pCompleted = (int) projectTasks.stream().filter(t -> pDoneCodes.contains(t.getStatus())).count();
-                int pOpenBugs = (int) projectBugs.stream().filter(b -> !pResolvedBugCodes.contains(b.getStatus())).count();
+                int pTotal = statusCounts.values().stream().mapToInt(v -> v[0]).sum();
+                Set<String> pDoneCodes = doneCodesOf(pid);
+                int pCompleted = statusCounts.entrySet().stream()
+                        .filter(e -> pDoneCodes.contains(e.getKey()))
+                        .mapToInt(e -> e.getValue()[0]).sum();
 
-                List<ProjectMember> pMembers = projectMemberMapper.selectList(
-                    new LambdaQueryWrapper<ProjectMember>().eq(ProjectMember::getProjectId, project.getId())
-                );
+                Set<String> pResolvedBugCodes = resolvedBugCodesOf(pid);
+                int pOpenBugs = bugCounts.entrySet().stream()
+                        .filter(e -> !pResolvedBugCodes.contains(e.getKey()))
+                        .mapToInt(Map.Entry::getValue).sum();
 
                 return EnterpriseStatsResponse.ProjectProgress.builder()
-                    .projectId(project.getId())
+                    .projectId(pid)
                     .projectName(project.getName())
                     .projectKey(project.getProjectKey())
                     .status(project.getStatus())
                     .totalTasks(pTotal)
                     .completedTasks(pCompleted)
-                    .totalBugs(projectBugs.size())
+                    .totalBugs(bugCounts.values().stream().mapToInt(Integer::intValue).sum())
                     .openBugs(pOpenBugs)
                     .progress(pTotal > 0 ? (double) pCompleted / pTotal * 100 : 0)
-                    .memberCount(pMembers.size())
+                    .memberCount(memberCountByProject.getOrDefault(pid, 0))
                     .build();
             })
             .collect(Collectors.toList());
 
-        // 任务趋势（最近 14 天）
-        List<EnterpriseStatsResponse.TrendPoint> taskTrend = buildTaskTrend(allTasks, 14);
-
-        // 分布统计：按各项目工作流的实际状态码聚合（去重合并同名状态）
-        Map<String, Integer> taskStatusDist = new LinkedHashMap<>();
-        Map<String, String> statusLabels = new HashMap<>();
-        for (String pid : projectIds) {
-            for (com.devflow.entity.WorkflowStatus st :
-                    workflowServiceStatuses(pid, com.devflow.service.WorkflowService.TYPE_TASK)) {
-                int count = (int) allTasks.stream()
-                        .filter(t -> pid.equals(t.getProjectId()) && st.getCode().equals(t.getStatus()))
-                        .count();
-                if (count > 0) {
-                    taskStatusDist.merge(st.getCode(), count, Integer::sum);
-                    statusLabels.putIfAbsent(st.getCode(), st.getName());
-                }
-            }
-        }
-        // 兜底：未知状态码（历史数据）也纳入分布，避免总量对不上
-        allTasks.stream()
-                .filter(t -> t.getStatus() != null && !taskStatusDist.containsKey(t.getStatus()))
-                .forEach(t -> taskStatusDist.merge(t.getStatus(), 1, Integer::sum));
-
-        Map<String, Integer> bugSeverityDist = new LinkedHashMap<>();
-        bugSeverityDist.put("BLOCKER", (int) allBugs.stream().filter(b -> "BLOCKER".equals(b.getSeverity())).count());
-        bugSeverityDist.put("CRITICAL", (int) allBugs.stream().filter(b -> "CRITICAL".equals(b.getSeverity())).count());
-        bugSeverityDist.put("MAJOR", (int) allBugs.stream().filter(b -> "MAJOR".equals(b.getSeverity())).count());
-        bugSeverityDist.put("MINOR", (int) allBugs.stream().filter(b -> "MINOR".equals(b.getSeverity())).count());
-        bugSeverityDist.put("TRIVIAL", (int) allBugs.stream().filter(b -> "TRIVIAL".equals(b.getSeverity())).count());
+        // ---- 任务趋势（最近 14 天，按 completed_at 而不是 updated_at） ----
+        List<EnterpriseStatsResponse.TrendPoint> taskTrend = buildTaskTrend(projectIds, 14);
 
         Map<String, Integer> reqStatusDist = new LinkedHashMap<>();
         reqStatusDist.put("OPEN", openRequirements);
@@ -217,7 +258,7 @@ public class StatisticsServiceImpl implements StatisticsService {
                 .activeProjects(activeProjects)
                 .planningProjects(planningProjects)
                 .archivedProjects(archivedProjects)
-                .totalMembers(memberIds.size())
+                .totalMembers(distinctMembers == null ? 0 : distinctMembers)
                 .build())
             .taskOverview(EnterpriseStatsResponse.TaskOverview.builder()
                 .totalTasks(totalTasks)
@@ -395,70 +436,73 @@ public class StatisticsServiceImpl implements StatisticsService {
     // ============================================
     @Override
     public MemberWorkloadResponse getMemberWorkload(String projectId) {
-        // 获取项目成员
         List<ProjectMember> members = projectMemberMapper.selectList(
             new LambdaQueryWrapper<ProjectMember>().eq(ProjectMember::getProjectId, projectId)
         );
 
-        List<Task> tasks = taskMapper.selectList(
-            new LambdaQueryWrapper<Task>().eq(Task::getProjectId, projectId)
-        );
-        List<Bug> bugs = bugMapper.selectList(
-            new LambdaQueryWrapper<Bug>().eq(Bug::getProjectId, projectId)
-        );
+        // 按 (负责人, 状态) 聚合，不再把项目全部任务/Bug 拉进内存后逐人过滤
+        List<Map<String, Object>> taskRows =
+                statisticsAggregateMapper.taskCountByAssigneeAndStatus(projectId);
+        List<Map<String, Object>> bugRows =
+                statisticsAggregateMapper.bugCountByAssigneeAndStatus(projectId);
 
-        // 获取成员用户名映射
+        Map<String, List<Map<String, Object>>> tasksByUser = new HashMap<>();
+        taskRows.forEach(r -> tasksByUser
+                .computeIfAbsent(asString(r.get("userId")), k -> new ArrayList<>()).add(r));
+        Map<String, List<Map<String, Object>>> bugsByUser = new HashMap<>();
+        bugRows.forEach(r -> bugsByUser
+                .computeIfAbsent(asString(r.get("userId")), k -> new ArrayList<>()).add(r));
+
         Set<String> userIds = members.stream().map(ProjectMember::getUserId).collect(Collectors.toSet());
         Map<String, User> userMap = new HashMap<>();
         if (!userIds.isEmpty()) {
-            List<User> users = userMapper.selectBatchIds(userIds);
-            users.forEach(u -> userMap.put(u.getId(), u));
+            userMapper.selectBatchIds(userIds).forEach(u -> userMap.put(u.getId(), u));
         }
 
-        LocalDateTime now = LocalDateTime.now();
-
-        // 按项目工作流分类聚合（自定义状态同样正确归类）
-        java.util.Set<String> doneCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
-                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
-                com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
-        java.util.Set<String> progCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
-                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
-                com.devflow.entity.WorkflowStatus.CATEGORY_IN_PROGRESS));
-        java.util.Set<String> resolvedBugCodes = new java.util.HashSet<>(
-                workflowService.statusCodesInCategory(projectId, com.devflow.service.WorkflowService.TYPE_BUG,
-                        com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
-        resolvedBugCodes.add("RESOLVED");
+        Set<String> doneCodes = doneCodesOf(projectId);
+        Set<String> progCodes = progCodesOf(projectId);
+        Set<String> resolvedBugCodes = resolvedBugCodesOf(projectId);
 
         List<MemberWorkloadResponse.MemberStats> memberStatsList = members.stream()
             .map(member -> {
                 String userId = member.getUserId();
                 User user = userMap.get(userId);
 
-                List<Task> memberTasks = tasks.stream()
-                    .filter(t -> userId.equals(t.getAssigneeId()))
-                    .collect(Collectors.toList());
-                List<Bug> memberBugs = bugs.stream()
-                    .filter(b -> userId.equals(b.getAssigneeId()))
-                    .collect(Collectors.toList());
+                List<Map<String, Object>> myTasks = tasksByUser.getOrDefault(userId, List.of());
+                List<Map<String, Object>> myBugs = bugsByUser.getOrDefault(userId, List.of());
 
-                int totalTasks = memberTasks.size();
-                int completedTasks = (int) memberTasks.stream().filter(t -> doneCodes.contains(t.getStatus())).count();
-                int inProgressTasks = (int) memberTasks.stream().filter(t -> progCodes.contains(t.getStatus())).count();
-                int todoTasks = memberTasks.size() - completedTasks - inProgressTasks;
-                int bugCount = memberBugs.size();
-                int resolvedBugCount = (int) memberBugs.stream()
-                    .filter(b -> resolvedBugCodes.contains(b.getStatus()))
-                    .count();
-                int criticalTasks = (int) memberTasks.stream()
-                    .filter(t -> "CRITICAL".equals(t.getPriority()) || "HIGH".equals(t.getPriority()))
-                    .count();
-                int overdueTasks = (int) memberTasks.stream()
-                    .filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(now)
-                        && !doneCodes.contains(t.getStatus()))
-                    .count();
+                int totalTasks = 0, completedTasks = 0, inProgressTasks = 0;
+                int criticalTasks = 0, overdueOpenTasks = 0, testingTasks = 0;
+                for (Map<String, Object> row : myTasks) {
+                    String status = asString(row.get("status"));
+                    int n = asInt(row.get("n"));
+                    totalTasks += n;
+                    if (doneCodes.contains(status)) {
+                        completedTasks += n;
+                    } else if (progCodes.contains(status)) {
+                        inProgressTasks += n;
+                    }
+                    if ("TESTING".equals(status)) {
+                        testingTasks += n;
+                    }
+                    criticalTasks += asInt(row.get("criticalCount"));
+                    if (!doneCodes.contains(status)) {
+                        overdueOpenTasks += asInt(row.get("overdue"));
+                    }
+                }
+                int todoTasks = totalTasks - completedTasks - inProgressTasks;
+
+                int bugCount = 0, resolvedBugCount = 0;
+                for (Map<String, Object> row : myBugs) {
+                    int n = asInt(row.get("n"));
+                    bugCount += n;
+                    if (resolvedBugCodes.contains(asString(row.get("status")))) {
+                        resolvedBugCount += n;
+                    }
+                }
+
                 double completionRate = totalTasks > 0 ? (double) completedTasks / totalTasks * 100 : 0;
 
-                // 负载等级
                 String loadLevel;
                 if (totalTasks >= 10 || inProgressTasks >= 5) loadLevel = "HIGH";
                 else if (totalTasks >= 5) loadLevel = "MEDIUM";
@@ -467,7 +511,7 @@ public class StatisticsServiceImpl implements StatisticsService {
                 Map<String, Integer> taskDist = new LinkedHashMap<>();
                 taskDist.put("TODO", todoTasks);
                 taskDist.put("DOING", inProgressTasks);
-                taskDist.put("TESTING", (int) memberTasks.stream().filter(t -> "TESTING".equals(t.getStatus())).count());
+                taskDist.put("TESTING", testingTasks);
                 taskDist.put("DONE", completedTasks);
 
                 return MemberWorkloadResponse.MemberStats.builder()
@@ -481,7 +525,7 @@ public class StatisticsServiceImpl implements StatisticsService {
                     .bugCount(bugCount)
                     .resolvedBugCount(resolvedBugCount)
                     .criticalTasks(criticalTasks)
-                    .overdueTasks(overdueTasks)
+                    .overdueTasks(overdueOpenTasks)
                     .completionRate(completionRate)
                     .loadLevel(loadLevel)
                     .taskDistribution(taskDist)
@@ -489,7 +533,6 @@ public class StatisticsServiceImpl implements StatisticsService {
             })
             .collect(Collectors.toList());
 
-        // 汇总
         double avgTasks = memberStatsList.isEmpty() ? 0 :
             memberStatsList.stream().mapToInt(MemberWorkloadResponse.MemberStats::getTotalTasks).average().orElse(0);
         double avgCompletion = memberStatsList.isEmpty() ? 0 :
@@ -502,7 +545,6 @@ public class StatisticsServiceImpl implements StatisticsService {
             .min(Comparator.comparingInt(MemberWorkloadResponse.MemberStats::getTotalTasks))
             .map(MemberWorkloadResponse.MemberStats::getUsername).orElse("-");
 
-        // 判断是否均衡（标准差 / 平均值 < 0.5 视为均衡）
         boolean balanced = true;
         if (memberStatsList.size() > 1 && avgTasks > 0) {
             double variance = memberStatsList.stream()
@@ -761,38 +803,43 @@ public class StatisticsServiceImpl implements StatisticsService {
     // 辅助方法
     // ============================================
 
-    /** 构建任务趋势数据 */
-    private List<EnterpriseStatsResponse.TrendPoint> buildTaskTrend(List<Task> tasks, int days) {
+    /**
+     * 构建任务趋势数据（最近 N 天的新建数 / 完成数）。
+     *
+     * 两次 GROUP BY 查询拿回 (项目, 日期) 与 (项目, 日期, 状态) 的计数，
+     * 再在内存里按项目自己的 DONE 分类归并。原实现把全部任务加载进内存
+     * 每一天过滤一遍 —— 14 天 × N 条任务。
+     */
+    private List<EnterpriseStatsResponse.TrendPoint> buildTaskTrend(List<String> projectIds, int days) {
         List<EnterpriseStatsResponse.TrendPoint> trend = new ArrayList<>();
         LocalDate today = LocalDate.now();
 
-        // 任务可能来自不同项目，各自有自己的工作流：按"项目→已完成状态码集合"预计算一次
-        Map<String, java.util.Set<String>> doneCodesByProject = new HashMap<>();
-        for (Task t : tasks) {
-            doneCodesByProject.computeIfAbsent(t.getProjectId(), pid -> new java.util.HashSet<>(
-                    workflowService.statusCodesInCategory(pid, com.devflow.service.WorkflowService.TYPE_TASK,
-                            com.devflow.entity.WorkflowStatus.CATEGORY_DONE)));
+        Map<String, Map<String, Integer>> createdByDate = new HashMap<>();
+        for (Map<String, Object> row : statisticsAggregateMapper.taskCreatedPerDay(projectIds, days)) {
+            createdByDate.computeIfAbsent(asString(row.get("d")), k -> new HashMap<>())
+                    .merge(asString(row.get("projectId")), asInt(row.get("n")), Integer::sum);
         }
-        java.util.function.Predicate<Task> isDone = t -> {
-            java.util.Set<String> codes = doneCodesByProject.get(t.getProjectId());
-            return codes != null && codes.contains(t.getStatus());
-        };
+
+        Map<String, Map<String, Integer>> completedByDate = new HashMap<>();
+        for (Map<String, Object> row : statisticsAggregateMapper.taskCompletedPerDay(projectIds, days)) {
+            String date = asString(row.get("d"));
+            String pid = asString(row.get("projectId"));
+            String status = asString(row.get("status"));
+            if (doneCodesOf(pid).contains(status)) {
+                completedByDate.computeIfAbsent(date, k -> new HashMap<>())
+                        .merge(pid, asInt(row.get("n")), Integer::sum);
+            }
+        }
 
         for (int i = days - 1; i >= 0; i--) {
-            LocalDate date = today.minusDays(i);
-            final LocalDate dateEnd = date.plusDays(1);
-
-            int created = (int) tasks.stream()
-                .filter(t -> t.getCreatedAt() != null && t.getCreatedAt().toLocalDate().isEqual(date))
-                .count();
-
-            int completed = (int) tasks.stream()
-                .filter(isDone)
-                .filter(t -> t.getUpdatedAt() != null && t.getUpdatedAt().toLocalDate().isEqual(date))
-                .count();
+            String date = today.minusDays(i).toString();
+            int created = createdByDate.getOrDefault(date, Map.of())
+                    .values().stream().mapToInt(Integer::intValue).sum();
+            int completed = completedByDate.getOrDefault(date, Map.of())
+                    .values().stream().mapToInt(Integer::intValue).sum();
 
             trend.add(EnterpriseStatsResponse.TrendPoint.builder()
-                .date(date.toString())
+                .date(date)
                 .created(created)
                 .completed(completed)
                 .build());
@@ -825,12 +872,4 @@ public class StatisticsServiceImpl implements StatisticsService {
         return 40;
     }
 
-    /** 项目某问题类型的全部工作流状态（报表分布用） */
-    private List<com.devflow.entity.WorkflowStatus> workflowServiceStatuses(String projectId, String issueType) {
-        com.devflow.entity.Workflow wf = workflowService.resolve(projectId, issueType);
-        if (wf == null) {
-            return List.of();
-        }
-        return workflowService.statuses(wf.getId());
-    }
 }

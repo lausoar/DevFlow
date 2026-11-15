@@ -33,7 +33,7 @@ jobs:
         working-directory: backend
         run: >
           mvn -B test
-          -Dtest='EnterpriseRolesTest,PermissionServiceImplTest,GuestServiceImplTest,ProjectAccessServiceImplTest,SearchServiceImplTest,AutomationRuleServiceImplTest,QueryExpressionParserTest,WorkflowDefaultsTest,DeploymentServiceImplDoraTest,TotpUtilTest,PasswordPolicyTest'
+          -Dtest='EnterpriseRolesTest,PermissionServiceImplTest,GuestServiceImplTest,ProjectAccessServiceImplTest,SearchServiceImplTest,AutomationRuleServiceImplTest,QueryExpressionParserTest,WorkflowDefaultsTest,DeploymentServiceImplDoraTest,TotpUtilTest,PasswordPolicyTest,TaskServiceImplTest,StatisticsServiceImplTest'
           -DfailIfNoSpecifiedTests=false
 
       - name: 上传测试报告

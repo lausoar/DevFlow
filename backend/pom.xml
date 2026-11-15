@@ -65,6 +65,18 @@
             <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
             <version>${mybatis-plus.version}</version>
         </dependency>
+        <!-- 数据库迁移：Flyway（审计报告 §C11）
+             版本化的 DDL 迁移，替代 schema.sql 的 "每次启动重跑 + continue-on-error"。
+             flyway-mysql 是 MySQL 8 方言（FULLTEXT ngram 解析器等）必需模块。 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
         <!-- 分页插件（3.5.7+ 需要单独引入） -->
         <dependency>
             <groupId>com.baomidou</groupId>

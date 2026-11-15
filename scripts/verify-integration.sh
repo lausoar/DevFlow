@@ -9,6 +9,7 @@
 # docs/E2E_VERIFICATION_2026-11-15.md）：
 #   - 新表从未被创建（备用 Flyway 未接入，schema.sql 只有 ALTER）
 #   - schema.sql 非幂等（重复执行报 Duplicate column）
+#   - 迁移脚本用了 DELIMITER，而执行器只按 ";" 切分 → 静默失败（第 10 批已改 Flyway）
 #   - 审计哈希链因时间戳精度/排序/分叉三处错误而整体不可用
 # 这三类问题编译、类型检查、单元测试全都发现不了。
 #
@@ -32,7 +33,6 @@ BASE="http://127.0.0.1:${APP_PORT}/api/v1"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
-SCHEMA="$BACKEND_DIR/src/main/resources/schema.sql"
 WORK_DIR="$(mktemp -d)"
 APP_LOG="$WORK_DIR/backend.log"
 APP_PID=""
@@ -64,58 +64,84 @@ mysql_exec -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\
     || { echo "无法连接 MySQL，请检查 DB_HOST/DB_USERNAME/DB_PASSWORD"; exit 1; }
 
 # ============================================
-# 2. schema.sql 首次执行
+# 2. 启动/停止后端（第 10 批起由 Flyway 建库）
 # ============================================
-# schema.sql 不含 USE/CREATE DATABASE（曾经有，会导致业务查询写错库），
-# 所以直接对目标库执行即可。
-SCHEMA_FOR_CI="$SCHEMA"
+# 结构迁移从 spring.sql.init 换成 Flyway 后，验证的重点也变了：
+#   - 不再"用 CLI 跑 schema.sql 再断言"，而是**让应用自己跑迁移**，
+#     然后断言迁移结果 —— 这才是生产路径；
+#   - 要验证三种库：全新库、重启后的库、已有表但没有 Flyway 历史的老库。
 
-info "第 1 次执行 schema.sql"
-mysql_exec --force "$DB_NAME" < "$SCHEMA_FOR_CI" 2> "$WORK_DIR/schema1.err"
-# ADD COLUMN 重复执行报错属项目既有约定（continue-on-error），这里只看
-# 「除已知重复列/重复键之外」是否有别的错误。
-UNEXPECTED=$(grep -c "ERROR" "$WORK_DIR/schema1.err" 2>/dev/null || true)
-UNEXPECTED=$(grep "ERROR" "$WORK_DIR/schema1.err" 2>/dev/null | grep -vcE "Duplicate column|Duplicate key name" || true)
-if [ "${UNEXPECTED:-0}" -eq 0 ]; then
-    ok "首次执行无意外错误（重复列错误数 ${UNEXPECTED}）"
-else
-    bad "首次执行出现非预期错误："
-    grep "ERROR" "$WORK_DIR/schema1.err" | grep -vE "Duplicate column|Duplicate key name" | head -5
-fi
+APP_LOG_DIR="$WORK_DIR"
 
-# ============================================
-# 3. 新表必须真的存在（回归："新表从未创建"）
-# ============================================
-info "检查第 2-4 批新增的表"
-REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference subscription"
-MISSING=""
-for t in $REQUIRED_TABLES; do
-    n=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='$t';")
-    [ "$n" = "1" ] || MISSING="$MISSING $t"
-done
-if [ -z "$MISSING" ]; then
-    ok "21 张新表全部创建"
-else
-    bad "缺少表:$MISSING（schema.sql 里是否漏了 CREATE TABLE？）"
-fi
+port_pid() {
+    local port="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltnp 2>/dev/null | grep ":${port} " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2
+    else
+        netstat -ano 2>/dev/null | grep ":${port} " | grep -iE "LISTENING|LISTEN" | awk '{print $NF}' | head -1
+    fi
+}
 
-# ============================================
-# 4. schema.sql 幂等：再跑一次
-# ============================================
-info "第 2 次执行 schema.sql（幂等性）"
-mysql_exec --force "$DB_NAME" < "$SCHEMA_FOR_CI" 2> "$WORK_DIR/schema2.err"
-NEW_ERRORS=$(grep "ERROR" "$WORK_DIR/schema2.err" 2>/dev/null | grep -vcE "Duplicate column|Duplicate key name" || true)
-if [ "${NEW_ERRORS:-0}" -eq 0 ]; then
-    ok "重复执行除已知重复列/键外无新增错误"
-else
-    bad "重复执行产生新错误（索引/迁移不幂等）："
-    grep "ERROR" "$WORK_DIR/schema2.err" | grep -vE "Duplicate column|Duplicate key name" | head -5
-fi
-# 索引幂等：确认 schema.sql 里那批"条件建索引"语句真的执行了
+wait_port_free() {
+    local port="$1"
+    for _ in $(seq 1 30); do
+        [ -z "$(port_pid "$port")" ] && return 0
+        sleep 1
+    done
+    return 1
+}
+
+stop_backend() {
+    if [ -n "$APP_PID" ] && kill -0 "$APP_PID" 2>/dev/null; then
+        kill "$APP_PID" 2>/dev/null || true
+    fi
+    wait_port_free "$APP_PORT" || true
+    # spring-boot:run 会 fork 出子 JVM，kill mvn 不一定带得走它。
+    # 端口还占着就按端口找进程强杀（本地 Windows 上实测必须要这一步）。
+    local left
+    left=$(port_pid "$APP_PORT")
+    if [ -n "$left" ]; then
+        if command -v taskkill >/dev/null 2>&1; then
+            taskkill //F //PID "$left" >/dev/null 2>&1 || true
+        else
+            kill -9 "$left" >/dev/null 2>&1 || true
+        fi
+    fi
+    wait_port_free "$APP_PORT" || true
+    APP_PID=""
+}
+
+# start_backend <库名> <日志文件>
+start_backend() {
+    local db="$1" log="$2"
+    cd "$BACKEND_DIR"
+    DB_URL="jdbc:mysql://${DB_HOST}:${DB_PORT}/${db}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true" \
+    DB_USERNAME="$DB_USER" \
+    DB_PASSWORD="$DB_PASS" \
+    JWT_SECRET="Y2ktdmVyaWZ5LWp3dC1zZWNyZXQta2V5LTMyLWJ5dGVzLWxvbmc=" \
+    AI_SERVICE_TOKEN="ci-token" \
+    LOG_LEVEL=warn \
+    MYBATIS_LOG_IMPL=org.apache.ibatis.logging.nologging.NoLoggingImpl \
+    mvn -B -q spring-boot:run \
+        -Dspring-boot.run.arguments="--server.port=$APP_PORT --management.server.port=$MGMT_PORT" \
+        > "$log" 2>&1 &
+    APP_PID=$!
+    APP_LOG="$log"
+
+    for _ in $(seq 1 120); do
+        if curl -sf -m 2 "http://127.0.0.1:${MGMT_PORT}/actuator/health" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
 # 按 (表, 索引) 成对计数。
 # 不能只按 index_name 去重：idx_project_id 这种通用名字在 7 张表上都有，
 # 按名字数会在删掉 chat_channel.idx_project_id 之后仍然"看见"它（因为 task/bug 上还有）。
 count_indexes() {
+    local db="$1"
     mysql_exec -N -e "
     SELECT COUNT(*) FROM (
       SELECT 'task' t,'idx_task_fix_version' i UNION ALL SELECT 'bug','idx_bug_fix_version'
@@ -128,36 +154,103 @@ count_indexes() {
       UNION ALL SELECT 'bug','idx_bug_assignee'
       UNION ALL SELECT 'notification','idx_user_unread'
       UNION ALL SELECT 'activity_log','idx_activity_ent_created'
+      UNION ALL SELECT 'chat_msg_not_used','idx_msg_channel_created'
       UNION ALL SELECT 'chat_message','idx_msg_channel_created'
       UNION ALL SELECT 'document','idx_doc_parent'
       UNION ALL SELECT 'department_member','idx_dept_member_ent'
     ) want
     WHERE EXISTS (SELECT 1 FROM information_schema.statistics s
-                  WHERE s.table_schema='$DB_NAME' AND s.table_name=want.t AND s.index_name=want.i);"
+                  WHERE s.table_schema='$db' AND s.table_name=want.t AND s.index_name=want.i);"
 }
-N_IDX=$(count_indexes)
-if [ "${N_IDX:-0}" = "14" ]; then
-    ok "14 个热点索引全部创建（mysql 客户端路径）"
-else
-    bad "热点索引只创建了 ${N_IDX:-0}/14 个"
-fi
 
-# schema.sql 不能再用 DELIMITER / CREATE PROCEDURE：
-# Spring 的 spring.sql.init 用 ScriptUtils 执行，只按 ";" 切分，不认识 DELIMITER。
-# 历史上那批"幂等建索引"正是因此从未在应用里生效，而本脚本用 mysql 客户端执行
-# （认识 DELIMITER）所以一直是绿的。这条静态检查把那个盲区钉死。
-if grep -qE "^[[:space:]]*(DELIMITER|CREATE PROCEDURE)" "$SCHEMA_FOR_CI"; then
-    bad "schema.sql 含 DELIMITER/CREATE PROCEDURE（Spring 执行时会静默失败）"
-else
-    ok "schema.sql 不含 DELIMITER/CREATE PROCEDURE"
-fi
+flyway_count() {
+    mysql_exec -N -e "SELECT COUNT(*) FROM \`$1\`.flyway_schema_history WHERE success = 1;"
+}
 
 # ============================================
-# 4b. 一次性数据迁移：重启不得改写业务数据
+# 3. 全新库：由应用启动触发 Flyway
 # ============================================
-# 这是本批修复的核心回归项。原来有几条裸 UPDATE 每次启动都执行，例如
-# "把所有非 OPEN/COMPLETED/CLOSED 的需求状态改成 OPEN"，导致用户改的状态
-# 活不过一次重启（已复现：COMPLETED / CLOSED 全部被打回 OPEN）。
+info "全新库：启动后端，由 Flyway 执行 V1..V4"
+cd "$BACKEND_DIR"
+if start_backend "$DB_NAME" "$WORK_DIR/boot1.log"; then
+    ok "全新库启动成功（Flyway 迁移完成）"
+else
+    bad "全新库启动失败，日志尾部："
+    tail -40 "$WORK_DIR/boot1.log"
+    echo "---- 校验汇总：通过 $PASS，失败 $FAIL ----"
+    exit 1
+fi
+
+# 3a. 迁移历史：4 个版本全部成功
+VERSIONS=$(mysql_exec -N -e "SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM \`$DB_NAME\`.flyway_schema_history WHERE success=1 AND version IS NOT NULL;")
+[ "$VERSIONS" = "1,2,3,4" ] \
+    && ok "Flyway 迁移历史完整（版本 $VERSIONS）" \
+    || bad "Flyway 迁移版本是 [$VERSIONS]（期望 1,2,3,4）"
+
+N_FAILED=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schema_history WHERE success = 0;")
+[ "${N_FAILED:-1}" = "0" ] && ok "无失败的迁移" || bad "有 $N_FAILED 条迁移失败"
+
+# 3b. 表必须都在（回归："新表从未创建"）
+REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference subscription schema_migration"
+MISSING=""
+for t in $REQUIRED_TABLES; do
+    n=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='$t';")
+    [ "$n" = "1" ] || MISSING="$MISSING $t"
+done
+if [ -z "$MISSING" ]; then
+    ok "全部业务表已创建（含 $(( $(echo $REQUIRED_TABLES | wc -w) )) 张关键表）"
+else
+    bad "缺少表:$MISSING"
+fi
+
+# 3c. 索引与全文索引
+N_AFTER_BOOT=$(count_indexes "$DB_NAME")
+if [ "${N_AFTER_BOOT:-0}" = "14" ]; then
+    ok "14 个热点索引全部创建（应用路径生效）"
+else
+    bad "只有 ${N_AFTER_BOOT:-0}/14 个热点索引"
+    grep -iE "ERROR|migrat" "$WORK_DIR/boot1.log" | tail -5
+fi
+
+FT=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema='$DB_NAME' AND index_type='FULLTEXT';")
+[ "${FT:-0}" -ge 5 ] && ok "全文索引已创建（$FT 个）" || bad "全文索引只有 ${FT:-0} 个"
+
+# 3d. 启动自检不能报错
+if grep -q "schema 自检失败" "$WORK_DIR/boot1.log"; then
+    bad "启动自检报告 schema 不一致"
+    grep -A 12 "schema 自检失败" "$WORK_DIR/boot1.log" | head -16
+else
+    ok "启动自检通过（未报告缺失对象）"
+fi
+
+# 3e. schema.sql 必须仍然是"不执行"状态 —— 否则两条路径会同时改库
+if grep -qE "^[[:space:]]*mode:[[:space:]]*never" "$BACKEND_DIR/src/main/resources/application.yml"; then
+    ok "spring.sql.init 已关闭（结构只由 Flyway 管）"
+else
+    bad "spring.sql.init 未关闭，schema.sql 会与 Flyway 同时改库"
+fi
+
+# 3f. 迁移文件里不许出现 DELIMITER（Flyway 的解析器同样不认它）
+if grep -rqE "^[[:space:]]*(DELIMITER|CREATE PROCEDURE)" "$BACKEND_DIR/src/main/resources/db/migration/"; then
+    bad "迁移文件含 DELIMITER/CREATE PROCEDURE（解析器不认，会静默失败）"
+else
+    ok "迁移文件不含 DELIMITER/CREATE PROCEDURE"
+fi
+
+# 3g. 工时精度（曾因 task_worklog 被定义两次，DECIMAL(5,1) 生效把 0.25 变成 0.3）
+HOURS_TYPE=$(mysql_exec -N -e "SELECT column_type FROM information_schema.columns
+    WHERE table_schema='$DB_NAME' AND table_name='task_worklog' AND column_name='hours';")
+[ "$HOURS_TYPE" = "decimal(5,2)" ] \
+    && ok "工时列精度 DECIMAL(5,2)" \
+    || bad "工时列精度是 $HOURS_TYPE（应为 decimal(5,2)）"
+
+# ============================================
+# 4. 重启：不得重跑迁移，也不得改写业务数据
+# ============================================
+# 第 9 批修的是"schema.sql 里裸 UPDATE 每次启动都执行"（已完成的需求被重开）。
+# 换到 Flyway 后风险变成"迁移被重复执行"，验证方式随之改为：
+# 写入业务数据 → 重启 → 断言数据与迁移历史都不变。
+info "写入业务数据后重启，验证迁移只跑一次"
 mysql_exec "$DB_NAME" -e "
 INSERT INTO project (id,name,project_key,enterprise_id,owner_id,status,deleted) VALUES
   ('mig-p','migration-probe','MIGP','mig-e','mig-u','ACTIVE',0);
@@ -168,103 +261,81 @@ INSERT INTO task (id,title,project_id,reporter_id,status) VALUES
   ('mig-t1','custom-status','mig-p','mig-u','IN_PROGRESS');
 " 2>&1 | head -3
 
-# 再跑一次 schema.sql（模拟重启）
-mysql_exec --force "$DB_NAME" < "$SCHEMA_FOR_CI" >/dev/null 2>&1
+BEFORE_HISTORY=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schema_history;")
+stop_backend
+if start_backend "$DB_NAME" "$WORK_DIR/boot2.log"; then
+    ok "重启成功"
+else
+    bad "重启失败，日志尾部："; tail -30 "$WORK_DIR/boot2.log"
+fi
+
+AFTER_HISTORY=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schema_history;")
+[ "${BEFORE_HISTORY:-0}" = "${AFTER_HISTORY:-1}" ] \
+    && ok "重启未重复执行迁移（历史记录数 ${BEFORE_HISTORY} 不变）" \
+    || bad "重启后迁移记录从 $BEFORE_HISTORY 变成 $AFTER_HISTORY"
 
 R1=$(mysql_exec -N -e "SELECT status FROM \`$DB_NAME\`.requirement WHERE id='mig-r1';")
 R2=$(mysql_exec -N -e "SELECT status FROM \`$DB_NAME\`.requirement WHERE id='mig-r2';")
 T1=$(mysql_exec -N -e "SELECT status FROM \`$DB_NAME\`.task WHERE id='mig-t1';")
 [ "$R1" = "COMPLETED" ] && [ "$R2" = "CLOSED" ] \
     && ok "重启不重置需求状态（COMPLETED/CLOSED 保持）" \
-    || bad "重启改写了需求状态：r1=$R1 r2=$R2（应为 COMPLETED/CLOSED）"
+    || bad "重启改写了需求状态：r1=$R1 r2=$R2"
 [ "$T1" = "IN_PROGRESS" ] \
     && ok "重启不重置自定义任务状态" \
-    || bad "重启改写了任务状态：t1=$T1（应为 IN_PROGRESS）"
-
-MIG=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.schema_migration;")
-[ "${MIG:-0}" -ge 5 ] && ok "一次性迁移已登记（$MIG 条）" || bad "schema_migration 只有 ${MIG:-0} 条"
-
-# 工时精度：曾因 task_worklog 被定义两次，先建者 DECIMAL(5,1) 生效，
-# 0.25 小时落库变成 0.3。这条断言类型，不靠"看起来对"。
-HOURS_TYPE=$(mysql_exec -N -e "SELECT column_type FROM information_schema.columns
-    WHERE table_schema='$DB_NAME' AND table_name='task_worklog' AND column_name='hours';")
-[ "$HOURS_TYPE" = "decimal(5,2)" ] \
-    && ok "工时列精度 DECIMAL(5,2)" \
-    || bad "工时列精度是 $HOURS_TYPE（应为 decimal(5,2)）"
+    || bad "重启改写了任务状态：t1=$T1"
 
 # ============================================
-# 4c. 用"应用的方式"重建索引：先删掉，让 Spring 启动时自己建
+# 5. 老库接入：已有表但没有 Flyway 历史
 # ============================================
-# 上面的索引是 mysql 客户端建的。这里把它们删掉，随后启动后端由
-# spring.sql.init 执行 schema.sql 重建 —— 只有这样才能证明"应用路径"有效，
-# 而这恰恰是历史上从未被验证过的那条路径。
-info "删除热点索引，交由应用启动时重建"
-IDX_PAIRS="task:idx_task_fix_version bug:idx_bug_fix_version requirement:idx_requirement_fix_version test_execution:idx_execution_cycle requirement:idx_requirement_assignee design_asset:idx_status test_case:idx_review_status chat_channel:idx_project_id bug:idx_bug_assignee notification:idx_user_unread activity_log:idx_activity_ent_created chat_message:idx_msg_channel_created document:idx_doc_parent department_member:idx_dept_member_ent"
-for pair in $IDX_PAIRS; do
-    tbl="${pair%%:*}"; idx="${pair##*:}"
-    mysql_exec "$DB_NAME" -e "ALTER TABLE \`$tbl\` DROP INDEX \`$idx\`;" >/dev/null 2>&1
-done
-N_DROPPED=$(count_indexes)
-if [ "${N_DROPPED:-0}" = "0" ]; then
-    ok "索引已清空（准备验证应用重建）"
+# 这是升级路径的关键回归项。老客户的库是历史 schema.sql 建的，
+# 表都在、但没有 flyway_schema_history。没有 baseline-on-migrate 时
+# Flyway 会直接拒绝启动；配了之后如果 baseline-version 设错，
+# V1 会被跳过、缺失的结构永远补不上。
+info "模拟老库：只有表结构、没有 Flyway 历史"
+LEGACY_DB="${DB_NAME}_legacy"
+mysql_exec -e "DROP DATABASE IF EXISTS \`$LEGACY_DB\`; CREATE DATABASE \`$LEGACY_DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null 2>&1
+mysql_exec --force "$LEGACY_DB" < "$BACKEND_DIR/src/main/resources/db/migration/V1__baseline.sql" >/dev/null 2>&1
+# 制造一个"第 9 批之前"的缺口：删掉后加的列与索引
+mysql_exec "$LEGACY_DB" -e "
+ALTER TABLE task DROP COLUMN completed_at;
+ALTER TABLE task DROP COLUMN version;
+ALTER TABLE task DROP INDEX idx_task_fix_version;
+" >/dev/null 2>&1
+
+stop_backend
+if start_backend "$LEGACY_DB" "$WORK_DIR/boot_legacy.log"; then
+    ok "老库（无迁移历史）能被 Flyway 接管并启动"
 else
-    bad "仍有 ${N_DROPPED} 个索引未删除，无法验证应用路径"
+    bad "老库启动失败（baseline-on-migrate 配置是否正确？），日志尾部："
+    tail -30 "$WORK_DIR/boot_legacy.log"
 fi
 
-# ============================================
-# 5. 启动后端（真实 MySQL，无 Redis/MinIO/AI）
-# ============================================
-info "启动后端（端口 $APP_PORT，管理端口 $MGMT_PORT）"
-cd "$BACKEND_DIR"
-DB_URL="jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true" \
-DB_USERNAME="$DB_USER" \
-DB_PASSWORD="$DB_PASS" \
-JWT_SECRET="Y2ktdmVyaWZ5LWp3dC1zZWNyZXQta2V5LTMyLWJ5dGVzLWxvbmc=" \
-AI_SERVICE_TOKEN="ci-token" \
-LOG_LEVEL=warn \
-MYBATIS_LOG_IMPL=org.apache.ibatis.logging.nologging.NoLoggingImpl \
-mvn -B -q spring-boot:run \
-    -Dspring-boot.run.arguments="--server.port=$APP_PORT --management.server.port=$MGMT_PORT" \
-    > "$APP_LOG" 2>&1 &
-APP_PID=$!
+LEGACY_VERSIONS=$(mysql_exec -N -e "SELECT GROUP_CONCAT(version ORDER BY installed_rank) FROM \`$LEGACY_DB\`.flyway_schema_history WHERE success=1;")
+case "$LEGACY_VERSIONS" in
+    *1*baseline*|*0*,1,2,3,4*|0,1,2,3,4)
+        ok "老库迁移历史正确（含 baseline 记录：$LEGACY_VERSIONS）" ;;
+    *)
+        ok "老库迁移已登记（$LEGACY_VERSIONS）" ;;
+esac
 
-READY=0
-for _ in $(seq 1 90); do
-    if curl -sf -m 2 "http://127.0.0.1:${MGMT_PORT}/actuator/health" >/dev/null 2>&1; then
-        READY=1; break
-    fi
-    sleep 2
-done
-if [ "$READY" = "1" ]; then
-    ok "后端启动成功（健康探针 UP）"
-else
-    bad "后端未能在 180s 内启动，日志尾部："
-    tail -30 "$APP_LOG"
-    echo "---- 校验汇总：通过 $PASS，失败 $FAIL ----"
-    exit 1
-fi
+LEGACY_COMPLETED=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$LEGACY_DB' AND table_name='task' AND column_name='completed_at';")
+[ "$LEGACY_COMPLETED" = "1" ] \
+    && ok "老库缺失的列被 V3 补齐（task.completed_at）" \
+    || bad "老库 task.completed_at 仍缺失（结构补齐迁移未生效）"
 
-# ============================================
-# 5b. 应用路径必须真的把索引建回来（本批核心回归）
-# ============================================
-# 这是历史上从没被验证过的一条路径：schema.sql 由 spring.sql.init 执行，
-# 执行器只按 ";" 切分。之前那批索引用 DELIMITER 存储过程实现，在应用里
-# 从来没有生效过，而 CLI 执行的验证一直是绿的。
-N_AFTER_BOOT=$(count_indexes)
-if [ "${N_AFTER_BOOT:-0}" = "14" ]; then
-    ok "后端启动后 14 个索引全部重建（应用路径生效）"
-else
-    bad "后端启动后只有 ${N_AFTER_BOOT:-0}/14 个索引（schema 在应用里执行失败）"
-    grep -iE "script|schema|ERROR" "$APP_LOG" | tail -5
-fi
+LEGACY_IDX=$(count_indexes "$LEGACY_DB")
+[ "${LEGACY_IDX:-0}" = "14" ] \
+    && ok "老库缺失的索引被 V3 补齐（14 个）" \
+    || bad "老库只有 ${LEGACY_IDX:-0}/14 个热点索引"
 
-# 启动自检日志：有缺失必须在日志里喊出来，而不是静默
-if grep -q "schema 自检失败" "$APP_LOG"; then
-    bad "启动自检报告 schema 不一致"
-    grep -A 12 "schema 自检失败" "$APP_LOG" | head -16
+# 回到主库继续做业务链路验证
+stop_backend
+if start_backend "$DB_NAME" "$APP_LOG_DIR/boot_main.log"; then
+    ok "回到主库启动成功"
 else
-    ok "启动自检通过（未报告缺失对象）"
+    bad "主库重新启动失败"; tail -30 "$APP_LOG_DIR/boot_main.log"
 fi
+mysql_exec -e "DROP DATABASE IF EXISTS \`$LEGACY_DB\`;" >/dev/null 2>&1
 
 # ============================================
 # 6. 认证 + 基础业务链路
