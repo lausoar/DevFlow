@@ -1,11 +1,113 @@
-import axios from 'axios';
-import type { ApiResponse } from '@/types';
+import axios, { type AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
+import type { ApiResponse, AuthResponse } from '@/types';
+import { useAuthStore } from '@/stores/auth-store';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api/v1';
+
+type RetryableRequest = InternalAxiosRequestConfig & { _retry?: boolean };
+
+let refreshPromise: Promise<string> | null = null;
+
+function clearSessionAndRedirect() {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('devflow-logged-out', '1');
+  useAuthStore.getState().logout();
+  localStorage.removeItem('devflow-auth');
+  const onAuthPage = window.location.pathname.startsWith('/login')
+    || window.location.pathname.startsWith('/register')
+    || window.location.pathname.startsWith('/guest');
+  if (!onAuthPage) {
+    const path = window.location.pathname + window.location.search;
+    window.location.href = `/login?redirect=${encodeURIComponent(path)}`;
+  }
+}
+
+async function performRefresh(failedAccessToken: string | null): Promise<string> {
+  if (localStorage.getItem('devflow-logged-out') === '1') throw new Error('Logged out');
+  const latestAccessToken = localStorage.getItem('access_token');
+  if (latestAccessToken && latestAccessToken !== failedAccessToken) {
+    const state = useAuthStore.getState();
+    const latestRefreshToken = localStorage.getItem('refresh_token');
+    if (state.user && latestRefreshToken) {
+      state.setAuth(state.user, latestAccessToken, latestRefreshToken);
+    }
+    return latestAccessToken;
+  }
+
+  const refreshToken = localStorage.getItem('refresh_token');
+  if (!refreshToken) throw new Error('No refresh token');
+  const response = await axios.post<ApiResponse<AuthResponse>>(
+    `${API_BASE_URL}/auth/refresh`,
+    { refreshToken },
+    { headers: { 'Content-Type': 'application/json' } },
+  );
+  const auth = response.data.data;
+  if (localStorage.getItem('devflow-logged-out') === '1') throw new Error('Logged out during refresh');
+  useAuthStore.getState().setAuth(auth.user, auth.accessToken, auth.refreshToken);
+  return auth.accessToken;
+}
+
+async function refreshAccessToken(failedAccessToken: string | null): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      if (navigator.locks) {
+        return navigator.locks.request('devflow-auth-refresh', () => performRefresh(failedAccessToken));
+      }
+      return performRefresh(failedAccessToken);
+    })().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+function createResponseInterceptor(client: AxiosInstance) {
+  return async (error: AxiosError) => {
+    const originalRequest = error.config as RetryableRequest | undefined;
+    const status = error.response?.status;
+    const requestUrl = originalRequest?.url || '';
+    const canRefresh = status === 401
+      && originalRequest
+      && !originalRequest._retry
+      && !requestUrl.startsWith('/auth/');
+
+    if (canRefresh) {
+      originalRequest._retry = true;
+      try {
+        const authorization = originalRequest.headers.Authorization;
+        const failedAccessToken = typeof authorization === 'string' && authorization.startsWith('Bearer ')
+          ? authorization.substring(7)
+          : localStorage.getItem('access_token');
+        const token = await refreshAccessToken(failedAccessToken);
+        originalRequest.headers.Authorization = `Bearer ${token}`;
+        return client.request(originalRequest);
+      } catch (refreshError) {
+        clearSessionAndRedirect();
+        return Promise.reject(refreshError);
+      }
+    }
+
+    if (status === 401) {
+      clearSessionAndRedirect();
+    } else {
+      const message = (error.response?.data as { message?: string } | undefined)?.message;
+      if (status === 403) {
+        console.error('权限不足:', message);
+      } else if (status === 404) {
+        console.error('资源不存在:', message);
+      } else if (status === 500) {
+        console.error('服务器错误:', message);
+      }
+    }
+    return Promise.reject(error);
+  };
+}
 
 // ============================================
 // Axios 实例 - 统一请求配置
 // ============================================
 const apiClient = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
@@ -31,43 +133,9 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// 响应拦截器 - 统一错误处理
 apiClient.interceptors.response.use(
   (response) => response.data,
-  (error) => {
-    if (error.response) {
-      const { status, data } = error.response;
-
-      switch (status) {
-        case 401:
-          // Token 过期/无效：清会话并带 redirect 跳登录（登录成功后回跳原页面）
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('refresh_token');
-            localStorage.removeItem('devflow-auth');
-            document.cookie = 'df_token=; path=/; Max-Age=0';
-            const path = window.location.pathname + window.location.search;
-            const onAuthPage = window.location.pathname.startsWith('/login')
-              || window.location.pathname.startsWith('/register')
-              || window.location.pathname.startsWith('/guest');
-            if (!onAuthPage) {
-              window.location.href = `/login?redirect=${encodeURIComponent(path)}`;
-            }
-          }
-          break;
-        case 403:
-          console.error('权限不足:', data?.message);
-          break;
-        case 404:
-          console.error('资源不存在:', data?.message);
-          break;
-        case 500:
-          console.error('服务器错误:', data?.message);
-          break;
-      }
-    }
-    return Promise.reject(error);
-  }
+  createResponseInterceptor(apiClient)
 );
 
 export default apiClient;
@@ -93,6 +161,11 @@ aiClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+aiClient.interceptors.response.use(
+  (response) => response.data,
+  createResponseInterceptor(aiClient)
+);
 
 // ============================================
 // 通用请求方法

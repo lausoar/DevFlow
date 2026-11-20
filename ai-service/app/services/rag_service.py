@@ -7,6 +7,10 @@ RAG 服务 - 文档向量化、检索增强生成
   否则 A 项目/企业的文档会被答给 B 项目成员。
 """
 from typing import Optional
+
+import httpx
+
+from app.services.backend_client import BackendClient
 from app.services.chroma_client import ChromaClient
 from app.services.embedding_service import embed, is_embedding_configured
 
@@ -15,6 +19,15 @@ chroma = ChromaClient()
 
 class RagScopeError(ValueError):
     """检索缺少隔离范围：宁可拒绝也不跨租户检索"""
+
+
+class RagAuthorizationError(PermissionError):
+    """知识库范围未获授权，或后端无法确认授权。"""
+
+    def __init__(self, detail: str, status_code: int = 403):
+        super().__init__(detail)
+        self.detail = detail
+        self.status_code = status_code
 
 
 class RagService:
@@ -31,7 +44,11 @@ class RagService:
         chunks = self._split_text(request.content, max_tokens=500)
 
         # 先清理该文档的旧分片，保证重复索引（文档更新）时幂等
-        await self.delete_document(request.doc_id)
+        await self.delete_document(
+            request.doc_id,
+            project_id=getattr(request, "project_id", None),
+            enterprise_id=getattr(request, "enterprise_id", None),
+        )
 
         if not chunks:
             return {"chunks": 0}
@@ -78,18 +95,67 @@ class RagService:
             return conditions[0]
         return {"$and": conditions}
 
-    async def search(self, request) -> list:
+    async def _authorized_where(
+        self,
+        request,
+        *,
+        user_token: Optional[str],
+        is_service: bool,
+    ) -> dict:
+        """在任何向量操作前确认范围；服务主体和用户主体走不同信任边界。"""
+        project_id = getattr(request, "project_id", None)
+        enterprise_id = getattr(request, "enterprise_id", None)
+        doc_type = getattr(request, "doc_type", None)
+
+        if is_service:
+            return self.build_where(project_id, enterprise_id, doc_type)
+
+        if not project_id:
+            raise RagScopeError("用户检索必须指定 project_id，不支持仅按企业检索")
+        if not user_token:
+            raise RagAuthorizationError("用户检索必须透传用户令牌", status_code=401)
+
+        try:
+            project = await BackendClient(user_token).get_project(project_id)
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            if status in (401, 403, 404):
+                raise RagAuthorizationError(
+                    "当前用户无权访问该项目知识库",
+                    status_code=401 if status == 401 else 403,
+                ) from e
+            raise RagAuthorizationError("暂时无法确认项目访问权限", status_code=503) from e
+        except Exception as e:  # 后端不可达、业务错误和 JSON 格式错误均 fail-closed
+            raise RagAuthorizationError("暂时无法确认项目访问权限", status_code=503) from e
+
+        if project is None:
+            raise RagAuthorizationError("当前用户无权访问该项目知识库")
+        if not isinstance(project, dict) or not project.get("id"):
+            raise RagAuthorizationError("后端项目响应格式无效", status_code=503)
+        if str(project["id"]) != str(project_id):
+            raise RagAuthorizationError("后端项目响应与请求范围不一致", status_code=503)
+
+        # 用户请求只使用已验证的项目范围，忽略其自行声明的 enterprise_id。
+        return self.build_where(project_id, None, doc_type)
+
+    async def search(
+        self,
+        request,
+        *,
+        user_token: Optional[str] = None,
+        is_service: bool = False,
+    ) -> list:
         """
-        向量检索知识库
-        嵌入服务或向量库不可用时返回空结果，由上层（RAG 问答/Agent）走纯 LLM 兜底
+        向量检索知识库。范围授权是本方法的强制边界，调用方不能绕过。
+        仅嵌入模型或向量库故障可降级为空结果，授权异常必须向上传递。
         """
+        where = await self._authorized_where(
+            request,
+            user_token=user_token,
+            is_service=is_service,
+        )
         if not is_embedding_configured():
             return []
-        where = self.build_where(
-            getattr(request, "project_id", None),
-            getattr(request, "enterprise_id", None),
-            getattr(request, "doc_type", None),
-        )
         try:
             query_embeddings = await embed([request.query])
             results = await chroma.query(
@@ -115,7 +181,13 @@ class RagService:
                 })
         return search_results
 
-    async def query_with_context(self, request) -> dict:
+    async def query_with_context(
+        self,
+        request,
+        *,
+        user_token: Optional[str] = None,
+        is_service: bool = False,
+    ) -> dict:
         """
         RAG 问答 - 先检索相关知识，再交给 LLM 生成回答
         """
@@ -129,7 +201,9 @@ class RagService:
                 "enterprise_id": getattr(request, "enterprise_id", None),
                 "top_k": request.top_k,
                 "doc_type": None,
-            })()
+            })(),
+            user_token=user_token,
+            is_service=is_service,
         )
 
         context_parts = []
@@ -169,15 +243,22 @@ class RagService:
             ],
         }
 
-    async def delete_document(self, doc_id: str):
-        """
-        删除文档的所有索引
-        集合为空时 Chroma 的 where 查询会返回 422，按"无索引"处理
-        """
-        try:
-            results = await chroma.get(where={"doc_id": doc_id})
-        except Exception:
-            return
+    async def delete_document(
+        self,
+        doc_id: str,
+        *,
+        project_id: Optional[str] = None,
+        enterprise_id: Optional[str] = None,
+    ):
+        """只删除指定租户范围内的文档分片。"""
+        scope = self.build_where(project_id, enterprise_id, None)
+        conditions = [{"doc_id": doc_id}]
+        if "$and" in scope:
+            conditions.extend(scope["$and"])
+        else:
+            conditions.append(scope)
+        where = {"$and": conditions}
+        results = await chroma.get(where=where)
         if results and results.get("ids"):
             await chroma.delete(ids=results["ids"])
 

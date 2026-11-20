@@ -58,17 +58,17 @@ export function TopBar() {
   const mounted = useIsMounted();
 
   const handleLogout = async () => {
+    localStorage.setItem('devflow-logged-out', '1');
+    let serverRevoked = true;
     try {
-      // 调用后端接口将 Token 加入黑名单
-      await authApi.logout();
+      await authApi.logout(localStorage.getItem('refresh_token') || undefined);
     } catch {
-      // 后端不可用时仍继续清除本地状态
-    }
-    // 标记用户已主动退出，防止 layout 自动登录
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('devflow-logged-out', '1');
+      serverRevoked = false;
     }
     logout();
+    if (!serverRevoked) {
+      alert('本地已退出，但服务器未能确认注销。请检查网络或服务状态后再次登录。');
+    }
     router.push('/login');
   };
 

@@ -47,6 +47,16 @@ class BackendClient:
             data = data["records"]
         return data or []
 
+    # ---------- 当前用户与权限校验 ----------
+
+    async def get_current_user(self) -> dict | None:
+        """以原始用户 Authorization 头调用 Java，执行登录态内省。"""
+        return await self._request("GET", "/auth/me")
+
+    async def get_project(self, project_id: str) -> dict | None:
+        """返回当前用户可见的项目；不可见时 Java 返回 data:null。"""
+        return await self._request("GET", f"/projects/{project_id}")
+
     # ---------- 业务数据查询（Agent 工具用） ----------
 
     async def list_my_tasks(self, limit: int = 50) -> list[dict]:

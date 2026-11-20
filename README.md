@@ -149,10 +149,10 @@ sys_role_permission（角色 × 权限点映射，企业域 4 角色 + 项目域
 ```
 HTTP:     JwtAuthFilter → Authorization Header（df_token Cookie 兜底，供 <img> 下载用）
 WebSocket: WebSocketAuthInterceptor → CONNECT 帧解析 JWT → 绑定会话身份
-登出:     TokenBlacklistService → Redis SETNX token:blacklist:<jwt> TTL=剩余有效期
+登出:     session_version + 1 → 全设备令牌失效 → Redis 黑名单补充
 ```
 
-无状态 JWT 的"登出即失效"难题用 Redis 黑名单解决：TTL 设为 Token 剩余有效期，过期自动清理；Redis 不可用时降级放行，不阻断业务。
+无状态 JWT 的"登出即失效"通过数据库会话版本与 Redis 黑名单共同实现：退出登录会递增会话版本并撤销该账号全部设备的会话，改密也会使旧会话失效；TTL 为 Token 剩余有效期，过期自动清理。Redis 不可用时按已撤销处理（fail-closed），避免注销后的 Token 被继续放行。Access/Refresh Token 使用不同用途与 audience，Refresh Token 轮换后旧令牌立即失效。
 
 ### 3. STOMP 实时通信设计
 
@@ -283,6 +283,8 @@ node scripts/seed-demo-data.mjs
 [docs/BUSINESS_FLOW_AND_DEMO_DATA.md](docs/BUSINESS_FLOW_AND_DEMO_DATA.md)。
 
 ### 测试账号
+
+历史种子账号默认处于停用状态，生产环境不会提供可用的公开默认密码。日常使用请直接注册账号；仅在隔离开发/集成环境需要演示账号时，在根目录 `.env` 设置 `DEVFLOW_SEED_DEMO_ACCOUNTS=true` 后再启动后端。升级认证模型后，旧 Token 会统一失效，需要重新登录。
 
 | 用户名 | 密码 | 角色 | 说明 |
 |--------|------|------|------|

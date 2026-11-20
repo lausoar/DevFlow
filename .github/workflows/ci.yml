@@ -33,7 +33,7 @@ jobs:
         working-directory: backend
         run: >
           mvn -B test
-          -Dtest='EnterpriseRolesTest,PermissionServiceImplTest,GuestServiceImplTest,ProjectAccessServiceImplTest,SearchServiceImplTest,AutomationRuleServiceImplTest,QueryExpressionParserTest,WorkflowDefaultsTest,DeploymentServiceImplDoraTest,TotpUtilTest,PasswordPolicyTest,TaskServiceImplTest,StatisticsServiceImplTest'
+          -Dtest='EnterpriseRolesTest,PermissionServiceImplTest,GuestServiceImplTest,ProjectAccessServiceImplTest,SearchServiceImplTest,AutomationRuleServiceImplTest,QueryExpressionParserTest,WorkflowDefaultsTest,DeploymentServiceImplDoraTest,TotpUtilTest,PasswordPolicyTest,TaskServiceImplTest,StatisticsServiceImplTest,JwtUtilTest,TokenBlacklistServiceTest,AuthServiceImplTest,UserServiceImplPasswordTest,EnterpriseServiceImplPasswordTest,DemoAccountInitializerTest,V4PendingProtectionCallbackTest,WebSocketAuthInterceptorTest,JwtAuthFilterTest'
           -DfailIfNoSpecifiedTests=false
 
       - name: 上传测试报告
@@ -44,7 +44,7 @@ jobs:
           path: backend/target/surefire-reports/
           retention-days: 7
 
-  # 集成验证：起一个真实 MySQL，跑 schema.sql，再打一遍关键接口。
+  # 集成验证：起真实 MySQL + Redis，由应用执行 Flyway 迁移并验证关键接口。
   # 覆盖单测覆盖不到的一类缺陷（2026-11-15 验证中发现的 5 个缺陷全在此列）：
   # 表未创建、schema 非幂等、审计链精度/排序/分叉、Servlet 流冲突、库串用。
   integration:
@@ -60,6 +60,15 @@ jobs:
           - 3306:3306
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
@@ -82,10 +91,13 @@ jobs:
           DB_USERNAME: root
           DB_PASSWORD: devflow123
           DB_NAME: devflow_ci
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          REDIS_PASSWORD: ''
         run: bash scripts/verify-integration.sh
 
   frontend:
-    name: 前端（类型检查 + Lint + 构建）
+    name: 前端（测试 + 类型检查 + Lint + 构建）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +111,14 @@ jobs:
       - name: 安装依赖
         working-directory: frontend
         run: npm ci
+
+      - name: 生产依赖漏洞门禁
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: 单元测试
+        working-directory: frontend
+        run: npm test
 
       - name: 类型检查
         working-directory: frontend

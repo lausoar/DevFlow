@@ -17,7 +17,7 @@
 #   scripts/verify-integration.sh                # 本地（默认连 localhost:3306）
 #   DB_HOST=mysql DB_PASSWORD=xxx scripts/verify-integration.sh
 #
-# 需要：bash + mysql 客户端 + JDK17 + Maven（后端由脚本自行启动）
+# 需要：bash + mysql 客户端 + JDK17 + Maven + Python 3 + Redis（后端由脚本自行启动）
 # 脚本会创建/使用独立数据库 ${DB_NAME:-devflow_ci}，不会碰现有业务库。
 
 set -uo pipefail
@@ -27,6 +27,9 @@ DB_PORT="${DB_PORT:-3306}"
 DB_USER="${DB_USERNAME:-root}"
 DB_PASS="${DB_PASSWORD:-devflow123}"
 DB_NAME="${DB_NAME:-devflow_ci}"
+REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
+REDIS_PORT="${REDIS_PORT:-6380}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-}"
 APP_PORT="${APP_PORT:-18080}"
 MGMT_PORT="${MGMT_PORT:-19090}"
 BASE="http://127.0.0.1:${APP_PORT}/api/v1"
@@ -55,6 +58,35 @@ bad()  { FAIL=$((FAIL+1)); FAILED_CHECKS+=("$1"); echo "  ❌ $1"; }
 info() { echo "→ $1"; }
 
 mysql_exec() { mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASS" --default-character-set=utf8mb4 "$@"; }
+
+info "检查 Redis ${REDIS_HOST}:${REDIS_PORT}"
+if ! python3 - "$REDIS_HOST" "$REDIS_PORT" "$REDIS_PASSWORD" <<'PY'
+import socket
+import sys
+
+host, port, password = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+
+def command(sock, payload):
+    sock.sendall(payload)
+    return sock.recv(4096)
+
+try:
+    with socket.create_connection((host, port), timeout=3) as sock:
+        if password:
+            reply = command(sock, f"AUTH {password}\r\n".encode())
+            if not reply.startswith(b"+OK"):
+                raise SystemExit("Redis AUTH 失败")
+        reply = command(sock, b"PING\r\n")
+        if not reply.startswith(b"+PONG"):
+            raise SystemExit("Redis PING 未通过")
+except Exception as exc:
+    print(f"Redis 不可用: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+then
+    echo "认证撤销采用 fail-closed，集成测试必须先启动可用 Redis"
+    exit 1
+fi
 
 # ============================================
 # 1. 准备一个干净库
@@ -111,13 +143,18 @@ stop_backend() {
     APP_PID=""
 }
 
-# start_backend <库名> <日志文件>
+# start_backend <库名> <日志文件> [是否启用演示账号]
+# 默认显式开启演示账号供隔离 CI 的 HTTP 链路使用；迁移隔离检查可传 false。
 start_backend() {
-    local db="$1" log="$2"
+    local db="$1" log="$2" seed_demo="${3:-true}"
     cd "$BACKEND_DIR"
     DB_URL="jdbc:mysql://${DB_HOST}:${DB_PORT}/${db}?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true" \
     DB_USERNAME="$DB_USER" \
     DB_PASSWORD="$DB_PASS" \
+    REDIS_HOST="$REDIS_HOST" \
+    REDIS_PORT="$REDIS_PORT" \
+    REDIS_PASSWORD="$REDIS_PASSWORD" \
+    DEVFLOW_SEED_DEMO_ACCOUNTS="$seed_demo" \
     JWT_SECRET="Y2ktdmVyaWZ5LWp3dC1zZWNyZXQta2V5LTMyLWJ5dGVzLWxvbmc=" \
     AI_SERVICE_TOKEN="ci-token" \
     LOG_LEVEL=warn \
@@ -129,7 +166,7 @@ start_backend() {
     APP_LOG="$log"
 
     for _ in $(seq 1 120); do
-        if curl -sf -m 2 "http://127.0.0.1:${MGMT_PORT}/actuator/health" >/dev/null 2>&1; then
+        if curl -sf -m 2 "http://127.0.0.1:${MGMT_PORT}/actuator/health/readiness" >/dev/null 2>&1; then
             return 0
         fi
         sleep 2
@@ -170,9 +207,9 @@ flyway_count() {
 # ============================================
 # 3. 全新库：由应用启动触发 Flyway
 # ============================================
-info "全新库：启动后端，由 Flyway 执行 V1..V4"
+info "全新库：启动后端，由 Flyway 执行全部版本化迁移（暂不重新播种演示账号）"
 cd "$BACKEND_DIR"
-if start_backend "$DB_NAME" "$WORK_DIR/boot1.log"; then
+if start_backend "$DB_NAME" "$WORK_DIR/boot1.log" false; then
     ok "全新库启动成功（Flyway 迁移完成）"
 else
     bad "全新库启动失败，日志尾部："
@@ -193,6 +230,20 @@ VERSIONS=$(mysql_exec -N -e "SELECT GROUP_CONCAT(version ORDER BY installed_rank
 
 N_FAILED=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schema_history WHERE success = 0;")
 [ "${N_FAILED:-1}" = "0" ] && ok "无失败的迁移" || bad "有 $N_FAILED 条迁移失败"
+
+# V8 必须先隔离仍使用默认密码的演示账号；后续 HTTP 链路再显式开启播种器。
+SESSION_VERSION=$(mysql_exec -N -e "SELECT CONCAT(column_type, '|', is_nullable, '|', column_default)
+    FROM information_schema.columns
+    WHERE table_schema='$DB_NAME' AND table_name='sys_user' AND column_name='session_version';")
+[ "$SESSION_VERSION" = "bigint|NO|0" ] \
+    && ok "V8 创建 sys_user.session_version BIGINT NOT NULL DEFAULT 0" \
+    || bad "session_version 定义错误：$SESSION_VERSION（期望 bigint|NO|0）"
+
+DEMO_QUARANTINE=$(mysql_exec -N -e "SELECT GROUP_CONCAT(CONCAT(username, ':', status, ':', must_change_password) ORDER BY username SEPARATOR ',')
+    FROM \`$DB_NAME\`.sys_user WHERE username IN ('admin', 'zhangsan');")
+[ "$DEMO_QUARANTINE" = "admin:SUSPENDED:1,zhangsan:SUSPENDED:1" ] \
+    && ok "V8 隔离未改密的 admin/zhangsan 演示账号" \
+    || bad "默认演示账号隔离结果错误：$DEMO_QUARANTINE"
 
 # 3b. 表必须都在（回归："新表从未创建"）
 REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference subscription schema_migration"
@@ -306,8 +357,35 @@ ALTER TABLE task DROP COLUMN version;
 ALTER TABLE task DROP INDEX idx_task_fix_version;
 " >/dev/null 2>&1
 
+# 真正的 pre-V4 数据：自定义状态必须穿过 V4/V7，未配置的旧状态才归一到初始态。
+# 同时恢复历史上错误的三列唯一键；V7 必须原地修成四列 UNIQUE。
+mysql_exec "$LEGACY_DB" -e "
+ALTER TABLE sys_role_permission
+  DROP INDEX uk_role_perm,
+  ADD UNIQUE KEY uk_role_perm (scope, role, permission_code);
+INSERT INTO sys_user (id, username, email, password, role, status, deleted) VALUES
+  ('legacy-zhangsan', 'zhangsan', 'zhangsan@devflow.com', 'changed-password-hash', 'MEMBER', 'ACTIVE', 0);
+INSERT INTO project (id,name,project_key,enterprise_id,owner_id,status,deleted) VALUES
+  ('legacy-p','pre-v4-project','PREV4','legacy-e','legacy-u','ACTIVE',0);
+INSERT INTO workflow (id,project_id,name,issue_type,is_default,deleted) VALUES
+  ('legacy-rw','legacy-p','legacy requirement flow','REQUIREMENT',1,0),
+  ('legacy-tw','legacy-p','legacy task flow','TASK',1,0);
+INSERT INTO workflow_status (id,workflow_id,code,name,category,sort,is_initial,is_terminal) VALUES
+  ('legacy-rs1','legacy-rw','R_INITIAL_12345678901','Long initial requirement','TODO',0,1,0),
+  ('legacy-rs2','legacy-rw','AWAITING_TRIAGE','Awaiting triage','TODO',1,0,0),
+  ('legacy-rs3','legacy-rw','CUSTOM_COMPLETED','Custom completed','DONE',2,0,1),
+  ('legacy-ts1','legacy-tw','T_INITIAL_123456789012345678901234567890','Long initial task','TODO',0,1,0),
+  ('legacy-ts2','legacy-tw','IN_PROGRESS','Configured legacy code','IN_PROGRESS',1,0,0);
+INSERT INTO requirement (id,title,project_id,requester_id,status) VALUES
+  ('legacy-r-custom','configured requirement','legacy-p','legacy-u','AWAITING_TRIAGE'),
+  ('legacy-r-normalize','unconfigured requirement','legacy-p','legacy-u','PENDING');
+INSERT INTO task (id,title,project_id,reporter_id,status) VALUES
+  ('legacy-t-custom','configured task','legacy-p','legacy-u','IN_PROGRESS'),
+  ('legacy-t-normalize','unconfigured task','legacy-p','legacy-u','IN_REVIEW');
+" || { bad "无法建立 pre-V4 老库夹具"; exit 1; }
+
 stop_backend
-if start_backend "$LEGACY_DB" "$WORK_DIR/boot_legacy.log"; then
+if start_backend "$LEGACY_DB" "$WORK_DIR/boot_legacy.log" false; then
     ok "老库（无迁移历史）能被 Flyway 接管并启动"
 else
     bad "老库启动失败（baseline-on-migrate 配置是否正确？），日志尾部："
@@ -332,14 +410,95 @@ LEGACY_IDX=$(count_indexes "$LEGACY_DB")
     && ok "老库缺失的索引被 V3 补齐（14 个）" \
     || bad "老库只有 ${LEGACY_IDX:-0}/14 个热点索引"
 
-# 回到主库继续做业务链路验证
+LEGACY_R_CUSTOM=$(mysql_exec -N -e "SELECT status FROM \`$LEGACY_DB\`.requirement WHERE id='legacy-r-custom';")
+LEGACY_T_CUSTOM=$(mysql_exec -N -e "SELECT status FROM \`$LEGACY_DB\`.task WHERE id='legacy-t-custom';")
+[ "$LEGACY_R_CUSTOM" = "AWAITING_TRIAGE" ] && [ "$LEGACY_T_CUSTOM" = "IN_PROGRESS" ] \
+    && ok "V4 前回调与 V7 均保留项目已配置的自定义状态" \
+    || bad "自定义状态被改写：requirement=$LEGACY_R_CUSTOM task=$LEGACY_T_CUSTOM"
+
+LEGACY_R_NORMALIZED=$(mysql_exec -N -e "SELECT status FROM \`$LEGACY_DB\`.requirement WHERE id='legacy-r-normalize';")
+LEGACY_T_NORMALIZED=$(mysql_exec -N -e "SELECT status FROM \`$LEGACY_DB\`.task WHERE id='legacy-t-normalize';")
+[ "$LEGACY_R_NORMALIZED" = "R_INITIAL_12345678901" ] \
+    && [ "$LEGACY_T_NORMALIZED" = "T_INITIAL_123456789012345678901234567890" ] \
+    && ok "V7 将未配置旧状态归一到 21/40 字符的工作流初始代码" \
+    || bad "旧状态归一错误：requirement=$LEGACY_R_NORMALIZED task=$LEGACY_T_NORMALIZED"
+
+LEGACY_CODE_LENGTHS=$(mysql_exec -N -e "SELECT CONCAT(
+    CHAR_LENGTH((SELECT code FROM \`$LEGACY_DB\`.workflow_status WHERE id='legacy-rs1')), ':',
+    CHAR_LENGTH((SELECT code FROM \`$LEGACY_DB\`.workflow_status WHERE id='legacy-ts1')), ':',
+    CHAR_LENGTH((SELECT status FROM \`$LEGACY_DB\`.requirement WHERE id='legacy-r-normalize')), ':',
+    CHAR_LENGTH((SELECT status FROM \`$LEGACY_DB\`.task WHERE id='legacy-t-normalize')));")
+LEGACY_STATUS_COLUMNS=$(mysql_exec -N -e "SELECT GROUP_CONCAT(CONCAT(table_name, ':', column_type) ORDER BY table_name SEPARATOR ',')
+    FROM information_schema.columns
+    WHERE table_schema='$LEGACY_DB' AND column_name='status' AND table_name IN ('requirement', 'task');")
+[ "$LEGACY_CODE_LENGTHS" = "21:40:21:40" ] && [ "$LEGACY_STATUS_COLUMNS" = "requirement:varchar(40),task:varchar(40)" ] \
+    && ok "21–40 字符初始代码保留且需求/任务列均为 VARCHAR(40)" \
+    || bad "长状态代码或列宽错误：lengths=$LEGACY_CODE_LENGTHS columns=$LEGACY_STATUS_COLUMNS"
+
+LEGACY_ROLE_KEY=$(mysql_exec -N -e "SELECT CONCAT(non_unique, ':', GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ','))
+    FROM information_schema.statistics
+    WHERE table_schema='$LEGACY_DB' AND table_name='sys_role_permission' AND index_name='uk_role_perm'
+    GROUP BY non_unique;")
+[ "$LEGACY_ROLE_KEY" = "0:enterprise_id,scope,role,permission_code" ] \
+    && ok "V7 将错误三列 uk_role_perm 修复为四列 UNIQUE" \
+    || bad "uk_role_perm 修复错误：$LEGACY_ROLE_KEY"
+
+LEGACY_ADMIN=$(mysql_exec -N -e "SELECT CONCAT(status, ':', must_change_password) FROM \`$LEGACY_DB\`.sys_user WHERE username='admin';")
+LEGACY_CHANGED=$(mysql_exec -N -e "SELECT CONCAT(status, ':', must_change_password, ':', password) FROM \`$LEGACY_DB\`.sys_user WHERE username='zhangsan';")
+[ "$LEGACY_ADMIN" = "SUSPENDED:1" ] \
+    && [ "$LEGACY_CHANGED" = "ACTIVE:0:changed-password-hash" ] \
+    && ok "V8 只隔离默认哈希账号，已改密账号保持原状" \
+    || bad "演示账号精确匹配失败：admin=$LEGACY_ADMIN changed=$LEGACY_CHANGED"
+
+case ",$LEGACY_VERSIONS," in
+    *,7,8*) ok "老库应用路径包含 V7/V8" ;;
+    *) bad "老库缺少 V7/V8 成功历史：$LEGACY_VERSIONS" ;;
+esac
+
+# 独立 pre-V4 库：全程没有任何 workflow/workflow_status 行，必须走 V7 内置回退。
+FALLBACK_DB="${DB_NAME}_legacy_builtin"
+info "模拟零工作流老库：验证 V7 内置状态回退"
+mysql_exec -e "DROP DATABASE IF EXISTS \`$FALLBACK_DB\`; CREATE DATABASE \`$FALLBACK_DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null 2>&1
+mysql_exec --force "$FALLBACK_DB" < "$BACKEND_DIR/src/main/resources/db/migration/V1__baseline.sql" >/dev/null 2>&1
+mysql_exec "$FALLBACK_DB" -e "
+INSERT INTO project (id,name,project_key,enterprise_id,owner_id,status,deleted) VALUES
+  ('fallback-p','zero-workflow-project','FALLBACK','fallback-e','fallback-u','ACTIVE',0);
+INSERT INTO requirement (id,title,project_id,requester_id,status) VALUES
+  ('fallback-r','legacy pending requirement','fallback-p','fallback-u','PENDING');
+INSERT INTO task (id,title,project_id,reporter_id,status) VALUES
+  ('fallback-t-progress','legacy progress task','fallback-p','fallback-u','IN_PROGRESS'),
+  ('fallback-t-review','legacy review task','fallback-p','fallback-u','IN_REVIEW');
+" || { bad "无法建立零工作流 pre-V4 夹具"; exit 1; }
+FALLBACK_EMPTY=$(mysql_exec -N -e "SELECT CONCAT(
+    (SELECT COUNT(*) FROM \`$FALLBACK_DB\`.workflow), ':',
+    (SELECT COUNT(*) FROM \`$FALLBACK_DB\`.workflow_status));")
+[ "$FALLBACK_EMPTY" = "0:0" ] \
+    && ok "零工作流夹具确认 workflow/workflow_status 均无行" \
+    || { bad "零工作流夹具被污染：$FALLBACK_EMPTY"; exit 1; }
+
+stop_backend
+if start_backend "$FALLBACK_DB" "$WORK_DIR/boot_legacy_builtin.log" false; then
+    ok "零工作流老库通过应用 Flyway 路径启动"
+else
+    bad "零工作流老库启动失败，日志尾部："
+    tail -30 "$WORK_DIR/boot_legacy_builtin.log"
+fi
+
+FALLBACK_R=$(mysql_exec -N -e "SELECT status FROM \`$FALLBACK_DB\`.requirement WHERE id='fallback-r';")
+FALLBACK_T_PROGRESS=$(mysql_exec -N -e "SELECT status FROM \`$FALLBACK_DB\`.task WHERE id='fallback-t-progress';")
+FALLBACK_T_REVIEW=$(mysql_exec -N -e "SELECT status FROM \`$FALLBACK_DB\`.task WHERE id='fallback-t-review';")
+[ "$FALLBACK_R" = "OPEN" ] && [ "$FALLBACK_T_PROGRESS" = "DOING" ] && [ "$FALLBACK_T_REVIEW" = "TESTING" ] \
+    && ok "零工作流旧状态回退为 OPEN/DOING/TESTING" \
+    || bad "内置回退错误：requirement=$FALLBACK_R progress=$FALLBACK_T_PROGRESS review=$FALLBACK_T_REVIEW"
+
+# 回到主库继续做业务链路验证（默认显式开启演示账号播种器）。
 stop_backend
 if start_backend "$DB_NAME" "$APP_LOG_DIR/boot_main.log"; then
     ok "回到主库启动成功"
 else
     bad "主库重新启动失败"; tail -30 "$APP_LOG_DIR/boot_main.log"
 fi
-mysql_exec -e "DROP DATABASE IF EXISTS \`$LEGACY_DB\`;" >/dev/null 2>&1
+mysql_exec -e "DROP DATABASE IF EXISTS \`$LEGACY_DB\`; DROP DATABASE IF EXISTS \`$FALLBACK_DB\`;" >/dev/null 2>&1
 
 # ============================================
 # 6. 认证 + 基础业务链路

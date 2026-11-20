@@ -750,6 +750,7 @@ public class EnterpriseServiceImpl implements EnterpriseService {
         // 强制下次登录改密：临时密码不应长期有效（本次回应中明文可见属正常，仅此一次）
         member.setMustChangePassword(1);
         member.setPasswordUpdatedAt(java.time.LocalDateTime.now());
+        member.setSessionVersion((member.getSessionVersion() == null ? 0L : member.getSessionVersion()) + 1);
         userMapper.updateById(member);
 
         // 审计只记动作，绝不记录密码明文

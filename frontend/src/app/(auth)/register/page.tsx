@@ -20,7 +20,7 @@ const registerSchema = z
     realName: z.string().min(1, '请输入真实姓名').max(50, '真实姓名最多 50 个字符'),
     username: z.string().min(3, '用户名至少 3 个字符').max(20, '用户名最多 20 个字符'),
     email: z.string().email('请输入有效的邮箱地址'),
-    password: z.string().min(6, '密码至少 6 位'),
+    password: z.string().min(8, '密码至少 8 位'),
     confirmPassword: z.string(),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -61,7 +61,7 @@ export default function RegisterPage() {
         password: data.password,
         confirmPassword: data.confirmPassword,
       });
-      setAuth(res.data.user, res.data.accessToken);
+      setAuth(res.data.user, res.data.accessToken, res.data.refreshToken);
       router.push('/workspace');
     } catch (err) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -142,7 +142,7 @@ export default function RegisterPage() {
                   <Input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
-                    placeholder="至少 6 位"
+                    placeholder="至少 8 位"
                     autoComplete="new-password"
                     {...register('password')}
                   />

@@ -57,6 +57,7 @@ public class UserServiceImpl implements UserService {
     private void afterPasswordChange(User user) {
         user.setMustChangePassword(0);
         user.setPasswordUpdatedAt(java.time.LocalDateTime.now());
+        user.setSessionVersion((user.getSessionVersion() == null ? 0L : user.getSessionVersion()) + 1);
         userMapper.updateById(user);
     }
 

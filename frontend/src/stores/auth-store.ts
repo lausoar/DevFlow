@@ -12,7 +12,7 @@ interface AuthState {
   isLoading: boolean;
 
   // Actions
-  setAuth: (user: User, accessToken: string) => void;
+  setAuth: (user: User, accessToken: string, refreshToken: string) => void;
   setUser: (user: User) => void;
   logout: () => void;
   setLoading: (loading: boolean) => void;
@@ -27,9 +27,11 @@ export const useAuthStore = create<AuthState>()(
       isLoading: true,
 
       // 设置认证信息
-      setAuth: (user, accessToken) => {
+      setAuth: (user, accessToken, refreshToken) => {
         if (typeof window !== 'undefined') {
           localStorage.setItem('access_token', accessToken);
+          localStorage.setItem('refresh_token', refreshToken);
+          localStorage.removeItem('devflow-logged-out');
         }
         set({
           user,
@@ -47,6 +49,7 @@ export const useAuthStore = create<AuthState>()(
         if (typeof window !== 'undefined') {
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
+          document.cookie = 'df_token=; path=/; Max-Age=0';
         }
         set({
           user: null,

@@ -52,7 +52,7 @@ spring:
 
   # 结构迁移改为 Flyway（审计报告 §C11）。
   # schema.sql 不再是执行入口 —— 它保留为"人类可读的结构总览"，
-  # 真正生效的是 db/migration/V1..V4。
+  # 真正生效的是 db/migration 下的版本化迁移。
   #
   # baseline-on-migrate：老库里表已经存在、且没有 flyway_schema_history，
   #   不加这个 Flyway 会直接拒绝启动（"found non-empty schema without schema history table"）。
@@ -80,6 +80,10 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 100MB
+
+devflow:
+  # 仅在隔离开发/集成环境显式启用公开演示账号；生产默认 false
+  seed-demo-accounts: ${DEVFLOW_SEED_DEMO_ACCOUNTS:false}
 
 # MyBatis Plus 配置
 mybatis-plus:

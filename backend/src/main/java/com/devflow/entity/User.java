@@ -59,6 +59,9 @@ public class User {
     /** 上次改密时间 */
     private LocalDateTime passwordUpdatedAt;
 
+    /** 会话版本；改密或重置密码后递增，使旧令牌立即失效 */
+    private Long sessionVersion;
+
     /** 免打扰开始时间（与结束时间配合，start > end 表示跨天） */
     private java.time.LocalTime dndStart;
 

@@ -52,6 +52,7 @@ public class AiKnowledgeSyncService {
         }
         try {
             if (doc.getContent() == null || doc.getContent().isBlank()) {
+                deleteDocument(doc.getId(), doc.getProjectId(), doc.getEnterpriseId());
                 return;
             }
             HashMap<String, Object> body = new HashMap<>();
@@ -79,15 +80,24 @@ public class AiKnowledgeSyncService {
         }
     }
 
-    /** 文档删除后清理向量索引 */
+    /** 文档删除或正文清空后，清理指定租户范围内的向量索引 */
     @Async("aiExecutor")
-    public void deleteDocument(String docId) {
+    public void deleteDocument(String docId, String projectId, String enterpriseId) {
         if (docId == null || docId.isBlank()) {
             return;
         }
         try {
             restClient.delete()
-                    .uri("/rag/index/{docId}", docId)
+                    .uri(builder -> {
+                        builder.path("/rag/index/{docId}");
+                        if (StringUtils.hasText(projectId)) {
+                            builder.queryParam("project_id", projectId);
+                        }
+                        if (StringUtils.hasText(enterpriseId)) {
+                            builder.queryParam("enterprise_id", enterpriseId);
+                        }
+                        return builder.build(docId);
+                    })
                     .headers(this::applyServiceToken)
                     .retrieve()
                     .toBodilessEntity();

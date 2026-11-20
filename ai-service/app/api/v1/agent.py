@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from app.core.auth import require_user_token
 from app.services.agent_service import AgentService
+from app.services.rag_service import RagAuthorizationError, RagScopeError
 
 router = APIRouter()
 agent_router = router
@@ -39,8 +40,12 @@ async def run_agent(
     try:
         result = await agent_service.run(payload, token=user_token)
         return result
+    except RagScopeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RagAuthorizationError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent 运行失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Agent 运行失败: {str(e)}") from e
 
 
 @router.get("/status")

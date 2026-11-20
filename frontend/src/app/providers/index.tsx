@@ -38,25 +38,22 @@ function getQueryClient() {
 // 同一浏览器切换账号时必须清空，否则新账号会读到旧账号的数据
 // ============================================
 function AuthCacheInvalidation() {
-  const accessToken = useAuthStore((s) => s.accessToken);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
   const queryClient = useQueryClient();
-  const prevToken = useRef<string | null | undefined>(undefined);
+  const prevUserId = useRef<string | null | undefined>(undefined);
   const mounted = useRef(false);
 
   useEffect(() => {
-    // 首次挂载只记录当前 token（页面刷新时内存缓存本就是空的）
     if (!mounted.current) {
       mounted.current = true;
-      prevToken.current = accessToken;
+      prevUserId.current = userId;
       return;
     }
-    if (prevToken.current !== accessToken) {
-      prevToken.current = accessToken;
-      // resetQueries：清空所有缓存数据，活动中的查询自动重新拉取
-      // （clear+removeQueries 会让进行中的 observer 卡在 pending，导致页面永远"加载中"）
+    if (prevUserId.current !== userId) {
+      prevUserId.current = userId;
       queryClient.resetQueries();
     }
-  }, [accessToken, queryClient]);
+  }, [userId, queryClient]);
 
   return null;
 }

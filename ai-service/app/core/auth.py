@@ -13,9 +13,11 @@ import base64
 import hmac
 from typing import Optional
 
+import httpx
 from fastapi import Header, HTTPException, Request
 
 from app.core.config import get_settings
+from app.services.backend_client import BackendClient
 
 settings = get_settings()
 
@@ -44,33 +46,79 @@ def _verify_jwt(token: str) -> dict:
         raise HTTPException(status_code=503, detail="AI 服务未配置 JWT_SECRET，拒绝提供服务")
     try:
         key = base64.b64decode(secret)
-        return jwt.decode(token, key, algorithms=["HS256", "HS384", "HS512"])
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=["HS256", "HS384", "HS512"],
+            audience="devflow-ai",
+            issuer="devflow",
+        )
     except JWTError as e:
         raise HTTPException(status_code=401, detail="登录凭证无效或已过期") from e
     except Exception as e:  # noqa: BLE001 - 密钥格式错误同样按认证失败处理
         raise HTTPException(status_code=401, detail="登录凭证无效") from e
+    return _validate_access_claims(claims)
+
+
+def _validate_access_claims(claims: dict) -> dict:
+    """验签之外，只接受面向 AI 服务的 Java access token。"""
+    subject = claims.get("sub")
+    if (
+        claims.get("token_type") != "access"
+        or not isinstance(subject, str)
+        or not subject.strip()
+    ):
+        raise HTTPException(status_code=401, detail="需要有效的访问令牌")
+    return claims
+
+
+async def _introspect_user(authorization: str, subject: str) -> None:
+    """由 Java 判定黑名单、账号状态和 session 版本，失败时关闭访问。"""
+    try:
+        current_user = await BackendClient(authorization).get_current_user()
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (401, 403):
+            raise HTTPException(status_code=401, detail="登录凭证已失效") from e
+        raise HTTPException(status_code=503, detail="暂时无法确认用户授权状态") from e
+    except Exception as e:  # 网络、响应格式和后端业务错误均不能视为已授权
+        raise HTTPException(status_code=503, detail="暂时无法确认用户授权状态") from e
+
+    backend_subject = current_user.get("id") if isinstance(current_user, dict) else None
+    if not isinstance(backend_subject, str) or not backend_subject.strip():
+        raise HTTPException(status_code=503, detail="后端用户响应格式无效")
+    if backend_subject != subject:
+        raise HTTPException(status_code=401, detail="登录凭证与用户身份不一致")
 
 
 async def require_user(
     request: Request,
     authorization: Optional[str] = Header(None),
 ) -> dict:
-    """路由依赖：要求已认证（用户 JWT 或服务令牌）。"""
+    """路由依赖：要求已认证（用户 JWT 或服务令牌），同一请求只内省一次。"""
+    if getattr(request.state, "auth_complete", False):
+        return request.state.auth_claims
+
     token = _extract_bearer(authorization)
     if token:
         claims = _verify_jwt(token)
-        request.state.user_id = claims.get("sub")
+        await _introspect_user(authorization or "", claims["sub"])
+        request.state.user_id = claims["sub"]
         request.state.authorization = authorization
         request.state.is_service = False
+        request.state.auth_claims = claims
+        request.state.auth_complete = True
         return claims
 
     service_token = request.headers.get("x-service-token")
     expected = (settings.ai_service_token or "").strip()
     if expected and service_token and hmac.compare_digest(service_token, expected):
+        claims = {"sub": "service", "scope": "service"}
         request.state.user_id = None
         request.state.authorization = None
         request.state.is_service = True
-        return {"sub": "service", "scope": "service"}
+        request.state.auth_claims = claims
+        request.state.auth_complete = True
+        return claims
 
     raise HTTPException(status_code=401, detail="需要登录凭证")
 
@@ -83,7 +131,8 @@ async def require_user_token(
     要求"真实用户 JWT"（不接受服务令牌），返回 Authorization 头的原值。
     Agent 工具需要以该用户身份访问 Java 后端，因此必须拿到可透传的用户令牌。
     """
-    await require_user(request, authorization)
+    if not getattr(request.state, "auth_complete", False):
+        await require_user(request, authorization)
     if getattr(request.state, "is_service", False):
         raise HTTPException(status_code=403, detail="该接口需要以用户身份调用")
-    return authorization or ""
+    return getattr(request.state, "authorization", None) or authorization or ""

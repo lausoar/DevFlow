@@ -158,6 +158,7 @@ public class GlobalExceptionHandler {
             case 409 -> HttpStatus.CONFLICT;
             case 422 -> HttpStatus.UNPROCESSABLE_ENTITY;
             case 429 -> HttpStatus.TOO_MANY_REQUESTS;
+            case 503 -> HttpStatus.SERVICE_UNAVAILABLE;
             default -> code >= 400 && code < 500
                     ? HttpStatus.valueOf(code)
                     : HttpStatus.INTERNAL_SERVER_ERROR;

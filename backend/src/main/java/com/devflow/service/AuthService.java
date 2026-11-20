@@ -22,6 +22,6 @@ public interface AuthService {
     /** 获取当前用户 */
     User getCurrentUser(String userId);
 
-    /** 退出登录（将 Token 加入黑名单） */
+    /** 退出登录：递增会话版本，撤销该账号全部设备上的令牌 */
     void logout(String accessToken, String refreshToken);
 }

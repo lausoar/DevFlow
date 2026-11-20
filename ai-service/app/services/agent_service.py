@@ -217,8 +217,8 @@ class AgentService:
         args = tool_call.arguments
 
         if tool_call.name == "search_knowledge_base":
-            # 知识库检索必须带项目范围，否则拒绝（跨项目检索属于数据泄露）
-            target_project = args.get("project_id") or project_id
+            # 请求绑定的项目优先于模型参数； RagService 仍会用用户令牌校验该项目。
+            target_project = project_id or args.get("project_id")
             if not target_project:
                 return {"error": "知识库检索需要指定项目上下文（project_id），请在提问时选择项目"}
             results = await self.rag_service.search(
@@ -227,7 +227,8 @@ class AgentService:
                     "project_id": target_project,
                     "top_k": args.get("top_k", 3),
                     "doc_type": None,
-                })()
+                })(),
+                user_token=token,
             )
             return {"results": results}
 

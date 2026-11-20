@@ -1,6 +1,7 @@
 package com.devflow.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.devflow.common.exception.BusinessException;
 import com.devflow.dto.request.LoginRequest;
 import com.devflow.dto.request.RegisterRequest;
@@ -14,6 +15,7 @@ import com.devflow.service.MfaService;
 import com.devflow.service.TokenBlacklistService;
 import com.devflow.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.util.StringUtils;
 import org.springframework.stereotype.Service;
@@ -29,6 +31,7 @@ import java.util.UUID;
  * 认证服务实现
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
@@ -90,8 +93,8 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 生成 Token
-        String accessToken = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
-        String refreshToken = jwtUtil.generateRefreshToken(user.getId());
+        String accessToken = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole(), sessionVersionOf(user));
+        String refreshToken = jwtUtil.generateRefreshToken(user.getId(), sessionVersionOf(user));
 
         // 清除密码字段返回
         user.setPassword(null);
@@ -144,12 +147,13 @@ public class AuthServiceImpl implements AuthService {
         user.setRole("MEMBER");
         user.setStatus("ACTIVE");
         user.setEnterpriseId(null);
+        user.setSessionVersion(0L);
         user.setDeleted(0);
         userMapper.insert(user);
 
         // 生成 Token
-        String accessToken = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
-        String refreshToken = jwtUtil.generateRefreshToken(user.getId());
+        String accessToken = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole(), sessionVersionOf(user));
+        String refreshToken = jwtUtil.generateRefreshToken(user.getId(), sessionVersionOf(user));
 
         user.setPassword(null);
 
@@ -162,19 +166,28 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthResponse refreshToken(String refreshToken) {
-        if (!jwtUtil.validateToken(refreshToken)) {
-            throw new BusinessException(401, "Refresh Token 已过期");
+        if (!jwtUtil.validateRefreshToken(refreshToken)) {
+            throw new BusinessException(401, "Refresh Token 已过期或无效");
         }
 
         String userId = jwtUtil.getUserIdFromToken(refreshToken);
         User user = userMapper.selectById(userId);
-
-        if (user == null || !"ACTIVE".equals(user.getStatus())) {
-            throw new BusinessException(401, "用户不存在或已被禁用");
+        if (user == null || !"ACTIVE".equals(user.getStatus())
+                || sessionVersionOf(user) != jwtUtil.getSessionVersionFromToken(refreshToken)) {
+            throw new BusinessException(401, "登录状态已失效，请重新登录");
+        }
+        if (!tokenBlacklistService.consume(refreshToken, jwtUtil.getRemainingExpiration(refreshToken))) {
+            throw new BusinessException(401, "Refresh Token 已使用或已撤销");
+        }
+        user = userMapper.selectById(userId);
+        if (user == null || !"ACTIVE".equals(user.getStatus())
+                || sessionVersionOf(user) != jwtUtil.getSessionVersionFromToken(refreshToken)) {
+            throw new BusinessException(401, "登录状态已失效，请重新登录");
         }
 
-        String newAccessToken = jwtUtil.generateToken(user.getId(), user.getUsername(), user.getRole());
-        String newRefreshToken = jwtUtil.generateRefreshToken(user.getId());
+        String newAccessToken = jwtUtil.generateToken(
+                user.getId(), user.getUsername(), user.getRole(), sessionVersionOf(user));
+        String newRefreshToken = jwtUtil.generateRefreshToken(user.getId(), sessionVersionOf(user));
 
         user.setPassword(null);
 
@@ -182,7 +195,12 @@ public class AuthServiceImpl implements AuthService {
                 .accessToken(newAccessToken)
                 .refreshToken(newRefreshToken)
                 .user(user)
+                .mustChangePassword(Integer.valueOf(1).equals(user.getMustChangePassword()))
                 .build();
+    }
+
+    private static long sessionVersionOf(User user) {
+        return user.getSessionVersion() == null ? 0L : user.getSessionVersion();
     }
 
     @Override
@@ -196,17 +214,37 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional
     public void logout(String accessToken, String refreshToken) {
-        // 将 Access Token 加入黑名单，TTL 为剩余有效期
-        if (accessToken != null && jwtUtil.validateToken(accessToken)) {
-            long remaining = jwtUtil.getRemainingExpiration(accessToken);
-            tokenBlacklistService.blacklist(accessToken, remaining);
+        String userId = null;
+        if (accessToken != null && jwtUtil.validateAccessToken(accessToken)) {
+            userId = jwtUtil.getUserIdFromToken(accessToken);
+        } else if (refreshToken != null && jwtUtil.validateRefreshToken(refreshToken)) {
+            userId = jwtUtil.getUserIdFromToken(refreshToken);
+        }
+        if (userId != null) {
+            try {
+                userMapper.update(null, new LambdaUpdateWrapper<User>()
+                        .eq(User::getId, userId)
+                        .setSql("session_version = COALESCE(session_version, 0) + 1"));
+            } catch (RuntimeException e) {
+                throw new BusinessException(503, "无法持久化注销状态，请稍后重试");
+            }
         }
 
-        // 将 Refresh Token 也加入黑名单
-        if (refreshToken != null && jwtUtil.validateToken(refreshToken)) {
-            long remaining = jwtUtil.getRemainingExpiration(refreshToken);
-            tokenBlacklistService.blacklist(refreshToken, remaining);
+        if (accessToken != null && jwtUtil.validateAccessToken(accessToken)) {
+            blacklistBestEffort(accessToken);
+        }
+        if (refreshToken != null && jwtUtil.validateRefreshToken(refreshToken)) {
+            blacklistBestEffort(refreshToken);
+        }
+    }
+
+    private void blacklistBestEffort(String token) {
+        try {
+            tokenBlacklistService.blacklist(token, jwtUtil.getRemainingExpiration(token));
+        } catch (RuntimeException e) {
+            log.warn("Redis 黑名单写入失败，数据库会话版本已完成撤销: {}", e.getMessage());
         }
     }
 

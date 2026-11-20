@@ -22,7 +22,7 @@ public class AuthResponse {
     /** 需要继续完成双因素校验 */
     private Boolean mfaRequired;
 
-    /** 双因素校验用的短期凭证（5 分钟有效，只能用于 /auth/mfa/verify） */
+    /** 双因素校验用的短期凭证（5 分钟有效，随动态码再次提交 /auth/login） */
     private String mfaToken;
 
     /** 密码待修改（首次登录 / 超管重置后） */

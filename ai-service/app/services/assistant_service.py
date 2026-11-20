@@ -159,12 +159,14 @@ class AssistantService:
         """
         AI 分析 Bug
         """
+        log_section = f"**日志**:\n{request.logs}" if request.logs else ''
+        environment_section = f"**环境**: {request.environment}" if request.environment else ''
         prompt = f"""请分析以下 Bug 并提供修复建议。
 
 **标题**: {request.title}
 **描述**: {request.description}
-{f'**日志**:\n{request.logs}' if request.logs else ''}
-{f'**环境**: {request.environment}' if request.environment else ''}
+{log_section}
+{environment_section}
 
 请分析：
 1. 可能的根本原因

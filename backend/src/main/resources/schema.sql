@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS task (
     sprint_id VARCHAR(36) DEFAULT NULL COMMENT '所属Sprint ID',
     assignee_id VARCHAR(36) DEFAULT NULL COMMENT '负责人ID',
     reporter_id VARCHAR(36) NOT NULL COMMENT '创建人ID',
-    status VARCHAR(20) NOT NULL DEFAULT 'TODO' COMMENT '状态: TODO/DOING/TESTING/DONE',
+    status VARCHAR(40) NOT NULL DEFAULT 'TODO' COMMENT '状态: 取值来自项目工作流配置（默认 TODO/DOING/TESTING/DONE）',
     priority VARCHAR(20) NOT NULL DEFAULT 'MEDIUM' COMMENT '优先级: CRITICAL/HIGH/MEDIUM/LOW',
     story_points INT DEFAULT NULL COMMENT '故事点',
     due_date DATETIME DEFAULT NULL COMMENT '截止时间',
@@ -335,7 +335,7 @@ CREATE TABLE IF NOT EXISTS requirement (
     project_id VARCHAR(36) NOT NULL COMMENT '所属项目ID',
     requester_id VARCHAR(36) NOT NULL COMMENT '需求提出人ID',
     approver_id VARCHAR(36) DEFAULT NULL COMMENT '当前审批人ID',
-    status VARCHAR(20) NOT NULL DEFAULT 'OPEN' COMMENT '状态: OPEN/COMPLETED/CLOSED（默认值由项目工作流决定，列默认仅为兜底）',
+    status VARCHAR(40) NOT NULL DEFAULT 'OPEN' COMMENT '状态: 取值来自项目工作流配置（默认 OPEN/COMPLETED/CLOSED）',
     priority VARCHAR(20) NOT NULL DEFAULT 'MEDIUM' COMMENT '优先级: CRITICAL/HIGH/MEDIUM/LOW',
     source VARCHAR(50) DEFAULT NULL COMMENT '需求来源: CUSTOMER/INTERNAL/MARKET/TECHNICAL',
     category VARCHAR(50) DEFAULT NULL COMMENT '需求分类: FEATURE/IMPROVEMENT/BUGFIX/OTHER',
@@ -1198,7 +1198,7 @@ DEALLOCATE PREPARE devflow_stmt;
 -- requirement.status 的列注释长期写着已废弃的审批流状态（DRAFT/PENDING/APPROVED...），
 -- 实际取值是工作流定义的 OPEN/COMPLETED/CLOSED。老库的注释不会因 CREATE TABLE IF NOT EXISTS 更新，
 -- 这里显式 MODIFY 一次（MODIFY 幂等）。
-ALTER TABLE requirement MODIFY COLUMN status VARCHAR(20) NOT NULL DEFAULT 'OPEN'
+ALTER TABLE requirement MODIFY COLUMN status VARCHAR(40) NOT NULL DEFAULT 'OPEN'
   COMMENT '状态: 取值来自项目工作流配置（默认 OPEN/COMPLETED/CLOSED）';
 
 -- 任务完成时间（审计报告 §C15）：燃尽图不能再用 updated_at 当完成时间
@@ -1304,6 +1304,7 @@ ALTER TABLE sys_user ADD COLUMN totp_bound_at DATETIME DEFAULT NULL COMMENT '绑
 -- 密码策略：首次登录 / 超管重置后强制改密
 ALTER TABLE sys_user ADD COLUMN must_change_password TINYINT NOT NULL DEFAULT 0 COMMENT '下次登录必须修改密码';
 ALTER TABLE sys_user ADD COLUMN password_updated_at DATETIME DEFAULT NULL COMMENT '上次改密时间（密码过期策略用）';
+ALTER TABLE sys_user ADD COLUMN session_version BIGINT NOT NULL DEFAULT 0 COMMENT '会话版本（改密后递增并撤销旧令牌）';
 
 -- 审计防篡改：哈希链
 ALTER TABLE activity_log ADD COLUMN prev_hash VARCHAR(64) DEFAULT NULL COMMENT '上一条审计记录的哈希（链式防篡改）';

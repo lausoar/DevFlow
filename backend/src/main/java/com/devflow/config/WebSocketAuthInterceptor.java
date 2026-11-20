@@ -1,6 +1,9 @@
 package com.devflow.config;
 
 import com.devflow.util.JwtUtil;
+import com.devflow.entity.User;
+import com.devflow.mapper.UserMapper;
+import com.devflow.security.JwtAuthFilter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
@@ -41,12 +44,14 @@ public class WebSocketAuthInterceptor implements WebSocketMessageBrokerConfigure
     private final com.devflow.mapper.ChatChannelMapper channelMapper;
     private final com.devflow.service.ProjectAccessService projectAccessService;
     private final com.devflow.service.TokenBlacklistService tokenBlacklistService;
+    private final UserMapper userMapper;
 
     /** 项目频道 topic 前缀：/topic/channel.{channelId} */
     private static final String CHANNEL_TOPIC_PREFIX = "/topic/channel.";
 
     /** 会话 → userId 缓存（SEND/SUBSCRIBE 阶段 sessionAttributes 可能为空，用会话 ID 反查） */
     private final Map<String, String> sessionUsers = new ConcurrentHashMap<>();
+    private final Map<String, String> sessionTokens = new ConcurrentHashMap<>();
 
     @Value("${websocket.allowed-origin-patterns:http://localhost:3000,http://localhost:3001}")
     private String[] allowedOriginPatterns;
@@ -69,6 +74,7 @@ public class WebSocketAuthInterceptor implements WebSocketMessageBrokerConfigure
                         String sessionId = accessor.getSessionId();
                         if (sessionId != null) {
                             sessionUsers.remove(sessionId);
+                            sessionTokens.remove(sessionId);
                         }
                     }
                     default -> {
@@ -78,6 +84,32 @@ public class WebSocketAuthInterceptor implements WebSocketMessageBrokerConfigure
                 return message;
             }
         });
+    }
+
+    @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        registration.interceptors(new ChannelInterceptor() {
+            @Override
+            public Message<?> preSend(Message<?> message, MessageChannel channel) {
+                StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+                if (accessor == null || accessor.getCommand() != StompCommand.MESSAGE) {
+                    return message;
+                }
+                try {
+                    requireSessionUser(accessor);
+                    return message;
+                } catch (RuntimeException e) {
+                    return null;
+                }
+            }
+        });
+    }
+
+    public void cleanupSession(String sessionId) {
+        if (sessionId != null) {
+            sessionUsers.remove(sessionId);
+            sessionTokens.remove(sessionId);
+        }
     }
 
     /** CONNECT：必须携带有效 JWT，否则拒绝握手（抛异常 → 客户端收到 ERROR 帧） */
@@ -92,16 +124,23 @@ public class WebSocketAuthInterceptor implements WebSocketMessageBrokerConfigure
         if (token == null || token.isBlank()) {
             throw new AccessDeniedException("WebSocket 连接需要登录凭证");
         }
-        if (!jwtUtil.validateToken(token) || tokenBlacklistService.isBlacklisted(token)) {
+        if (!jwtUtil.validateAccessToken(token) || tokenBlacklistService.isBlacklisted(token)) {
             throw new AccessDeniedException("WebSocket 登录凭证无效或已过期");
         }
 
         String userId = jwtUtil.getUserIdFromToken(token);
+        User user = userMapper.selectById(userId);
+        if (user == null || !"ACTIVE".equals(user.getStatus())
+                || JwtAuthFilter.sessionVersion(user) != jwtUtil.getSessionVersionFromToken(token)) {
+            throw new AccessDeniedException("WebSocket 登录状态已失效");
+        }
         if (accessor.getSessionAttributes() != null) {
             accessor.getSessionAttributes().put("userId", userId);
+            accessor.getSessionAttributes().put("token", token);
         }
         if (accessor.getSessionId() != null) {
             sessionUsers.put(accessor.getSessionId(), userId);
+            sessionTokens.put(accessor.getSessionId(), token);
         }
         // 设置 STOMP 会话用户身份，使 /user 目的地能够按用户路由
         accessor.setUser(new UsernamePasswordAuthenticationToken(userId, null, null));
@@ -133,13 +172,26 @@ public class WebSocketAuthInterceptor implements WebSocketMessageBrokerConfigure
     }
 
     private String requireSessionUser(StompHeaderAccessor accessor) {
-        String userId = accessor.getSessionId() != null ? sessionUsers.get(accessor.getSessionId()) : null;
-        if (userId == null && accessor.getSessionAttributes() != null) {
-            Object attr = accessor.getSessionAttributes().get("userId");
-            userId = attr != null ? String.valueOf(attr) : null;
+        String sessionId = accessor.getSessionId();
+        String userId = sessionId != null ? sessionUsers.get(sessionId) : null;
+        String token = sessionId != null ? sessionTokens.get(sessionId) : null;
+        if (accessor.getSessionAttributes() != null) {
+            if (userId == null && accessor.getSessionAttributes().get("userId") != null) {
+                userId = String.valueOf(accessor.getSessionAttributes().get("userId"));
+            }
+            if (token == null && accessor.getSessionAttributes().get("token") != null) {
+                token = String.valueOf(accessor.getSessionAttributes().get("token"));
+            }
         }
-        if (userId == null) {
-            throw new AccessDeniedException("WebSocket 会话未认证");
+        if (userId == null || token == null || !jwtUtil.validateAccessToken(token)
+                || tokenBlacklistService.isBlacklisted(token)
+                || !userId.equals(jwtUtil.getUserIdFromToken(token))) {
+            throw new AccessDeniedException("WebSocket 会话未认证或已失效");
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null || !"ACTIVE".equals(user.getStatus())
+                || JwtAuthFilter.sessionVersion(user) != jwtUtil.getSessionVersionFromToken(token)) {
+            throw new AccessDeniedException("WebSocket 登录状态已失效");
         }
         return userId;
     }

@@ -6,9 +6,12 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
+from typing import TYPE_CHECKING, AsyncGenerator, Optional
 from openai import AsyncOpenAI
 from app.core.config import get_settings
+
+if TYPE_CHECKING:
+    from app.api.v1.chat import ChatResponse
 
 settings = get_settings()
 

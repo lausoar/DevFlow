@@ -46,17 +46,17 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true);
     setError(null);
+    const verifyingMfa = Boolean(mfaToken);
 
     try {
-      // 已进入双因素挑战时，第二次提交带上动态码
       const payload = mfaToken
         ? { ...data, mfaToken, mfaCode }
         : data;
       const res = await authApi.login(payload);
 
-      // 密码正确但需要双因素：停留在本页，等待用户输入动态码
       if (res.data.mfaRequired) {
         setMfaToken(res.data.mfaToken || null);
+        setMfaCode('');
         setError(null);
         setIsLoading(false);
         return;
@@ -67,7 +67,7 @@ export default function LoginPage() {
         localStorage.removeItem('devflow-logged-out');
       }
       // res 已被 interceptor 解包为 R<AuthResponse>，res.data 即 AuthResponse
-      setAuth(res.data.user, res.data.accessToken);
+      setAuth(res.data.user, res.data.accessToken, res.data.refreshToken);
       // 登录前被守卫重定向过来时（?redirect=...），登录后回跳原页面
       const redirect = new URLSearchParams(window.location.search).get('redirect');
       // 只接受站内路径，防开放重定向
@@ -80,9 +80,12 @@ export default function LoginPage() {
       }
       router.push(target);
     } catch (err) {
-      // 后端已按 HTTP 状态返回错误，优先展示服务端提示（如"账号已被锁定，请稍后再试"）
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       setError(msg || '登录失败，请检查用户名和密码');
+      if (verifyingMfa) {
+        setMfaToken(null);
+        setMfaCode('');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -149,17 +152,39 @@ export default function LoginPage() {
                   <p className="text-xs text-destructive">{errors.password.message}</p>
                 )}
               </div>
+
+              {mfaToken && (
+                <div className="space-y-2">
+                  <Label htmlFor="mfaCode">验证器动态码</Label>
+                  <Input
+                    id="mfaCode"
+                    value={mfaCode}
+                    onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="请输入 6 位数字"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    autoFocus
+                  />
+                  <p className="text-xs text-muted-foreground">密码已验证，请输入验证器 App 中显示的动态码。</p>
+                </div>
+              )}
             </CardContent>
 
             <CardFooter className="flex flex-col gap-4">
-              <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
+              <Button
+                type="submit"
+                className="w-full"
+                size="lg"
+                disabled={isLoading || Boolean(mfaToken) && mfaCode.length !== 6}
+              >
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    登录中...
+                    {mfaToken ? '验证中...' : '登录中...'}
                   </>
                 ) : (
-                  '登录'
+                  mfaToken ? '验证并登录' : '登录'
                 )}
               </Button>
               <p className="text-center text-sm text-muted-foreground">

@@ -319,7 +319,7 @@ public class DocumentController {
         Document doc = requireVisibleDoc(userId, id);
         requireDocPermission(userId, doc, PermissionCodes.DOCUMENT_DELETE);
         documentMapper.deleteById(id);
-        aiKnowledgeSyncService.deleteDocument(id);
+        aiKnowledgeSyncService.deleteDocument(doc.getId(), doc.getProjectId(), doc.getEnterpriseId());
         return R.ok();
     }
 

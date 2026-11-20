@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { MainLayout } from '@/components/layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -195,6 +196,7 @@ function ProfileCard({ user, setUser }: {
 // 修改密码卡片
 // ============================================
 function PasswordCard() {
+  const router = useRouter();
   const { data: policyRes } = useMfaStatus();
   const mustChange = !!policyRes?.data?.mustChangePassword;
   const [oldPassword, setOldPassword] = useState('');
@@ -236,7 +238,10 @@ function PasswordCard() {
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setTimeout(() => setSuccess(false), 3000);
+      window.setTimeout(() => {
+        useAuthStore.getState().logout();
+        router.replace('/login');
+      }, 1200);
     } catch (e) {
       setError(readApiError(e, '修改密码失败'));
     }
@@ -275,7 +280,7 @@ function PasswordCard() {
             type="password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            placeholder="至少 6 位"
+            placeholder="至少 8 位"
           />
         </div>
 
@@ -306,7 +311,7 @@ function PasswordCard() {
           </Button>
           {success && (
             <span className="flex items-center gap-1 text-sm text-success">
-              <CheckCircle2 className="h-4 w-4" /> 密码修改成功
+              <CheckCircle2 className="h-4 w-4" /> 密码修改成功，即将退出并重新登录
             </span>
           )}
           {error && (

@@ -19,9 +19,11 @@ import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 public class WebSocketPresenceListener {
 
     private final PresenceService presenceService;
+    private final WebSocketAuthInterceptor authInterceptor;
 
     @EventListener
     public void onSessionDisconnect(SessionDisconnectEvent event) {
+        authInterceptor.cleanupSession(event.getSessionId());
         presenceService.disconnect(event.getSessionId()).ifPresent(userId -> {
             log.debug("用户下线: {}", userId);
             presenceService.broadcast();
