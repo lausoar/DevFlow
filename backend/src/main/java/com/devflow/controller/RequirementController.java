@@ -15,6 +15,7 @@ import com.devflow.entity.Requirement;
 import com.devflow.entity.RequirementChangeLog;
 import com.devflow.entity.User;
 import com.devflow.mapper.RequirementChangeLogMapper;
+import com.devflow.mapper.ProjectMapper;
 import com.devflow.mapper.RequirementMapper;
 import com.devflow.mapper.UserMapper;
 import com.devflow.service.RequirementService;
@@ -42,6 +43,7 @@ public class RequirementController {
     private final AccessGuard guard;
     private final RequirementChangeLogMapper changeLogMapper;
     private final UserMapper userMapper;
+    private final ProjectMapper projectMapper;
 
     /**
      * 获取需求列表（分页）
@@ -125,6 +127,7 @@ public class RequirementController {
      */
     @Operation(summary = "更新需求")
     @PutMapping("/{id}")
+    @org.springframework.transaction.annotation.Transactional
     public R<Requirement> update(
             @PathVariable String id,
             @RequestBody UpdateRequirementRequest request,
@@ -134,6 +137,9 @@ public class RequirementController {
         requireRequirementVisible(id, authentication);
         RequirementResponse detail = requirementService.getRequirementDetail(id);
         guard.requireProjectPermission(userId, detail.getProjectId(), PermissionCodes.REQUIREMENT_MANAGE);
+        if (request.getStatus() != null && projectMapper.selectForUpdate(detail.getProjectId()) == null) {
+            throw new BusinessException(404, "项目不存在或已被删除");
+        }
         Requirement result = requirementService.updateRequirement(id, request, userId);
         return R.ok(result);
     }

@@ -2,11 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useNotifications, useMarkRead, useMarkAllRead } from '@/lib/hooks/use-notifications';
+import { useInfiniteNotifications, useUnreadCount, useMarkRead, useMarkAllRead } from '@/lib/hooks/use-notifications';
 import {
   Bell,
   Check,
@@ -18,9 +17,11 @@ import {
   Zap,
   Info,
   Bot,
-  Trash2,
+  Loader2,
 } from 'lucide-react';
 import type { Notification, NotificationType } from '@/types';
+
+const PAGE_SIZE = 20;
 
 // ============================================
 // 通知类型配置
@@ -43,10 +44,18 @@ export default function NotificationsContent() {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const router = useRouter();
 
-  const { data: notificationsRes, isLoading } = useNotifications({
+  const {
+    data: notificationPages,
+    isLoading,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteNotifications({
+    pageSize: PAGE_SIZE,
     type: typeFilter === 'ALL' ? undefined : typeFilter,
     unreadOnly,
   });
+  const { data: unreadRes } = useUnreadCount();
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
 
@@ -57,8 +66,12 @@ export default function NotificationsContent() {
     router.push(notification.actionUrl);
   };
 
-  const notifications = notificationsRes?.data?.records || [];
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  const notifications = notificationPages?.pages.flatMap((page) => page.data?.records || []) || [];
+  const latestPage = notificationPages?.pages[notificationPages.pages.length - 1]?.data;
+  const total = latestPage?.total ?? notifications.length;
+  const remainingCount = Math.max(0, total - notifications.length);
+  // 与顶栏共用全局未读查询，不能用当前已加载页推算未读总数。
+  const unreadCount = unreadRes?.data?.count ?? 0;
 
   return (
     <div className="flex h-full flex-col">
@@ -79,10 +92,14 @@ export default function NotificationsContent() {
             variant="outline"
             size="sm"
             onClick={() => markAllRead.mutate()}
-            disabled={unreadCount === 0}
+            disabled={markAllRead.isPending || unreadCount === 0}
           >
-            <CheckCheck className="mr-1.5 h-3.5 w-3.5" />
-            全部已读
+            {markAllRead.isPending ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <CheckCheck className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {markAllRead.isPending ? '处理中...' : '全部已读'}
           </Button>
         </div>
       </div>
@@ -132,16 +149,35 @@ export default function NotificationsContent() {
             <p className="text-sm">暂无通知</p>
           </div>
         ) : (
-          <div className="divide-y">
-            {notifications.map((notification) => (
-              <NotificationItem
-                key={notification.id}
-                notification={notification}
-                onMarkRead={() => markRead.mutate(notification.id)}
-                onOpen={handleOpen}
-              />
-            ))}
-          </div>
+          <>
+            <div className="divide-y">
+              {notifications.map((notification) => (
+                <NotificationItem
+                  key={notification.id}
+                  notification={notification}
+                  onMarkRead={() => markRead.mutate(notification.id)}
+                  onOpen={handleOpen}
+                />
+              ))}
+            </div>
+            {hasNextPage && (
+              <div className="flex flex-col items-center gap-1 border-t px-4 py-3">
+                <span className="text-xs text-muted-foreground">
+                  已加载 {notifications.length} / {total} 条，剩余 {remainingCount} 条
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={isFetchingNextPage}
+                  onClick={() => fetchNextPage()}
+                >
+                  {isFetchingNextPage && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {isFetchingNextPage ? '加载中...' : '加载更多'}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </ScrollArea>
     </div>

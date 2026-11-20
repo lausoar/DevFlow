@@ -10,7 +10,7 @@ import com.devflow.security.AccessGuard;
 import com.devflow.service.ProjectAccessService;
 import com.devflow.entity.Document;
 import com.devflow.mapper.DocumentMapper;
-import com.devflow.service.AiKnowledgeSyncService;
+import com.devflow.service.DocumentIndexOutboxService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 public class DocumentController {
 
     private final DocumentMapper documentMapper;
-    private final AiKnowledgeSyncService aiKnowledgeSyncService;
+    private final DocumentIndexOutboxService documentIndexOutboxService;
     private final ProjectAccessService projectAccessService;
     private final com.devflow.mapper.DocumentVersionMapper documentVersionMapper;
     private final com.devflow.mapper.DocumentCommentMapper documentCommentMapper;
@@ -94,6 +94,7 @@ public class DocumentController {
 
     @Operation(summary = "创建文档")
     @PostMapping
+    @Transactional
     public R<Document> create(@Valid @RequestBody CreateDocumentRequest request, Authentication authentication) {
         String userId = guard.userId(authentication);
 
@@ -120,8 +121,10 @@ public class DocumentController {
         document.setVersion(1);
         document.setDeleted(0);
         documentMapper.insert(document);
-        aiKnowledgeSyncService.indexDocument(document);
-        return R.ok(document);
+        Document persisted = documentMapper.selectById(document.getId());
+        Document saved = persisted != null ? persisted : document;
+        documentIndexOutboxService.enqueue(saved);
+        return R.ok(saved);
     }
 
     @Operation(summary = "更新文档")
@@ -174,7 +177,7 @@ public class DocumentController {
 
         // 重新读取合并后的文档（更新请求可能只携带部分字段）再同步知识库
         Document merged = documentMapper.selectById(id);
-        aiKnowledgeSyncService.indexDocument(merged);
+        documentIndexOutboxService.enqueue(merged);
         return R.ok(merged);
     }
 
@@ -234,7 +237,7 @@ public class DocumentController {
         patch.setVersion(prevVersion + 1);
         documentMapper.updateById(patch);
         Document merged = documentMapper.selectById(id);
-        aiKnowledgeSyncService.indexDocument(merged);
+        documentIndexOutboxService.enqueue(merged);
         return R.ok(merged);
     }
 
@@ -314,12 +317,13 @@ public class DocumentController {
 
     @Operation(summary = "删除文档")
     @DeleteMapping("/{id}")
+    @Transactional
     public R<Void> delete(@PathVariable String id, Authentication authentication) {
         String userId = guard.userId(authentication);
         Document doc = requireVisibleDoc(userId, id);
         requireDocPermission(userId, doc, PermissionCodes.DOCUMENT_DELETE);
         documentMapper.deleteById(id);
-        aiKnowledgeSyncService.deleteDocument(doc.getId(), doc.getProjectId(), doc.getEnterpriseId());
+        documentIndexOutboxService.enqueueDeletion(doc);
         return R.ok();
     }
 

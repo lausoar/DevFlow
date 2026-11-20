@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 // ============================================
 // 聊天未读管理（会话级：刷新后清零）
-// 由全局 WebSocket 的 /topic/chat.events 事件驱动计数，
+// 由全局 WebSocket 的 /topic/chat.events.{channelId} 事件驱动计数，
 // 用户正在查看的频道不计未读，进入频道即清零
 // ============================================
 interface ChatUnreadState {

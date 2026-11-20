@@ -246,7 +246,7 @@ DEMO_QUARANTINE=$(mysql_exec -N -e "SELECT GROUP_CONCAT(CONCAT(username, ':', st
     || bad "默认演示账号隔离结果错误：$DEMO_QUARANTINE"
 
 # 3b. 表必须都在（回归："新表从未创建"）
-REQUIRED_TABLES="workflow workflow_status workflow_transition project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference subscription schema_migration"
+REQUIRED_TABLES="workflow workflow_status workflow_transition task_status_event project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference subscription schema_migration"
 MISSING=""
 for t in $REQUIRED_TABLES; do
     n=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='$t';")
@@ -314,9 +314,13 @@ INSERT INTO requirement (id,title,project_id,requester_id,status) VALUES
   ('mig-r2','closed-req','mig-p','mig-u','CLOSED');
 INSERT INTO task (id,title,project_id,reporter_id,status) VALUES
   ('mig-t1','custom-status','mig-p','mig-u','IN_PROGRESS');
+INSERT INTO task_status_event
+  (id,task_id,project_id,from_status,to_status,from_category,to_category,actor_id,created_at) VALUES
+  ('mig-e1','mig-t1','mig-p','TODO','IN_PROGRESS','TODO','IN_PROGRESS','mig-u',NOW());
 " 2>&1 | head -3
 
 BEFORE_HISTORY=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schema_history;")
+BEFORE_EVENT_HISTORY=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.task_status_event WHERE id='mig-e1';")
 stop_backend
 if start_backend "$DB_NAME" "$WORK_DIR/boot2.log"; then
     ok "重启成功"
@@ -328,6 +332,10 @@ AFTER_HISTORY=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.flyway_schem
 [ "${BEFORE_HISTORY:-0}" = "${AFTER_HISTORY:-1}" ] \
     && ok "重启未重复执行迁移（历史记录数 ${BEFORE_HISTORY} 不变）" \
     || bad "重启后迁移记录从 $BEFORE_HISTORY 变成 $AFTER_HISTORY"
+AFTER_EVENT_HISTORY=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.task_status_event WHERE id='mig-e1';")
+[ "$BEFORE_EVENT_HISTORY" = "1" ] && [ "$AFTER_EVENT_HISTORY" = "1" ] \
+    && ok "重启不重复追加或改写 task_status_event" \
+    || bad "重启后状态事件幂等性错误：$BEFORE_EVENT_HISTORY → $AFTER_EVENT_HISTORY"
 
 R1=$(mysql_exec -N -e "SELECT status FROM \`$DB_NAME\`.requirement WHERE id='mig-r1';")
 R2=$(mysql_exec -N -e "SELECT status FROM \`$DB_NAME\`.requirement WHERE id='mig-r2';")
@@ -375,13 +383,15 @@ INSERT INTO workflow_status (id,workflow_id,code,name,category,sort,is_initial,i
   ('legacy-rs2','legacy-rw','AWAITING_TRIAGE','Awaiting triage','TODO',1,0,0),
   ('legacy-rs3','legacy-rw','CUSTOM_COMPLETED','Custom completed','DONE',2,0,1),
   ('legacy-ts1','legacy-tw','T_INITIAL_123456789012345678901234567890','Long initial task','TODO',0,1,0),
-  ('legacy-ts2','legacy-tw','IN_PROGRESS','Configured legacy code','IN_PROGRESS',1,0,0);
+  ('legacy-ts2','legacy-tw','IN_PROGRESS','Configured legacy code','IN_PROGRESS',1,0,0),
+  ('legacy-ts3','legacy-tw','DONE','Legacy done','DONE',2,0,1);
 INSERT INTO requirement (id,title,project_id,requester_id,status) VALUES
   ('legacy-r-custom','configured requirement','legacy-p','legacy-u','AWAITING_TRIAGE'),
   ('legacy-r-normalize','unconfigured requirement','legacy-p','legacy-u','PENDING');
 INSERT INTO task (id,title,project_id,reporter_id,status) VALUES
   ('legacy-t-custom','configured task','legacy-p','legacy-u','IN_PROGRESS'),
-  ('legacy-t-normalize','unconfigured task','legacy-p','legacy-u','IN_REVIEW');
+  ('legacy-t-normalize','unconfigured task','legacy-p','legacy-u','IN_REVIEW'),
+  ('legacy-t-done','done before V9','legacy-p','legacy-u','DONE');
 " || { bad "无法建立 pre-V4 老库夹具"; exit 1; }
 
 stop_backend
@@ -404,6 +414,11 @@ LEGACY_COMPLETED=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.col
 [ "$LEGACY_COMPLETED" = "1" ] \
     && ok "老库缺失的列被 V3 补齐（task.completed_at）" \
     || bad "老库 task.completed_at 仍缺失（结构补齐迁移未生效）"
+LEGACY_DONE_EVENT=$(mysql_exec -N -e "SELECT CONCAT(IFNULL(from_category,'NULL'), ':', to_category, ':', COUNT(*))
+    FROM \`$LEGACY_DB\`.task_status_event WHERE task_id='legacy-t-done' GROUP BY from_category, to_category;")
+[ "$LEGACY_DONE_EVENT" = "NULL:DONE:1" ] \
+    && ok "V9 为老库 DONE 任务回填且只回填一条完成事件" \
+    || bad "V9 完成事件回填错误：$LEGACY_DONE_EVENT（期望 NULL:DONE:1）"
 
 LEGACY_IDX=$(count_indexes "$LEGACY_DB")
 [ "${LEGACY_IDX:-0}" = "14" ] \
@@ -554,6 +569,11 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/tasks/$TASK_ID
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/tasks/$TASK_ID/status" -H "$AUTH" \
        -H "Content-Type: application/json" -d '{"status":"DONE"}')
 [ "$CODE" = "200" ] && ok "合法状态流转成功" || bad "合法流转返回 $CODE（期望 200）"
+TASK_EVENT=$(mysql_exec -N -e "SELECT CONCAT(from_status, ':', to_status, ':', from_category, ':', to_category)
+    FROM \`$DB_NAME\`.task_status_event WHERE task_id='$TASK_ID';")
+[ "$TASK_EVENT" = "TODO:DONE:TODO:DONE" ] \
+    && ok "任务状态流转追加 TODO → DONE 分类事件" \
+    || bad "任务状态事件错误：$TASK_EVENT（期望 TODO:DONE:TODO:DONE）"
 
 # ============================================
 # 8. 版本 / 部署 / DORA
@@ -596,6 +616,62 @@ if [ -n "$PLAN_ID" ]; then
     CYCLE_ID=$(curl -s -m 10 -X POST "$BASE/test-plans/$PLAN_ID/cycles" -H "$AUTH" -H "Content-Type: application/json" \
                -d '{"name":"cycle-1"}' | json_field "['data']['id']")
     [ -n "$CYCLE_ID" ] && ok "创建测试轮次" || bad "创建测试轮次失败"
+fi
+
+# 并发转缺陷：所有请求都返回同一个 Bug，且数据库只创建一条 Bug 和一条关联。
+RACE_CASE_ID=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/test-cases" -H "$AUTH" \
+    -H "Content-Type: application/json" \
+    -d '{"title":"ci-race-case","precondition":"fixture ready","expectedResult":"pass"}' \
+    | json_field "['data']['id']")
+RACE_EXEC_ID=""
+if [ -n "$RACE_CASE_ID" ]; then
+    RACE_EXEC_ID=$(curl -s -m 10 -X POST "$BASE/test-cases/$RACE_CASE_ID/executions" -H "$AUTH" \
+        -H "Content-Type: application/json" -d '{"result":"FAIL","note":"ci race"}' \
+        | json_field "['data']['id']")
+fi
+if [ -n "$RACE_EXEC_ID" ]; then
+    RACE_DIR="$WORK_DIR/to-bug-race"
+    mkdir -p "$RACE_DIR"
+    RACE_PIDS=""
+    for i in $(seq 1 8); do
+        curl -s -m 30 -o "$RACE_DIR/$i.json" -w "%{http_code}" \
+            -X POST "$BASE/test-cases/$RACE_CASE_ID/to-bug" -H "$AUTH" \
+            -H "Content-Type: application/json" -d '{"note":"concurrent"}' \
+            > "$RACE_DIR/$i.code" &
+        RACE_PIDS="$RACE_PIDS $!"
+    done
+    # 不能用无参数 wait：后端本身也是当前 shell 的后台任务。
+    wait $RACE_PIDS
+    RACE_RESULT=$(python -c "
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+codes = [(root / f'{i}.code').read_text(encoding='utf-8').strip() for i in range(1, 9)]
+ids = set()
+for i, code in enumerate(codes, 1):
+    if code == '200':
+        ids.add(json.loads((root / f'{i}.json').read_text(encoding='utf-8'))['data']['id'])
+bug_id = next(iter(ids)) if len(ids) == 1 else ''
+print(f\"{codes.count('200')}|{len(ids)}|{bug_id}\")
+" "$RACE_DIR" 2>/dev/null)
+    [ "$(echo "$RACE_RESULT" | cut -d'|' -f1-2)" = "8|1" ] \
+        && ok "8 路并发转缺陷全部返回同一个 Bug" \
+        || bad "并发转缺陷响应错误：$RACE_RESULT（期望 8|1|同一 Bug ID）"
+
+    RACE_BUG_ID=$(echo "$RACE_RESULT" | cut -d'|' -f3)
+    RACE_DB_RESULT=""
+    if [ -n "$RACE_BUG_ID" ]; then
+        RACE_DB_RESULT=$(mysql_exec -N -e "SELECT CONCAT(
+            (SELECT COUNT(*) FROM \`$DB_NAME\`.bug WHERE id='$RACE_BUG_ID'), ':',
+            (SELECT COUNT(*) FROM \`$DB_NAME\`.test_execution
+             WHERE id='$RACE_EXEC_ID' AND bug_id='$RACE_BUG_ID'), ':',
+            (SELECT COUNT(*) FROM \`$DB_NAME\`.bug
+             WHERE project_id='$PROJ_ID' AND title='【缺陷】ci-race-case'));")
+    fi
+    [ "$RACE_DB_RESULT" = "1:1:1" ] \
+        && ok "并发转缺陷仅持久化一个 Bug 和一条执行关联" \
+        || bad "并发转缺陷持久化错误：$RACE_DB_RESULT（期望 1:1:1）"
+else
+    bad "无法建立并发转缺陷夹具"
 fi
 
 # ============================================
@@ -883,7 +959,49 @@ if [ -n "$SPRINT_FUTURE" ]; then
     [ "$CODE" = "200" ] && ok "未来迭代的燃尽图返回 200（空数据不崩）"         || bad "未来迭代燃尽图返回 $CODE（期望 200）"
 fi
 
-# 4) 同一项目内只能有一个 ACTIVE 迭代
+# 4) 追加式状态事件：DONE → 次日重开 → 再次 DONE。
+#    原完成日必须保持完成，重开日剩余点回升，第二次完成日再次记完成。
+mysql_exec "$DB_NAME" -e "
+INSERT INTO sprint (id,project_id,name,status,start_date,end_date) VALUES
+  ('history-sprint','$PROJ_ID','history-sprint','ACTIVE',
+   DATE_SUB(CURDATE(), INTERVAL 3 DAY),DATE_ADD(CURDATE(), INTERVAL 3 DAY));
+INSERT INTO task (id,title,project_id,reporter_id,status,story_points,sprint_id,completed_at) VALUES
+  ('history-task','history-task','$PROJ_ID','u1','DONE',5,'history-sprint',NOW());
+INSERT INTO task_status_event
+  (id,task_id,project_id,from_status,to_status,from_category,to_category,actor_id,created_at) VALUES
+  ('history-e1','history-task','$PROJ_ID','TODO','DONE','TODO','DONE','u1',
+   TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 2 DAY),'10:00:00')),
+  ('history-e2','history-task','$PROJ_ID','DONE','DOING','DONE','IN_PROGRESS','u1',
+   TIMESTAMP(DATE_SUB(CURDATE(), INTERVAL 1 DAY),'09:00:00')),
+  ('history-e3','history-task','$PROJ_ID','DOING','DONE','IN_PROGRESS','DONE','u1',
+   TIMESTAMP(CURDATE(),'08:00:00'));
+" >/dev/null
+HISTORY_JSON=$(curl -s -m 15 "$BASE/statistics/projects/$PROJ_ID/burndown?sprintId=history-sprint" -H "$AUTH")
+HISTORY_VALUES=$(echo "$HISTORY_JSON" | python -c "
+import sys, json
+from datetime import date, timedelta
+points = {p['date']: p for p in json.load(sys.stdin)['data']['dataPoints']}
+values = []
+for ago in (2, 1, 0):
+    p = points[(date.today() - timedelta(days=ago)).isoformat()]
+    values.extend((p['actualRemaining'], p['completedPoints'], p['completedTasks']))
+print('|'.join(str(v) for v in values))
+" 2>/dev/null)
+[ "$HISTORY_VALUES" = "0|5|1|5|0|0|0|5|1" ] \
+    && ok "燃尽历史保留原完成、重开恢复剩余点、再次完成重新计数" \
+    || bad "DONE/reopen/DONE 燃尽历史错误：$HISTORY_VALUES；响应=$HISTORY_JSON"
+
+TREND_VALUES=$(curl -s -m 15 "$BASE/statistics/enterprise" -H "$AUTH" | python -c "
+import sys, json
+from datetime import date, timedelta
+points = {p['date']: p for p in json.load(sys.stdin)['data']['taskTrend']}
+print('|'.join(str(points[(date.today() - timedelta(days=ago)).isoformat()]['completed']) for ago in (2, 1, 0)))
+" 2>/dev/null)
+[ "$TREND_VALUES" = "1|0|2" ] \
+    && ok "企业趋势按 DONE 事件日期计数，重开不产生完成事件" \
+    || bad "企业完成趋势错误：$TREND_VALUES（期望 1|0|2）"
+
+# 5) 同一项目内只能有一个 ACTIVE 迭代
 S1=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/sprints" -H "$AUTH"      -H "Content-Type: application/json" -d '{"name":"s-alpha"}' | json_field "['data']['id']")
 S2=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/sprints" -H "$AUTH"      -H "Content-Type: application/json" -d '{"name":"s-beta"}' | json_field "['data']['id']")
 if [ -n "$S1" ] && [ -n "$S2" ]; then
@@ -893,7 +1011,7 @@ if [ -n "$S1" ] && [ -n "$S2" ]; then
     [ "${N_ACTIVE:-0}" = "1" ] && ok "同项目内只有一个 ACTIVE 迭代"         || bad "同项目内有 $N_ACTIVE 个 ACTIVE 迭代（期望 1）"
 fi
 
-# 5) 企业移除成员必须连带清理项目成员关系
+# 6) 企业移除成员必须连带清理项目成员关系
 #    原来只清 sys_user.enterprise_id，自助退出会清 project_member ——
 #    管理员移除反而比本人退出清得更少，被移除的人还能读全部项目数据。
 INV=$(curl -s -m 10 -X POST "$BASE/enterprises/$ENT_ID/members/invite" -H "$AUTH"       -H "Content-Type: application/json"       -d '{"email":"ci-remove@devflow.test","realName":"CI Remove","role":"MEMBER"}')
@@ -908,7 +1026,7 @@ if [ -n "$NEW_UID" ]; then
     [ "$CODE" = "200" ] && [ "${BEFORE_PM:-0}" -ge 1 ] && [ "${AFTER_PM:-1}" = "0" ]         && ok "移除企业成员同时清理项目成员关系（$BEFORE_PM → $AFTER_PM）"         || bad "移除成员返回 $CODE；项目成员 $BEFORE_PM → $AFTER_PM（期望 0）"
 fi
 
-# 6) 邀请码并发：两次请求必须拿到同一个码
+# 7) 邀请码并发：两次请求必须拿到同一个码
 IC_A=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/invite-code" -H "$AUTH" | json_field "['data']")
 IC_B=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/invite-code" -H "$AUTH" | json_field "['data']")
 if [ -n "$IC_A" ] && [ "$IC_A" = "$IC_B" ]; then
@@ -917,7 +1035,7 @@ else
     bad "邀请码不一致：$IC_A vs $IC_B"
 fi
 
-# 7) 删除任务必须连带清理依赖关系（否则看板徽章永久显示"前置未完成"）
+# 8) 删除任务必须连带清理依赖关系（否则看板徽章永久显示"前置未完成"）
 DEP_T1=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/tasks" -H "$AUTH"          -H "Content-Type: application/json" -d '{"title":"dep-a"}' | json_field "['data']['id']")
 DEP_T2=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/tasks" -H "$AUTH"          -H "Content-Type: application/json" -d '{"title":"dep-b"}' | json_field "['data']['id']")
 if [ -n "$DEP_T1" ] && [ -n "$DEP_T2" ]; then

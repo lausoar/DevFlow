@@ -24,7 +24,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { useBugs, useCreateBug, useUpdateBug, useDeleteBug, useUpdateBugStatus, useConfirmGuestBug } from '@/lib/hooks/use-bugs';
+import { useInfiniteBugs, useCreateBug, useUpdateBug, useDeleteBug, useUpdateBugStatus, useConfirmGuestBug } from '@/lib/hooks/use-bugs';
 import { useProjectMembers } from '@/lib/hooks/use-projects';
 import { useMyPermissions } from '@/lib/hooks/use-permissions';
 import { useAuthStore } from '@/stores/auth-store';
@@ -44,6 +44,7 @@ import {
   UserCheck,
   Image as ImageIcon,
   Download,
+  Loader2,
   X,
 } from 'lucide-react';
 import { BugDescriptionField } from './bug-description-field';
@@ -100,7 +101,16 @@ export function BugsTab({ projectId }: { projectId: string }) {
   const [editBug, setEditBug] = useState<Bug | null>(null);
   const [detailBug, setDetailBug] = useState<Bug | null>(null);
 
-  const { data: bugsRes, isLoading } = useBugs(projectId);
+  const {
+    data: bugPages,
+    isLoading,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteBugs(projectId, {
+    keyword: search.trim() || undefined,
+    status: statusFilter === 'ALL' ? undefined : statusFilter,
+  });
   const createBug = useCreateBug(projectId);
   const deleteBug = useDeleteBug(projectId);
   const updateBugStatus = useUpdateBugStatus(projectId);
@@ -128,9 +138,9 @@ export function BugsTab({ projectId }: { projectId: string }) {
   const myPerms = useMyPermissions(projectId);
   const canEditBugs = !!myPerms.data?.data?.project?.includes('bug:create');
 
-  const bugs = bugsRes?.data?.records || [];
-  // 后端分页默认 pageSize=100；超出部分不会返回，必须让用户知道
-  const bugTotal = bugsRes?.data?.total ?? bugs.length;
+  const bugs = bugPages?.pages.flatMap((page) => page.data?.records || []) || [];
+  const latestBugPage = bugPages?.pages[bugPages.pages.length - 1]?.data;
+  const bugTotal = latestBugPage?.total ?? bugs.length;
   const hiddenBugCount = Math.max(0, bugTotal - bugs.length);
 
   // 批量操作（仅 bug:edit 可用）：多选后批量指派/批量优先级
@@ -186,14 +196,14 @@ export function BugsTab({ projectId }: { projectId: string }) {
     await deleteBug.mutateAsync(bugId);
   };
 
-  // 过滤
+  // 搜索和状态均由服务端筛选；这里只保留一层一致性过滤，不改变分页总数语义。
   const filteredBugs = bugs.filter((b) => {
-    const matchSearch = !search || b.title.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = !search.trim() || b.title.toLowerCase().includes(search.trim().toLowerCase());
     const matchStatus = statusFilter === 'ALL' || b.status === statusFilter;
     return matchSearch && matchStatus;
   });
 
-  // 统计
+  // 数量对应当前筛选结果；总数在分页加载完成前以“已加载”口径展示。
   const statusCounts: Record<string, number> = { ALL: bugs.length };
   bugs.forEach((b) => {
     statusCounts[b.status] = (statusCounts[b.status] || 0) + 1;
@@ -240,7 +250,13 @@ export function BugsTab({ projectId }: { projectId: string }) {
           />
         </div>
         {/* 导出 CSV（当前筛选结果） */}
-        <Button variant="outline" size="sm" className="gap-1 shrink-0" onClick={handleExport} title="导出当前筛选结果">
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1 shrink-0"
+          onClick={handleExport}
+          title={hiddenBugCount > 0 ? '导出已加载的当前筛选结果（尚有未加载 Bug）' : '导出当前筛选结果'}
+        >
           <Download className="h-3.5 w-3.5" />
           导出
         </Button>
@@ -410,8 +426,21 @@ export function BugsTab({ projectId }: { projectId: string }) {
       )}
 
       {hiddenBugCount > 0 && (
-        <div className="rounded-md border border-warning/30/60 bg-warning-muted px-3 py-2 text-xs text-warning ">
-          当前只显示前 {bugs.length} 条 Bug，另有 {hiddenBugCount} 条未加载（共 {bugTotal} 条）。
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          <span>
+            已加载 {bugs.length} / {bugTotal} 条 Bug，剩余 {hiddenBugCount} 条。
+            当前列表、状态数量与导出仅包含已加载结果。
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto h-7 gap-1.5"
+            disabled={!hasNextPage || isFetchingNextPage}
+            onClick={() => fetchNextPage()}
+          >
+            {isFetchingNextPage && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {isFetchingNextPage ? '加载中...' : `加载更多（剩余 ${hiddenBugCount} 条）`}
+          </Button>
         </div>
       )}
 

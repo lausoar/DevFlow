@@ -40,6 +40,7 @@ public class BugController {
     private final ProjectAccessService projectAccessService;
     private final AccessGuard guard;
     private final WorkflowService workflowService;
+    private final com.devflow.mapper.ProjectMapper projectMapper;
 
     /** 按项目获取 Bug 列表（分页） */
     @Operation(summary = "获取项目的 Bug 列表")
@@ -122,12 +123,16 @@ public class BugController {
     /** 变更 Bug 状态（仅负责人或报告人） */
     @Operation(summary = "变更 Bug 状态（仅负责人/报告人）")
     @PutMapping("/bugs/{id}/status")
+    @org.springframework.transaction.annotation.Transactional
     public R<Bug> changeStatus(@PathVariable String id,
                                @RequestBody java.util.Map<String, String> body,
                                Authentication authentication) {
         String status = body.get("status");
         String userId = guard.userId(authentication);
         Bug bug = requireBug(userId, id);
+        if (projectMapper.selectForUpdate(bug.getProjectId()) == null) {
+            throw new BusinessException(404, "项目不存在或已被删除");
+        }
         // 状态取值与流转由项目工作流决定
         workflowService.assertTransitionAllowed(bug.getProjectId(), WorkflowService.TYPE_BUG,
                 bug.getStatus(), status);

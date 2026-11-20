@@ -1,7 +1,6 @@
 package com.devflow.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.devflow.entity.Bug;
 import com.devflow.entity.User;
@@ -33,6 +32,7 @@ public class BugServiceImpl implements BugService {
     private final com.devflow.mapper.UserMapper userMapper;
     private final com.devflow.service.NotificationRecipients notificationRecipients;
     private final com.devflow.service.SubscriptionService subscriptionService;
+    private final com.devflow.service.WorkflowService workflowService;
 
     @Override
     public Page<Bug> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
@@ -68,9 +68,11 @@ public class BugServiceImpl implements BugService {
     public Bug create(String projectId, Bug bug, String reporterId) {
         bug.setProjectId(projectId);
         bug.setReporterId(reporterId);
-        // 状态枚举与 schema/前端保持一致: NEW/ASSIGNED/DOING/RESOLVED/REOPENED/CLOSED
-        // 创建时已指派直接进入"已分配"
-        bug.setStatus(StringUtils.hasText(bug.getAssigneeId()) ? "ASSIGNED" : "NEW");
+        // 调用方已经按项目工作流选定初始状态时不得覆盖；缺省时再取工作流初态
+        if (!StringUtils.hasText(bug.getStatus())) {
+            bug.setStatus(workflowService.initialStatus(projectId,
+                    com.devflow.service.WorkflowService.TYPE_BUG));
+        }
         // 显式给初值：@Version 字段为 null 时插入语句会跳过该列，库里落默认值 1，
         // 但返回给客户端的实体仍是 null —— 前端拿不到版本号，首次编辑时
         // expectedVersion 就是 undefined，乐观锁形同失效。
@@ -148,26 +150,29 @@ public class BugServiceImpl implements BugService {
         Bug existing = bugMapper.selectById(id);
         if (existing == null) return null;
 
-        // 乐观锁：带版本号才校验，冲突抛 409
-        if (expectedVersion != null) {
-            int current = existing.getVersion() == null ? 1 : existing.getVersion();
-            if (expectedVersion != current) {
-                throw new com.devflow.common.exception.BusinessException(409,
-                        "Bug 已被他人修改（当前版本 v" + current + "），请刷新后再保存");
-            }
-            bug.setVersion(expectedVersion);
+        // 乐观锁：显式版本先给出友好提示，数据库版本条件兜底并发竞争
+        int current = existing.getVersion() == null ? 1 : existing.getVersion();
+        if (expectedVersion != null && expectedVersion != current) {
+            throw new com.devflow.common.exception.BusinessException(409,
+                    "Bug 已被他人修改（当前版本 v" + current + "），请刷新后再保存");
         }
+        bug.setVersion(expectedVersion != null ? expectedVersion : current);
+        bug.setId(id);
 
         String oldAssigneeId = existing.getAssigneeId();
 
-        // assigneeId 传空串表示"取消指派"：updateById 默认跳过 null 字段，需显式置 NULL
+        // assigneeId 传空串表示"取消指派"；未传该字段时保留原负责人。
+        // assigneeId 的 updateStrategy=ALWAYS 使 NULL 与其他字段在同一版本化 UPDATE 中落库。
         if ("".equals(bug.getAssigneeId())) {
             bug.setAssigneeId(null);
-            bugMapper.update(null, new LambdaUpdateWrapper<Bug>()
-                    .eq(Bug::getId, id)
-                    .set(Bug::getAssigneeId, null));
+        } else if (bug.getAssigneeId() == null) {
+            bug.setAssigneeId(oldAssigneeId);
         }
-        bugMapper.updateById(bug);
+        int updatedRows = bugMapper.updateById(bug);
+        if (updatedRows == 0) {
+            throw new com.devflow.common.exception.BusinessException(409,
+                    "Bug 已被他人修改，请刷新后再保存");
+        }
 
         Bug updated = bugMapper.selectById(id);
 

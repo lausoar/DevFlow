@@ -237,7 +237,7 @@ CREATE TABLE IF NOT EXISTS document (
     is_published TINYINT DEFAULT 0 COMMENT '是否发布',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
     KEY idx_project_id (project_id),
     KEY idx_author_id (author_id)
 ) ENGINE=InnoDB COMMENT='文档表';
@@ -1445,3 +1445,42 @@ CREATE TABLE IF NOT EXISTS subscription (
     KEY idx_target (target_type, target_id),
     KEY idx_project (project_id)
 ) ENGINE=InnoDB COMMENT='工作项关注关系';
+
+-- 任务状态变更事件：燃尽与趋势只读追加式历史，不用当前状态反推过去
+CREATE TABLE IF NOT EXISTS task_status_event (
+    id VARCHAR(36) PRIMARY KEY COMMENT '状态事件ID',
+    task_id VARCHAR(36) NOT NULL COMMENT '任务ID',
+    project_id VARCHAR(36) NOT NULL COMMENT '项目ID',
+    from_status VARCHAR(40) DEFAULT NULL COMMENT '变更前状态（回填时为NULL）',
+    to_status VARCHAR(40) NOT NULL COMMENT '变更后状态',
+    from_category VARCHAR(20) DEFAULT NULL COMMENT '变更前状态分类',
+    to_category VARCHAR(20) NOT NULL COMMENT '变更后状态分类',
+    actor_id VARCHAR(36) DEFAULT NULL COMMENT '操作人ID（系统/历史回填为空）',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '状态变更时间',
+    KEY idx_task_status_event_task_time (task_id, created_at),
+    KEY idx_task_status_event_project_time (project_id, created_at)
+) ENGINE=InnoDB COMMENT='任务状态变更事件（追加式，不更新历史）';
+
+-- 文档向量索引事务发件箱：文档主数据与同步命令在同一事务提交
+CREATE TABLE IF NOT EXISTS document_index_outbox (
+    id VARCHAR(36) PRIMARY KEY COMMENT '索引同步事件ID',
+    document_id VARCHAR(36) NOT NULL COMMENT '文档ID',
+    project_id VARCHAR(36) DEFAULT NULL COMMENT '项目隔离范围',
+    enterprise_id VARCHAR(36) DEFAULT NULL COMMENT '企业隔离范围',
+    operation VARCHAR(10) NOT NULL COMMENT '操作: UPSERT/DELETE',
+    title VARCHAR(200) NOT NULL COMMENT '文档标题快照',
+    content LONGTEXT DEFAULT NULL COMMENT '文档正文快照',
+    doc_type VARCHAR(20) NOT NULL DEFAULT 'DOC' COMMENT '文档类型快照',
+    document_updated_at DATETIME(3) NOT NULL COMMENT '文档版本时间',
+    status VARCHAR(10) NOT NULL DEFAULT 'PENDING' COMMENT '状态: PENDING/RETRY/DONE/FAILED',
+    attempts INT NOT NULL DEFAULT 0 COMMENT '已尝试次数',
+    next_attempt_at DATETIME(3) DEFAULT NULL COMMENT '下次执行时间',
+    last_error VARCHAR(2000) DEFAULT NULL COMMENT '最近失败原因',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+        ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    UNIQUE KEY uk_document_index_outbox_version
+        (document_id, operation, document_updated_at),
+    KEY idx_document_index_outbox_due (status, next_attempt_at),
+    KEY idx_document_index_outbox_document (document_id, created_at)
+) ENGINE=InnoDB COMMENT='文档向量索引事务发件箱';

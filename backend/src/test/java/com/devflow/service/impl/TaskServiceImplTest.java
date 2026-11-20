@@ -3,6 +3,7 @@ package com.devflow.service.impl;
 import com.devflow.entity.Task;
 import com.devflow.mapper.TaskDependencyMapper;
 import com.devflow.mapper.TaskMapper;
+import com.devflow.mapper.TaskStatusEventMapper;
 import com.devflow.service.NotificationRecipients;
 import com.devflow.service.NotificationService;
 import com.devflow.service.SubscriptionService;
@@ -45,6 +46,7 @@ class TaskServiceImplTest {
     @Mock private SubscriptionService subscriptionService;
     @Mock private NotificationRecipients notificationRecipients;
     @Mock private TaskDependencyMapper taskDependencyMapper;
+    @Mock private TaskStatusEventMapper taskStatusEventMapper;
 
     @InjectMocks private TaskServiceImpl service;
 
@@ -66,6 +68,8 @@ class TaskServiceImplTest {
     void enteringDoneSetsCompletedAt() {
         when(taskMapper.selectById("t1")).thenReturn(task);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
+        when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "TODO"))
+                .thenReturn("TODO");
         when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "DONE"))
                 .thenReturn("DONE");
         when(workflowService.labelOf(anyString(), anyString(), anyString())).thenReturn("完成");
@@ -76,6 +80,7 @@ class TaskServiceImplTest {
         ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
         verify(taskMapper).updateById(captor.capture());
         assertThat(captor.getValue().getCompletedAt()).isNotNull();
+        verify(taskStatusEventMapper).insert(any(com.devflow.entity.TaskStatusEvent.class));
     }
 
     @Test
@@ -85,6 +90,8 @@ class TaskServiceImplTest {
         task.setCompletedAt(LocalDateTime.now().minusDays(3));
         when(taskMapper.selectById("t1")).thenReturn(task);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
+        when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "DONE"))
+                .thenReturn("DONE");
         when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "TODO"))
                 .thenReturn("TODO");
         when(workflowService.labelOf(anyString(), anyString(), anyString())).thenReturn("待办");
@@ -122,6 +129,8 @@ class TaskServiceImplTest {
     void nonDoneStatusLeavesCompletedAtNull() {
         when(taskMapper.selectById("t1")).thenReturn(task);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
+        when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "TODO"))
+                .thenReturn("TODO");
         when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "DOING"))
                 .thenReturn("IN_PROGRESS");
         when(workflowService.labelOf(anyString(), anyString(), anyString())).thenReturn("进行中");
@@ -139,7 +148,12 @@ class TaskServiceImplTest {
     void workflowFailureFallsBackGracefully() {
         when(taskMapper.selectById("t1")).thenReturn(task);
         when(taskMapper.updateById(any(Task.class))).thenReturn(1);
-        when(workflowService.categoryOf(anyString(), anyString(), anyString()))
+        when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "TODO"))
+                .thenReturn("TODO");
+        // statusCategory 需要先拿到正常分类；只有 isDoneStatus 的后续查询失败，
+        // 才能继续验证它原有的字面 DONE 回退。
+        when(workflowService.categoryOf("p1", WorkflowService.TYPE_TASK, "DONE"))
+                .thenReturn("DONE")
                 .thenThrow(new RuntimeException("工作流配置损坏"));
         when(workflowService.labelOf(anyString(), anyString(), anyString())).thenReturn("完成");
         when(notificationRecipients.resolve(any(), any(), any(), any())).thenReturn(List.of());

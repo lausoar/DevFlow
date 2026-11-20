@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { bugApi } from '@/lib/api/bug';
 import type { Bug, PageQuery } from '@/types';
 
@@ -11,6 +11,22 @@ export function useBugs(projectId: string | null, params?: PageQuery) {
   return useQuery({
     queryKey: ['bugs', projectId, params],
     queryFn: () => bugApi.getByProject(projectId!, params),
+    enabled: !!projectId,
+  });
+}
+
+export type BugListParams = Omit<PageQuery, 'page'> & { status?: string };
+
+/** Bug 列表专用：保留服务端筛选语义，并可逐页累积到全部结果。 */
+export function useInfiniteBugs(projectId: string | null, params?: BugListParams) {
+  return useInfiniteQuery({
+    queryKey: ['bugs', projectId, 'infinite', params],
+    queryFn: ({ pageParam }) => bugApi.getByProject(projectId!, { ...params, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => {
+      const result = lastPage.data;
+      return result.page < result.totalPages ? result.page + 1 : undefined;
+    },
     enabled: !!projectId,
   });
 }

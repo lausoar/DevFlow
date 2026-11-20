@@ -2,6 +2,7 @@ package com.devflow.service.impl;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.devflow.entity.AutomationRule;
 import com.devflow.entity.Bug;
@@ -12,12 +13,14 @@ import com.devflow.mapper.UserMapper;
 import com.devflow.service.NotificationService;
 import com.devflow.service.PermissionService;
 import com.devflow.service.ProjectAccessService;
+import com.devflow.service.WorkflowService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -53,6 +56,8 @@ class AutomationRuleServiceImplTest {
     private PermissionService permissionService;
     @Mock
     private ProjectAccessService projectAccessService;
+    @Mock
+    private WorkflowService workflowService;
 
     @InjectMocks
     private AutomationRuleServiceImpl service;
@@ -98,6 +103,8 @@ class AutomationRuleServiceImplTest {
         when(automationRuleMapper.selectList(any(LambdaQueryWrapper.class)))
                 .thenReturn(List.of(rule(ASSIGNEE, null)));
         when(bugMapper.update(isNull(), any())).thenReturn(1);
+        when(workflowService.statusCodes(PROJECT, WorkflowService.TYPE_BUG))
+                .thenReturn(List.of("NEW", "ASSIGNED"));
 
         Bug b = bug();
         String assigned = service.autoAssignBug(PROJECT, b, REPORTER);
@@ -141,6 +148,25 @@ class AutomationRuleServiceImplTest {
 
         assertThat(service.autoAssignBug(PROJECT, bug(), REPORTER)).isNull();
         verify(bugMapper, never()).update(any(), any());
+    }
+
+    @Test
+    @DisplayName("自动指派：自定义初态不被 ASSIGNED 覆盖，数据库也只更新负责人")
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void autoAssignPreservesCustomInitialStatus() {
+        when(automationRuleMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(rule(ASSIGNEE, null)));
+        when(bugMapper.update(isNull(), any())).thenReturn(1);
+        Bug bug = bug();
+        bug.setStatus("TRIAGE");
+
+        String assigned = service.autoAssignBug(PROJECT, bug, REPORTER);
+
+        assertThat(assigned).isEqualTo(ASSIGNEE);
+        assertThat(bug.getStatus()).isEqualTo("TRIAGE");
+        ArgumentCaptor<LambdaUpdateWrapper> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(bugMapper).update(isNull(), captor.capture());
+        assertThat(captor.getValue().getSqlSet()).contains("assignee_id").doesNotContain("status");
     }
 
     @Test

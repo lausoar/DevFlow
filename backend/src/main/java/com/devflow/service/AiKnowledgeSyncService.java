@@ -42,8 +42,8 @@ public class AiKnowledgeSyncService {
     }
 
     /**
-     * 文档创建/更新后重新索引
-     * AI 服务侧会先清理旧分片再写入，重复调用幂等
+     * 兼容既有调用方的异步入口。失败仍只记录日志，不影响文档主流程。
+     * 新的事务发件箱使用同步方法，不能把吞掉的异常误判为成功。
      */
     @Async("aiExecutor")
     public void indexDocument(Document doc) {
@@ -51,60 +51,79 @@ public class AiKnowledgeSyncService {
             return;
         }
         try {
-            if (doc.getContent() == null || doc.getContent().isBlank()) {
-                deleteDocument(doc.getId(), doc.getProjectId(), doc.getEnterpriseId());
-                return;
-            }
-            HashMap<String, Object> body = new HashMap<>();
-            body.put("doc_id", doc.getId());
-            body.put("title", doc.getTitle());
-            body.put("content", doc.getContent());
-            body.put("doc_type", doc.getType() != null ? doc.getType().toLowerCase() : "doc");
-            if (StringUtils.hasText(doc.getProjectId())) {
-                body.put("project_id", doc.getProjectId());
-            }
-            if (StringUtils.hasText(doc.getEnterpriseId())) {
-                body.put("enterprise_id", doc.getEnterpriseId());
-            }
-            String result = restClient.post()
-                    .uri("/rag/index")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .headers(this::applyServiceToken)
-                    .body(body)
-                    .retrieve()
-                    .body(String.class);
-            log.info("文档已同步到知识库: id={}, title={}, 响应={}", doc.getId(), doc.getTitle(), result);
+            indexDocumentSync(doc);
         } catch (Exception e) {
             log.warn("文档同步知识库失败（不影响主流程）: id={}, title={}, 原因={}",
                     doc.getId(), doc.getTitle(), e.getMessage());
         }
     }
 
-    /** 文档删除或正文清空后，清理指定租户范围内的向量索引 */
+    /**
+     * 同步重建索引；AI 服务侧会先清理旧分片再写入，重复调用幂等。
+     * 非 2xx、连接错误等异常直接抛给调用方。
+     */
+    public void indexDocumentSync(Document doc) {
+        if (doc == null || doc.getId() == null) {
+            return;
+        }
+        if (doc.getContent() == null || doc.getContent().isBlank()) {
+            deleteDocumentSync(doc.getId(), doc.getProjectId(), doc.getEnterpriseId());
+            return;
+        }
+        HashMap<String, Object> body = new HashMap<>();
+        body.put("doc_id", doc.getId());
+        body.put("title", doc.getTitle());
+        body.put("content", doc.getContent());
+        body.put("doc_type", doc.getType() != null ? doc.getType().toLowerCase() : "doc");
+        if (StringUtils.hasText(doc.getProjectId())) {
+            body.put("project_id", doc.getProjectId());
+        }
+        if (StringUtils.hasText(doc.getEnterpriseId())) {
+            body.put("enterprise_id", doc.getEnterpriseId());
+        }
+        String result = restClient.post()
+                .uri("/rag/index")
+                .contentType(MediaType.APPLICATION_JSON)
+                .headers(this::applyServiceToken)
+                .body(body)
+                .retrieve()
+                .body(String.class);
+        log.info("文档已同步到知识库: id={}, title={}, 响应={}", doc.getId(), doc.getTitle(), result);
+    }
+
+    /** 兼容既有调用方的异步删除入口。 */
     @Async("aiExecutor")
     public void deleteDocument(String docId, String projectId, String enterpriseId) {
         if (docId == null || docId.isBlank()) {
             return;
         }
         try {
-            restClient.delete()
-                    .uri(builder -> {
-                        builder.path("/rag/index/{docId}");
-                        if (StringUtils.hasText(projectId)) {
-                            builder.queryParam("project_id", projectId);
-                        }
-                        if (StringUtils.hasText(enterpriseId)) {
-                            builder.queryParam("enterprise_id", enterpriseId);
-                        }
-                        return builder.build(docId);
-                    })
-                    .headers(this::applyServiceToken)
-                    .retrieve()
-                    .toBodilessEntity();
-            log.info("文档索引已从知识库删除: {}", docId);
+            deleteDocumentSync(docId, projectId, enterpriseId);
         } catch (Exception e) {
             log.warn("文档索引删除失败（不影响主流程）: id={}, 原因={}", docId, e.getMessage());
         }
+    }
+
+    /** 同步删除指定租户范围内的向量索引，失败时抛出异常。 */
+    public void deleteDocumentSync(String docId, String projectId, String enterpriseId) {
+        if (docId == null || docId.isBlank()) {
+            return;
+        }
+        restClient.delete()
+                .uri(builder -> {
+                    builder.path("/rag/index/{docId}");
+                    if (StringUtils.hasText(projectId)) {
+                        builder.queryParam("project_id", projectId);
+                    }
+                    if (StringUtils.hasText(enterpriseId)) {
+                        builder.queryParam("enterprise_id", enterpriseId);
+                    }
+                    return builder.build(docId);
+                })
+                .headers(this::applyServiceToken)
+                .retrieve()
+                .toBodilessEntity();
+        log.info("文档索引已从知识库删除: {}", docId);
     }
 
     private void applyServiceToken(org.springframework.http.HttpHeaders headers) {

@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { notificationApi } from '@/lib/api/notification';
 
 // ============================================
@@ -10,6 +10,26 @@ export function useNotifications(params?: { page?: number; pageSize?: number; ty
   return useQuery({
     queryKey: ['notifications', params],
     queryFn: () => notificationApi.getList(params),
+    staleTime: 1000 * 30,
+  });
+}
+
+export type NotificationListParams = {
+  pageSize?: number;
+  type?: string;
+  unreadOnly?: boolean;
+};
+
+/** 通知中心专用累积列表；顶栏继续使用上面的单页 hook。 */
+export function useInfiniteNotifications(params?: NotificationListParams) {
+  return useInfiniteQuery({
+    queryKey: ['notifications', 'infinite', params],
+    queryFn: ({ pageParam }) => notificationApi.getList({ ...params, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => {
+      const result = lastPage.data;
+      return result.page < result.totalPages ? result.page + 1 : undefined;
+    },
     staleTime: 1000 * 30,
   });
 }

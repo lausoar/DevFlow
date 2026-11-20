@@ -1,5 +1,6 @@
 package com.devflow.config;
 
+import com.devflow.entity.ChatChannel;
 import com.devflow.entity.User;
 import com.devflow.mapper.ChatChannelMapper;
 import com.devflow.mapper.UserMapper;
@@ -163,6 +164,49 @@ class WebSocketAuthInterceptorTest {
         verify(presenceService, times(2)).broadcast();
     }
 
+    @Test
+    @DisplayName("项目成员可以订阅本频道的轻量聊天事件")
+    void memberCanSubscribeToChannelEvents() {
+        connectValidSession();
+        when(channelMapper.selectById("c1")).thenReturn(projectChannel("c1", "p1"));
+        when(projectAccessService.canView(USER_ID, "p1")).thenReturn(true);
+        Message<?> subscribe = subscribeMessage("/topic/chat.events.c1");
+
+        assertThat(inbound.preSend(subscribe, messageChannel)).isSameAs(subscribe);
+    }
+
+    @Test
+    @DisplayName("拒绝订阅其他项目频道的轻量聊天事件")
+    void crossProjectChannelEventsAreRejected() {
+        connectValidSession();
+        when(channelMapper.selectById("c2")).thenReturn(projectChannel("c2", "p2"));
+        when(projectAccessService.canView(USER_ID, "p2")).thenReturn(false);
+
+        assertThatThrownBy(() -> inbound.preSend(subscribeMessage("/topic/chat.events.c2"), messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("用户只能订阅本企业在线名单")
+    void presenceRequiresMatchingEnterprise() {
+        connectValidSession();
+        Message<?> own = subscribeMessage("/topic/presence.e1");
+
+        assertThat(inbound.preSend(own, messageChannel)).isSameAs(own);
+        assertThatThrownBy(() -> inbound.preSend(subscribeMessage("/topic/presence.e2"), messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("旧全局聊天事件 topic 不允许订阅")
+    void legacyGlobalChatEventsAreRejected() {
+        connectValidSession();
+
+        assertThatThrownBy(() -> inbound.preSend(subscribeMessage("/topic/chat.events"), messageChannel))
+                .isInstanceOf(AccessDeniedException.class);
+        verifyNoInteractions(channelMapper, projectAccessService);
+    }
+
     private Message<?> connectValidSession() {
         when(jwtUtil.validateAccessToken(TOKEN)).thenReturn(true);
         when(tokenBlacklistService.isBlacklisted(TOKEN)).thenReturn(false);
@@ -182,6 +226,22 @@ class WebSocketAuthInterceptorTest {
         return new GenericMessage<>("connect", accessor.getMessageHeaders());
     }
 
+    private static Message<?> subscribeMessage(String destination) {
+        StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.SUBSCRIBE);
+        accessor.setLeaveMutable(true);
+        accessor.setSessionId(SESSION_ID);
+        accessor.setDestination(destination);
+        return new GenericMessage<>("subscribe", accessor.getMessageHeaders());
+    }
+
+    private static ChatChannel projectChannel(String channelId, String projectId) {
+        ChatChannel channel = new ChatChannel();
+        channel.setId(channelId);
+        channel.setProjectId(projectId);
+        channel.setType("PROJECT");
+        return channel;
+    }
+
     private static Message<?> outboundMessage() {
         StompHeaderAccessor accessor = StompHeaderAccessor.create(StompCommand.MESSAGE);
         accessor.setLeaveMutable(true);
@@ -195,6 +255,7 @@ class WebSocketAuthInterceptorTest {
         user.setId(USER_ID);
         user.setStatus("ACTIVE");
         user.setRole("MEMBER");
+        user.setEnterpriseId("e1");
         user.setSessionVersion(sessionVersion);
         return user;
     }

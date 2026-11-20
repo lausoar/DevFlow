@@ -8,6 +8,7 @@ import com.devflow.entity.Bug;
 import com.devflow.entity.TestCase;
 import com.devflow.entity.TestExecution;
 import com.devflow.mapper.BugMapper;
+import com.devflow.service.BugService;
 import com.devflow.mapper.TestCaseMapper;
 import com.devflow.mapper.TestExecutionMapper;
 import java.util.List;
@@ -40,6 +41,7 @@ public class TestCaseController {
     private final com.devflow.mapper.TestCycleCaseMapper cycleCaseMapper;
     private final com.devflow.mapper.TestCaseVersionMapper testCaseVersionMapper;
     private final WorkflowService workflowService;
+    private final BugService bugService;
     private final BugMapper bugMapper;
     private final com.devflow.mapper.ProjectMapper projectMapper;
     private final ProjectAccessService projectAccessService;
@@ -281,11 +283,13 @@ public class TestCaseController {
             }
         }
 
-        // 自动化规则：CASE_FAIL 触发
-        try {
-            automationRuleService.fire("CASE_FAIL", testCase.getProjectId(),
-                    id, testCase.getTitle(), (String) authentication.getPrincipal());
-        } catch (Exception ignored) {
+        // 自动化规则：只有真实失败才触发 CASE_FAIL
+        if ("FAIL".equals(result)) {
+            try {
+                automationRuleService.fire("CASE_FAIL", testCase.getProjectId(),
+                        id, testCase.getTitle(), (String) authentication.getPrincipal());
+            } catch (Exception ignored) {
+            }
         }
 
         // 企业微信群机器人：用例执行失败推送（仅失败才推，避免刷屏）
@@ -316,6 +320,7 @@ public class TestCaseController {
     /** 失败转缺陷：用例的步骤/预期自动拼装为 Bug 描述，回填关联 */
     @Operation(summary = "用例转缺陷")
     @PostMapping("/test-cases/{id}/to-bug")
+    @org.springframework.transaction.annotation.Transactional
     public R<Bug> toBug(@PathVariable String id,
                         @RequestBody Map<String, String> body,
                         Authentication authentication) {
@@ -325,6 +330,27 @@ public class TestCaseController {
         // 权限点：转缺陷还需 bug:create（TESTER/OWNER/MANAGER 均已映射）
         if (!permissionService.hasProjectPermission(userId, testCase.getProjectId(), PermissionCodes.BUG_CREATE)) {
             throw new BusinessException(403, "无权创建缺陷");
+        }
+
+        TestExecution failedExecution = testExecutionMapper.selectByCase(id).stream()
+                .filter(e -> "FAIL".equals(e.getResult()))
+                .findFirst().orElse(null);
+        if (failedExecution == null) {
+            throw new BusinessException(400, "没有可转缺陷的失败执行记录");
+        }
+        if (failedExecution.getBugId() != null && !failedExecution.getBugId().isBlank()) {
+            return R.ok(requireLinkedBug(bugService.getById(failedExecution.getBugId())));
+        }
+
+        // 先生成 Bug 主键，再用它原子占用最新一次失败执行。并发失败者只读已有关联，
+        // 不会重复创建 Bug、通知或触发自动化；后续创建异常会由事务回滚这次占用。
+        String bugId = UUID.randomUUID().toString().replace("-", "");
+        if (testExecutionMapper.claimBug(failedExecution.getId(), bugId) == 0) {
+            TestExecution claimed = testExecutionMapper.selectByIdForUpdate(failedExecution.getId());
+            if (claimed != null && claimed.getBugId() != null && !claimed.getBugId().isBlank()) {
+                return R.ok(requireLinkedBug(bugMapper.selectByIdForUpdate(claimed.getBugId())));
+            }
+            throw new BusinessException(409, "失败执行记录已被更新，请刷新后重试");
         }
 
         String note = body.getOrDefault("note", "").trim();
@@ -358,6 +384,7 @@ public class TestCaseController {
                 .append(" 一键转缺陷生成）");
 
         Bug bug = new Bug();
+        bug.setId(bugId);
         bug.setProjectId(testCase.getProjectId());
         bug.setTitle("【缺陷】" + testCase.getTitle());
         bug.setDescription(desc.toString());
@@ -365,19 +392,9 @@ public class TestCaseController {
         bug.setPriority("MEDIUM");
         bug.setSeverity("MAJOR");
         bug.setReporterId(userId);
-        bugMapper.insert(bug);
+        Bug created = bugService.create(testCase.getProjectId(), bug, userId);
 
-        // 失败执行记录回填缺陷
-        List<TestExecution> execs = testExecutionMapper.selectByCase(id);
-        for (TestExecution e : execs) {
-            if ("FAIL".equals(e.getResult())) {
-                e.setBugId(bug.getId());
-                testExecutionMapper.updateById(e);
-                break;
-            }
-        }
-
-        // 通知用例创建人
+        // 通知用例创建人（仅实际创建成功的占用者）
         if (!testCase.getCreatorId().equals(userId)) {
             try {
                 notificationService.createNotification(
@@ -388,7 +405,14 @@ public class TestCaseController {
             } catch (Exception ignored) {
             }
         }
-        return R.ok(bug);
+        return R.ok(created);
+    }
+
+    private Bug requireLinkedBug(Bug linked) {
+        if (linked == null) {
+            throw new BusinessException(404, "关联缺陷不存在或已被删除");
+        }
+        return linked;
     }
 
     // ==================== 内部 ====================

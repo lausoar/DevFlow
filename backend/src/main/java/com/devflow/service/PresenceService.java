@@ -27,6 +27,8 @@ public class PresenceService {
     private final Map<String, Set<String>> userSessions = new ConcurrentHashMap<>();
     /** sessionId -> userId（断开时反查） */
     private final Map<String, String> sessionUser = new ConcurrentHashMap<>();
+    /** 上轮广播仍有在线用户的企业；本轮消失的企业必须补发一次空名单。 */
+    private final Set<String> lastBroadcastEnterprises = new java.util.HashSet<>();
 
     /** 延迟获取消息模板，避免与 WebSocket 配置类形成 bean 循环依赖 */
     private final ObjectProvider<SimpMessagingTemplate> messagingTemplateProvider;
@@ -38,7 +40,11 @@ public class PresenceService {
             return;
         }
         sessionUser.put(sessionId, userId);
-        userSessions.computeIfAbsent(userId, k -> ConcurrentHashMap.newKeySet()).add(sessionId);
+        userSessions.compute(userId, (id, sessions) -> {
+            Set<String> active = sessions != null ? sessions : ConcurrentHashMap.newKeySet();
+            active.add(sessionId);
+            return active;
+        });
     }
 
     /** 会话断开：若该用户的最后一个会话已关闭则返回其 userId（转为离线） */
@@ -47,15 +53,11 @@ public class PresenceService {
         if (userId == null) {
             return Optional.empty();
         }
-        Set<String> sessions = userSessions.get(userId);
-        if (sessions != null) {
+        Set<String> remaining = userSessions.computeIfPresent(userId, (id, sessions) -> {
             sessions.remove(sessionId);
-            if (sessions.isEmpty()) {
-                userSessions.remove(userId);
-                return Optional.of(userId);
-            }
-        }
-        return Optional.empty();
+            return sessions.isEmpty() ? null : sessions;
+        });
+        return remaining == null ? Optional.of(userId) : Optional.empty();
     }
 
     /** 当前全部在线用户ID */
@@ -67,7 +69,7 @@ public class PresenceService {
      * 在线名单变化后按企业广播（/topic/presence.{enterpriseId}）：
      * 在线状态属于组织内部信息，不能跨租户广播全量名单。
      */
-    public void broadcast() {
+    public synchronized void broadcast() {
         SimpMessagingTemplate template = messagingTemplateProvider.getIfAvailable();
         if (template == null) {
             return;
@@ -80,7 +82,12 @@ public class PresenceService {
             }
             byEnterprise.computeIfAbsent(user.getEnterpriseId(), k -> new java.util.ArrayList<>()).add(userId);
         }
-        byEnterprise.forEach((enterpriseId, ids) -> {
+
+        Set<String> enterpriseIds = new java.util.HashSet<>(lastBroadcastEnterprises);
+        enterpriseIds.addAll(byEnterprise.keySet());
+        enterpriseIds.forEach(enterpriseId -> {
+            // 最后一人下线后在线 map 不再包含该企业，仍须显式推送空数组清除客户端旧状态。
+            java.util.List<String> ids = byEnterprise.getOrDefault(enterpriseId, java.util.List.of());
             try {
                 template.convertAndSend("/topic/presence." + enterpriseId,
                         Map.of("onlineUserIds", ids));
@@ -88,5 +95,7 @@ public class PresenceService {
                 log.warn("在线状态广播失败: enterprise={}, 原因={}", enterpriseId, e.getMessage());
             }
         });
+        lastBroadcastEnterprises.clear();
+        lastBroadcastEnterprises.addAll(byEnterprise.keySet());
     }
 }

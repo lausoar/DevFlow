@@ -6,6 +6,10 @@ import com.devflow.common.result.R;
 import com.devflow.entity.Workflow;
 import com.devflow.entity.WorkflowStatus;
 import com.devflow.entity.WorkflowTransition;
+import com.devflow.mapper.BugMapper;
+import com.devflow.mapper.ProjectMapper;
+import com.devflow.mapper.RequirementMapper;
+import com.devflow.mapper.TaskMapper;
 import com.devflow.mapper.WorkflowMapper;
 import com.devflow.mapper.WorkflowStatusMapper;
 import com.devflow.mapper.WorkflowTransitionMapper;
@@ -20,8 +24,12 @@ import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 /**
  * 工作流配置与读取。
@@ -39,6 +47,10 @@ public class WorkflowController {
     private final WorkflowMapper workflowMapper;
     private final WorkflowStatusMapper statusMapper;
     private final WorkflowTransitionMapper transitionMapper;
+    private final TaskMapper taskMapper;
+    private final BugMapper bugMapper;
+    private final RequirementMapper requirementMapper;
+    private final ProjectMapper projectMapper;
     private final AccessGuard guard;
 
     /** 读取项目某问题类型的生效工作流（含每列可流转到的下一状态） */
@@ -93,12 +105,22 @@ public class WorkflowController {
         if (initialCount != 1) {
             throw new BusinessException(400, "必须且只能有一个初始状态");
         }
+        Set<String> survivingCodes = new LinkedHashSet<>();
         for (StatusItem i : items) {
+            if (i.getCode() == null || i.getCode().isBlank()) {
+                throw new BusinessException(400, "状态码不能为空");
+            }
             if (!List.of(WorkflowStatus.CATEGORY_TODO, WorkflowStatus.CATEGORY_IN_PROGRESS,
                     WorkflowStatus.CATEGORY_DONE).contains(i.getCategory())) {
                 throw new BusinessException(400, "状态「" + i.getCode() + "」缺少合法分类（TODO/IN_PROGRESS/DONE）");
             }
+            survivingCodes.add(i.getCode().trim());
         }
+
+        // 必须先校验再快照/删除：任何仍在业务数据中的状态都不能随整体替换消失
+        // 项目行锁把状态流转与工作流整体替换串行化，避免校验后状态集合被并发改写
+        lockProject(projectId);
+        assertInUseStatusesSurvive(projectId, issueType, survivingCodes);
 
         // 首次自定义：把全局模板复制成本项目快照，保证未改动的行为不变
         Workflow wf = workflowService.ensureProjectWorkflow(projectId, issueType, userId);
@@ -111,9 +133,6 @@ public class WorkflowController {
 
         int sort = 0;
         for (StatusItem item : items) {
-            if (item.getCode() == null || item.getCode().isBlank()) {
-                throw new BusinessException(400, "状态码不能为空");
-            }
             WorkflowStatus st = new WorkflowStatus();
             st.setWorkflowId(wf.getId());
             st.setCode(item.getCode().trim());
@@ -159,10 +178,19 @@ public class WorkflowController {
         String userId = guard.userId(authentication);
         guard.requireProjectPermission(userId, projectId, PermissionCodes.TESTCASE_MANAGE);
 
+        lockProject(projectId);
         List<Workflow> own = workflowMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Workflow>()
                         .eq(Workflow::getProjectId, projectId)
                         .eq(Workflow::getIssueType, issueType));
+        if (!own.isEmpty()) {
+            // null 项目 ID 与运行时全局回退口径一致，不能拿当前项目自定义状态做校验
+            Workflow fallback = workflowService.resolve(null, issueType);
+            Set<String> fallbackCodes = workflowService.statuses(fallback.getId()).stream()
+                    .map(WorkflowStatus::getCode)
+                    .collect(Collectors.toSet());
+            assertInUseStatusesSurvive(projectId, issueType, fallbackCodes);
+        }
         for (Workflow wf : own) {
             transitionMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WorkflowTransition>()
                     .eq(WorkflowTransition::getWorkflowId, wf.getId()));
@@ -172,5 +200,26 @@ public class WorkflowController {
         }
         workflowServiceImpl.reload();
         return R.ok();
+    }
+
+    private void lockProject(String projectId) {
+        if (projectMapper.selectForUpdate(projectId) == null) {
+            throw new BusinessException(404, "项目不存在或已被删除");
+        }
+    }
+
+    private void assertInUseStatusesSurvive(String projectId, String issueType, Set<String> survivingCodes) {
+        List<String> inUse = switch (issueType) {
+            case WorkflowService.TYPE_TASK -> taskMapper.selectUsedStatusCodes(projectId);
+            case WorkflowService.TYPE_BUG -> bugMapper.selectUsedStatusCodes(projectId);
+            case WorkflowService.TYPE_REQUIREMENT -> requirementMapper.selectUsedStatusCodes(projectId);
+            default -> throw new BusinessException(400, "不支持的问题类型: " + issueType);
+        };
+        Set<String> missing = new TreeSet<>(inUse);
+        missing.removeAll(survivingCodes);
+        if (!missing.isEmpty()) {
+            throw new BusinessException(409,
+                    "仍有业务数据使用状态: " + String.join(", ", missing) + "，请先迁移数据或保留这些状态");
+        }
     }
 }

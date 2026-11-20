@@ -267,6 +267,18 @@ public class DeploymentServiceImpl implements DeploymentService {
             throw new BusinessException(400, "受保护环境的回滚需要走一次新的部署审批");
         }
 
+        // 最新成功部署就是当前线上版本。目标已经是当前版本时回滚是无操作，
+        // 不能退而把更早的历史记录标成 ROLLED_BACK。
+        Deployment current = deploymentMapper.selectOne(new LambdaQueryWrapper<Deployment>()
+                .eq(Deployment::getEnvironmentId, target.getEnvironmentId())
+                .eq(Deployment::getStatus, "SUCCEEDED")
+                .orderByDesc(Deployment::getFinishedAt)
+                .orderByDesc(Deployment::getCreatedAt)
+                .last("LIMIT 1"));
+        if (current == null || target.getId().equals(current.getId())) {
+            throw new BusinessException(409, "目标部署已是当前版本，无需回滚");
+        }
+
         Deployment rb = new Deployment();
         rb.setProjectId(target.getProjectId());
         rb.setEnvironmentId(target.getEnvironmentId());
@@ -281,9 +293,9 @@ public class DeploymentServiceImpl implements DeploymentService {
         rb.setNote(StringUtils.hasText(note) ? note : "回滚到 " + target.getVersion());
         deploymentMapper.insert(rb);
 
-        // 被回滚的那次部署标记为回滚（不计入成功部署，计入变更失败）
+        // 历史目标保持不变；被取代的是同环境当前最新成功部署
         Deployment patch = new Deployment();
-        patch.setId(target.getId());
+        patch.setId(current.getId());
         patch.setStatus("ROLLED_BACK");
         deploymentMapper.updateById(patch);
         return rb;
@@ -319,7 +331,7 @@ public class DeploymentServiceImpl implements DeploymentService {
         List<Deployment> all = deploymentMapper.selectList(new LambdaQueryWrapper<Deployment>()
                 .eq(Deployment::getProjectId, projectId)
                 .in(Deployment::getEnvironmentId, envIds)
-                .ge(Deployment::getCreatedAt, since)
+                .ge(Deployment::getFinishedAt, since)
                 .orderByAsc(Deployment::getFinishedAt));
 
         List<Deployment> finished = all.stream()
@@ -367,9 +379,12 @@ public class DeploymentServiceImpl implements DeploymentService {
                 continue;
             }
             for (int j = i + 1; j < sorted.size(); j++) {
-                if ("SUCCEEDED".equals(sorted.get(j).getStatus())) {
+                Deployment success = sorted.get(j);
+                if (d.getEnvironmentId().equals(success.getEnvironmentId())
+                        && success.getFinishedAt().isAfter(d.getFinishedAt())
+                        && "SUCCEEDED".equals(success.getStatus())) {
                     recovery.add(Duration.between(d.getFinishedAt(),
-                            sorted.get(j).getFinishedAt()).toMinutes() / 60.0);
+                            success.getFinishedAt()).toMinutes() / 60.0);
                     break;
                 }
             }

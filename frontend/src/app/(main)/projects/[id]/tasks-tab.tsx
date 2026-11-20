@@ -15,7 +15,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { useTasks, useCreateTask, useUpdateTaskStatus, useUpdateTask, useDeleteTask } from '@/lib/hooks/use-tasks';
+import { useInfiniteTasks, useTasks, useCreateTask, useUpdateTaskStatus, useUpdateTask, useDeleteTask } from '@/lib/hooks/use-tasks';
 import { useSprints, useCreateSprint, useActivateSprint, useCompleteSprint } from '@/lib/hooks/use-sprints';
 import {
   useTaskExtras,
@@ -92,7 +92,13 @@ export function TasksTab({ projectId }: { projectId: string }) {
   const [sprintExpanded, setSprintExpanded] = useState(true);
   const [editTask, setEditTask] = useState<Task | null>(null);
 
-  const { data: tasksRes, isLoading } = useTasks(projectId);
+  const {
+    data: taskPages,
+    isLoading,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfiniteTasks(projectId, { keyword: search.trim() || undefined });
   // 看板列由项目工作流决定（支持自定义状态）；未加载完成时用兜底列保证不空白
   const { data: workflowRes } = useWorkflow(projectId, 'TASK');
   const COLUMNS: WorkflowStatusDef[] =
@@ -124,10 +130,9 @@ export function TasksTab({ projectId }: { projectId: string }) {
     setSprintOpen(false);
   };
 
-  const tasks = tasksRes?.data?.records || [];
-  // 后端分页默认 pageSize=100，前端从不翻页 —— 超过 100 条会被静默截断。
-  // 完整改造（虚拟滚动/加载更多）不在本批范围，但必须让用户知道"还有多少没显示"。
-  const taskTotal = tasksRes?.data?.total ?? tasks.length;
+  const tasks = taskPages?.pages.flatMap((page) => page.data?.records || []) || [];
+  const latestTaskPage = taskPages?.pages[taskPages.pages.length - 1]?.data;
+  const taskTotal = latestTaskPage?.total ?? tasks.length;
   const hiddenTaskCount = Math.max(0, taskTotal - tasks.length);
 
   // 成员名解析（导出列用）
@@ -137,7 +142,8 @@ export function TasksTab({ projectId }: { projectId: string }) {
     taskMemberMap[m.userId] = m.realName || m.username || '';
   });
 
-  // 导出当前看板任务为 CSV
+  // 导出已加载且命中当前服务端搜索、保存视图的看板任务。
+  // 未加载完时按钮文案与分页提示都会明确这一范围。
   // 执行保存视图：用 /query 取回命中任务的 id 集合，再看板内按 id 过滤。
   // 这样看板本身（拖拽、分页）不受影响，只是把列表缩到视图范围内。
   const [viewIds, setViewIds] = useState<Set<string> | null>(null);
@@ -146,13 +152,21 @@ export function TasksTab({ projectId }: { projectId: string }) {
   const handleApplyView = async (expression: string) => {
     setViewLoading(true);
     try {
-      const res = await queryApi.run({
+      const pageSize = 200;
+      const first = await queryApi.run({
         entity: 'TASK',
         expression,
         projectId,
-        pageSize: 200,
+        page: 1,
+        pageSize,
       });
-      const ids = new Set((res.data.records || []).map((r) => String((r as { id?: string }).id)));
+      const records = [...(first.data.records || [])];
+      const totalPages = Math.max(1, Math.ceil(first.data.total / pageSize));
+      for (let page = 2; page <= totalPages; page += 1) {
+        const next = await queryApi.run({ entity: 'TASK', expression, projectId, page, pageSize });
+        records.push(...(next.data.records || []));
+      }
+      const ids = new Set(records.map((r) => String((r as { id?: string }).id)));
       setViewIds(ids);
       setViewLabel(expression);
     } catch (e) {
@@ -178,10 +192,8 @@ export function TasksTab({ projectId }: { projectId: string }) {
     );
   };
 
-  // 按视图 + 搜索过滤
-  const filteredTasks = tasks
-    .filter((t) => !viewIds || viewIds.has(t.id))
-    .filter((t) => !search || t.title.toLowerCase().includes(search.toLowerCase()));
+  // 搜索由服务端完成；保存视图只在已加载的搜索结果内按 id 过滤。
+  const filteredTasks = tasks.filter((t) => !viewIds || viewIds.has(t.id));
 
   // 按状态分组（列来自工作流配置）
   const tasksByStatus: Record<string, Task[]> = {};
@@ -287,7 +299,13 @@ export function TasksTab({ projectId }: { projectId: string }) {
         ) : (
           <SavedFiltersPanel projectId={projectId} entity="TASK" onRun={handleApplyView} />
         )}
-        <Button variant="outline" size="sm" className="gap-1" onClick={handleExportTasks} title="导出当前看板任务">
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1"
+          onClick={handleExportTasks}
+          title={hiddenTaskCount > 0 ? '导出已加载的当前看板任务（尚有未加载任务）' : '导出当前看板任务'}
+        >
           <Download className="h-3.5 w-3.5" />
           导出
         </Button>
@@ -547,11 +565,23 @@ export function TasksTab({ projectId }: { projectId: string }) {
         )}
       </div>
 
-      {/* 分页提示：后端默认 pageSize=100，超出的任务不会显示 */}
+      {/* 看板与导出基于已加载结果；剩余任务可逐页继续加载。 */}
       {hiddenTaskCount > 0 && (
-        <div className="rounded-md border border-warning/30/60 bg-warning-muted px-3 py-2 text-xs text-warning ">
-          当前只显示前 {tasks.length} 条任务，另有 {hiddenTaskCount} 条未加载（共 {taskTotal} 条）。
-          请用筛选/视图缩小范围后再操作，避免误判任务总数。
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          <span>
+            已加载 {tasks.length} / {taskTotal} 条任务，剩余 {hiddenTaskCount} 条。
+            当前看板与导出仅包含已加载结果。
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto h-7 gap-1.5"
+            disabled={!hasNextPage || isFetchingNextPage}
+            onClick={() => fetchNextPage()}
+          >
+            {isFetchingNextPage && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {isFetchingNextPage ? '加载中...' : `加载更多（剩余 ${hiddenTaskCount} 条）`}
+          </Button>
         </div>
       )}
 

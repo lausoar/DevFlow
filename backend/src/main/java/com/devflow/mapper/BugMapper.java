@@ -12,6 +12,10 @@ import java.util.List;
 @Mapper
 public interface BugMapper extends BaseMapper<Bug> {
 
+    /** 项目内仍在使用的状态码（工作流整体替换前校验）。 */
+    @Select("SELECT DISTINCT status FROM bug WHERE project_id = #{projectId} AND status IS NOT NULL")
+    List<String> selectUsedStatusCodes(@Param("projectId") String projectId);
+
     /** 回收站：项目下已逻辑删除的记录（绕过 @TableLogic 过滤，需原生 SQL） */
     @Select("SELECT * FROM bug WHERE project_id = #{projectId} AND deleted = 1 " +
             "ORDER BY deleted_at DESC, id DESC LIMIT 200")
@@ -20,6 +24,10 @@ public interface BugMapper extends BaseMapper<Bug> {
     /** 按 ID 查询（绕过 @TableLogic 的 deleted=0 过滤，回收站用） */
     @Select("SELECT * FROM bug WHERE id = #{id}")
     Bug selectByIdIgnoreDeleted(@Param("id") String id);
+
+    /** 并发占用失败后的当前读：同事务先前的普通查询可能建立了旧快照。 */
+    @Select("SELECT * FROM bug WHERE id = #{id} AND deleted = 0 FOR UPDATE")
+    Bug selectByIdForUpdate(@Param("id") String id);
 
     /**
      * 带审计的软删除。

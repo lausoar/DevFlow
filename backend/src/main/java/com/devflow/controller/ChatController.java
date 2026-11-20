@@ -244,7 +244,7 @@ public class ChatController {
         // 广播失败只影响实时性，不影响消息落库（历史消息仍可拉取）
         messagingTemplate.convertAndSend("/topic/channel." + channelId, message);
         // 轻量事件：仅含 channelId+senderId，不含内容，供侧边栏未读角标使用
-        messagingTemplate.convertAndSend("/topic/chat.events",
+        messagingTemplate.convertAndSend("/topic/chat.events." + channelId,
                 java.util.Map.of("channelId", channelId, "senderId", senderId));
 
         chatMentionService.processMentions(channelId, senderId, request.getContent());

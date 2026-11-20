@@ -228,6 +228,9 @@ public class RequirementServiceImpl implements RequirementService {
         if (task == null) {
             throw new BusinessException(404, "任务不存在");
         }
+        if (!Objects.equals(requirement.getProjectId(), task.getProjectId())) {
+            throw new BusinessException(400, "任务与需求不属于同一项目");
+        }
 
         // 检查是否已关联
         Long count = requirementTaskMapper.selectCount(
@@ -348,18 +351,20 @@ public class RequirementServiceImpl implements RequirementService {
         List<RequirementResponse.LinkedTask> linkedTasks = new ArrayList<>();
         for (RequirementTask rt : requirementTasks) {
             Task task = taskMapper.selectById(rt.getTaskId());
-            if (task != null) {
-                User assignee = null;
-                if (task.getAssigneeId() != null) {
-                    assignee = userMapper.selectById(task.getAssigneeId());
-                }
-                linkedTasks.add(RequirementResponse.LinkedTask.builder()
-                        .taskId(task.getId())
-                        .taskTitle(task.getTitle())
-                        .taskStatus(task.getStatus())
-                        .assigneeName(assignee != null ? assignee.displayName() : null)
-                        .build());
+            // 历史脏数据可能跨项目关联：读取时也必须隐藏，且不能继续解析其负责人等信息
+            if (task == null || !Objects.equals(requirement.getProjectId(), task.getProjectId())) {
+                continue;
             }
+            User assignee = null;
+            if (task.getAssigneeId() != null) {
+                assignee = userMapper.selectById(task.getAssigneeId());
+            }
+            linkedTasks.add(RequirementResponse.LinkedTask.builder()
+                    .taskId(task.getId())
+                    .taskTitle(task.getTitle())
+                    .taskStatus(task.getStatus())
+                    .assigneeName(assignee != null ? assignee.displayName() : null)
+                    .build());
         }
 
         // 获取审批记录

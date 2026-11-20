@@ -17,7 +17,7 @@ export function useChannels() {
 
 /**
  * 获取频道消息（page=1 为最新一页，向后翻页即加载更早历史）
- * 实时性由全局 /topic/chat.events 事件失效缓存提供，轮询仅作断线兜底。
+ * 实时性由全局 /topic/chat.events.{channelId} 事件失效缓存提供，轮询仅作断线兜底。
  */
 export function useMessages(channelId: string | null, page = 1) {
   return useQuery({
@@ -77,8 +77,8 @@ export function useSendMessage(channelId: string) {
     mutationFn: (data: { content: string; type?: string; replyToId?: string }) =>
       chatApi.sendMessage(channelId, data),
     onSuccess: () => {
-      // 发送成功后刷新消息列表
-      queryClient.invalidateQueries({ queryKey: ['messages', channelId] });
+      // 发送成功后刷新聊天页实际渲染的累积消息列表
+      queryClient.invalidateQueries({ queryKey: ['message-history', channelId] });
     },
   });
 }

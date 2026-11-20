@@ -281,14 +281,7 @@ public class EnterpriseController {
     /** CSV 字段转义：含逗号/引号/换行时用双引号包裹并转义 */
     /** CSV 字段转义：含逗号/引号/换行时用双引号包裹并转义 */
     private String csv(String value) {
-        if (value == null) {
-            return "";
-        }
-        String v = value.replace("\r", " ").replace("\n", " ");
-        if (v.contains(",") || v.contains("\"") || v.contains(";")) {
-            return "\"" + v.replace("\"", "\"\"") + "\"";
-        }
-        return v;
+        return com.devflow.util.CsvUtils.escape(value);
     }
 
     /** 通过邀请码加入企业 */

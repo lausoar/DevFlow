@@ -33,17 +33,7 @@ public class StatisticsServiceImpl implements StatisticsService {
     private final UserMapper userMapper;
     private final com.devflow.service.WorkflowService workflowService;
     private final StatisticsAggregateMapper statisticsAggregateMapper;
-
-    /**
-     * 任务的完成日期。优先用 completed_at；老数据没有这个值时回落到 updated_at
-     * （回填迁移已经覆盖绝大多数历史任务，这里是兜底）。
-     */
-    private LocalDate completionDate(com.devflow.entity.Task t) {
-        if (t.getCompletedAt() != null) {
-            return t.getCompletedAt().toLocalDate();
-        }
-        return t.getUpdatedAt() != null ? t.getUpdatedAt().toLocalDate() : null;
-    }
+    private final TaskStatusEventMapper taskStatusEventMapper;
 
 
     // ============================================
@@ -58,6 +48,11 @@ public class StatisticsServiceImpl implements StatisticsService {
     private Set<String> progCodesOf(String projectId) {
         return new HashSet<>(workflowService.statusCodesInCategory(
                 projectId, WorkflowService.TYPE_TASK, WorkflowStatus.CATEGORY_IN_PROGRESS));
+    }
+
+    private Set<String> doneRequirementCodesOf(String projectId) {
+        return new HashSet<>(workflowService.statusCodesInCategory(
+                projectId, WorkflowService.TYPE_REQUIREMENT, WorkflowStatus.CATEGORY_DONE));
     }
 
     /**
@@ -202,13 +197,21 @@ public class StatisticsServiceImpl implements StatisticsService {
 
         // ---- 需求总览 ----
         int totalRequirements = 0, openRequirements = 0, completedRequirements = 0, closedRequirements = 0;
+        Map<String, Integer> reqStatusDist = new LinkedHashMap<>();
         for (Map<String, Object> row : reqRows) {
+            String pid = asString(row.get("projectId"));
             int n = asInt(row.get("n"));
             String status = asString(row.get("status"));
             totalRequirements += n;
-            if ("OPEN".equals(status)) openRequirements += n;
-            else if ("COMPLETED".equals(status)) completedRequirements += n;
-            else if ("CLOSED".equals(status)) closedRequirements += n;
+            if (doneRequirementCodesOf(pid).contains(status)) {
+                completedRequirements += n;
+            } else {
+                openRequirements += n;
+            }
+            if ("CLOSED".equals(status)) closedRequirements += n;
+            if (status != null) {
+                reqStatusDist.merge(status, n, Integer::sum);
+            }
         }
 
         // ---- 各项目进度 ----
@@ -244,13 +247,8 @@ public class StatisticsServiceImpl implements StatisticsService {
             })
             .collect(Collectors.toList());
 
-        // ---- 任务趋势（最近 14 天，按 completed_at 而不是 updated_at） ----
+        // ---- 任务趋势（最近 14 天，按进入 DONE 的事件时间归日） ----
         List<EnterpriseStatsResponse.TrendPoint> taskTrend = buildTaskTrend(projectIds, 14);
-
-        Map<String, Integer> reqStatusDist = new LinkedHashMap<>();
-        reqStatusDist.put("OPEN", openRequirements);
-        reqStatusDist.put("COMPLETED", completedRequirements);
-        reqStatusDist.put("CLOSED", closedRequirements);
 
         return EnterpriseStatsResponse.builder()
             .projectOverview(EnterpriseStatsResponse.ProjectOverview.builder()
@@ -570,6 +568,46 @@ public class StatisticsServiceImpl implements StatisticsService {
     // ============================================
     // Sprint 燃尽图
     // ============================================
+    private static final class TaskHistorySnapshot {
+        private final String category;
+        private final TaskStatusEvent lastCompletion;
+
+        private TaskHistorySnapshot(String category, TaskStatusEvent lastCompletion) {
+            this.category = category;
+            this.lastCompletion = lastCompletion;
+        }
+
+        private boolean isDone() {
+            return WorkflowStatus.CATEGORY_DONE.equals(category);
+        }
+    }
+
+    /**
+     * 重建某天结束时的任务状态。首个事件之前使用它的 fromCategory，之后依次应用
+     * toCategory；不能拿任务当前状态覆盖历史。每天最多记一次完成，且只有当天结束时
+     * 仍为 DONE 才计入，避免同日完成后重开制造虚假的完成量。
+     */
+    private TaskHistorySnapshot taskHistoryAt(List<TaskStatusEvent> events, LocalDate date) {
+        if (events.isEmpty()) {
+            return new TaskHistorySnapshot(null, null);
+        }
+
+        LocalDateTime cutoff = date.plusDays(1).atStartOfDay();
+        String category = events.get(0).getFromCategory();
+        TaskStatusEvent lastCompletion = null;
+        for (TaskStatusEvent event : events) {
+            if (!event.getCreatedAt().isBefore(cutoff)) {
+                break;
+            }
+            if (!WorkflowStatus.CATEGORY_DONE.equals(category)
+                    && WorkflowStatus.CATEGORY_DONE.equals(event.getToCategory())) {
+                lastCompletion = event;
+            }
+            category = event.getToCategory();
+        }
+        return new TaskHistorySnapshot(category, lastCompletion);
+    }
+
     @Override
     public BurndownResponse getSprintBurndown(String projectId, String sprintId) {
         Sprint sprint;
@@ -606,10 +644,24 @@ public class StatisticsServiceImpl implements StatisticsService {
         long totalDays = ChronoUnit.DAYS.between(startDate, endDate);
         if (totalDays <= 0) totalDays = 1;
 
-        // "已完成"按工作流分类判定（项目可自定义终态标签）
-        java.util.Set<String> doneCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
-                projectId, com.devflow.service.WorkflowService.TYPE_TASK,
-                com.devflow.entity.WorkflowStatus.CATEGORY_DONE));
+        // 一次取回本迭代全部任务的事件，再按任务和时间重建历史。
+        Map<String, List<TaskStatusEvent>> eventsByTask = new HashMap<>();
+        if (!sprintTasks.isEmpty()) {
+            List<String> taskIds = sprintTasks.stream().map(Task::getId).collect(Collectors.toList());
+            List<TaskStatusEvent> events = taskStatusEventMapper.selectList(
+                new LambdaQueryWrapper<TaskStatusEvent>()
+                    .eq(TaskStatusEvent::getProjectId, projectId)
+                    .in(TaskStatusEvent::getTaskId, taskIds)
+                    .orderByAsc(TaskStatusEvent::getTaskId)
+                    .orderByAsc(TaskStatusEvent::getCreatedAt)
+                    .orderByAsc(TaskStatusEvent::getId)
+            );
+            eventsByTask = events.stream().collect(Collectors.groupingBy(TaskStatusEvent::getTaskId));
+            eventsByTask.values().forEach(taskEvents -> taskEvents.sort(
+                Comparator.comparing(TaskStatusEvent::getCreatedAt)
+                    .thenComparing(TaskStatusEvent::getId)));
+        }
+
         // 计算每天的燃尽数据
         List<BurndownResponse.BurndownPoint> dataPoints = new ArrayList<>();
         LocalDate today = LocalDate.now();
@@ -621,37 +673,33 @@ public class StatisticsServiceImpl implements StatisticsService {
             // 理想剩余
             int idealRemaining = (int) (totalStoryPoints * (1.0 - (double) i / totalDays));
 
-            // 实际剩余（截止到该日期完成的任务）
-            final LocalDate currentDate = date;
-            // 用 completed_at（真正进入终态的时间），不能用 updated_at ——
-            // 任务完成后改标题/换负责人都会刷新 updated_at，历史曲线会被重画
-            int actualCompleted = sprintTasks.stream()
-                .filter(t -> doneCodes.contains(t.getStatus()))
-                .filter(t -> completionDate(t) != null && completionDate(t).isBefore(currentDate.plusDays(1)))
-                .mapToInt(t -> t.getStoryPoints() != null ? t.getStoryPoints() : 1)
-                .sum();
+            int actualCompleted = 0;
+            int completedToday = 0;
+            int completedTasksOnDate = 0;
+            for (Task task : sprintTasks) {
+                TaskHistorySnapshot snapshot = taskHistoryAt(
+                    eventsByTask.getOrDefault(task.getId(), Collections.emptyList()), date);
+                if (!snapshot.isDone()) {
+                    continue;
+                }
+
+                int points = task.getStoryPoints() != null ? task.getStoryPoints() : 1;
+                actualCompleted += points;
+                TaskStatusEvent completion = snapshot.lastCompletion;
+                if (completion != null && completion.getCreatedAt().toLocalDate().equals(date)) {
+                    completedToday += points;
+                    completedTasksOnDate++;
+                }
+            }
+            // 重开会让剩余故事点回升；当天完成量只统计进入 DONE，不做负数差分。
             int actualRemaining = Math.max(0, totalStoryPoints - actualCompleted);
-
-            // 当天完成
-            final LocalDate prevDate = date.minusDays(1);
-            int completedBefore = sprintTasks.stream()
-                .filter(t -> doneCodes.contains(t.getStatus()))
-                .filter(t -> completionDate(t) != null && completionDate(t).isBefore(prevDate.plusDays(1)))
-                .mapToInt(t -> t.getStoryPoints() != null ? t.getStoryPoints() : 1)
-                .sum();
-            int completedToday = actualCompleted - completedBefore;
-
-            long completedTasksOnDate = sprintTasks.stream()
-                .filter(t -> doneCodes.contains(t.getStatus()))
-                .filter(t -> completionDate(t) != null && completionDate(t).isEqual(date))
-                .count();
 
             dataPoints.add(BurndownResponse.BurndownPoint.builder()
                 .date(date.toString())
                 .idealRemaining(idealRemaining)
                 .actualRemaining(actualRemaining)
-                .completedPoints(Math.max(0, completedToday))
-                .completedTasks((int) completedTasksOnDate)
+                .completedPoints(completedToday)
+                .completedTasks(completedTasksOnDate)
                 .build());
         }
 
@@ -806,9 +854,8 @@ public class StatisticsServiceImpl implements StatisticsService {
     /**
      * 构建任务趋势数据（最近 N 天的新建数 / 完成数）。
      *
-     * 两次 GROUP BY 查询拿回 (项目, 日期) 与 (项目, 日期, 状态) 的计数，
-     * 再在内存里按项目自己的 DONE 分类归并。原实现把全部任务加载进内存
-     * 每一天过滤一遍 —— 14 天 × N 条任务。
+     * 两次 GROUP BY 查询拿回 (项目, 日期) 的新建数与进入 DONE 的事件数。
+     * 原实现把全部任务加载进内存每一天过滤一遍 —— 14 天 × N 条任务。
      */
     private List<EnterpriseStatsResponse.TrendPoint> buildTaskTrend(List<String> projectIds, int days) {
         List<EnterpriseStatsResponse.TrendPoint> trend = new ArrayList<>();
@@ -822,13 +869,8 @@ public class StatisticsServiceImpl implements StatisticsService {
 
         Map<String, Map<String, Integer>> completedByDate = new HashMap<>();
         for (Map<String, Object> row : statisticsAggregateMapper.taskCompletedPerDay(projectIds, days)) {
-            String date = asString(row.get("d"));
-            String pid = asString(row.get("projectId"));
-            String status = asString(row.get("status"));
-            if (doneCodesOf(pid).contains(status)) {
-                completedByDate.computeIfAbsent(date, k -> new HashMap<>())
-                        .merge(pid, asInt(row.get("n")), Integer::sum);
-            }
+            completedByDate.computeIfAbsent(asString(row.get("d")), k -> new HashMap<>())
+                    .merge(asString(row.get("projectId")), asInt(row.get("n")), Integer::sum);
         }
 
         for (int i = days - 1; i >= 0; i--) {

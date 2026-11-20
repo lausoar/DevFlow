@@ -87,15 +87,19 @@ public interface StatisticsAggregateMapper {
                                                 @Param("days") int days);
 
     /**
-     * 最近 N 天按 (项目, 日期, 状态) 统计完成情况。
-     * 用 completed_at 而不是 updated_at —— 后者改标题/换人也会刷新。
+     * 最近 N 天按 (项目, 事件日期) 统计进入 DONE 分类的次数。
+     * 事件保存了发生时的分类，不能用任务当前 status/completed_at 反推历史；
+     * DONE 分类内部的状态改名也不算一次新的完成。
      */
     @Select("<script>"
-            + "SELECT project_id AS projectId, DATE(completed_at) AS d, status AS status, COUNT(*) AS n FROM task "
-            + "WHERE deleted = 0 AND completed_at IS NOT NULL AND project_id IN "
+            + "SELECT e.project_id AS projectId, DATE(e.created_at) AS d, COUNT(*) AS n "
+            + "FROM task_status_event e "
+            + "WHERE e.to_category = 'DONE' "
+            + "AND (e.from_category IS NULL OR e.from_category != 'DONE') "
+            + "AND e.project_id IN "
             + "<foreach collection='projectIds' item='p' open='(' separator=',' close=')'>#{p}</foreach> "
-            + "AND completed_at &gt;= DATE_SUB(CURDATE(), INTERVAL #{days} DAY) "
-            + "GROUP BY project_id, DATE(completed_at), status"
+            + "AND e.created_at &gt;= DATE_SUB(CURDATE(), INTERVAL #{days} DAY) "
+            + "GROUP BY e.project_id, DATE(e.created_at)"
             + "</script>")
     List<Map<String, Object>> taskCompletedPerDay(@Param("projectIds") List<String> projectIds,
                                                   @Param("days") int days);

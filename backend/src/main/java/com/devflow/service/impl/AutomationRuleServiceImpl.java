@@ -13,6 +13,7 @@ import com.devflow.service.AutomationRuleService;
 import com.devflow.service.NotificationService;
 import com.devflow.service.PermissionService;
 import com.devflow.service.ProjectAccessService;
+import com.devflow.service.WorkflowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     private final NotificationService notificationService;
     private final PermissionService permissionService;
     private final ProjectAccessService projectAccessService;
+    private final WorkflowService workflowService;
 
     @Override
     public List<AutomationRule> listByProject(String projectId) {
@@ -155,19 +157,26 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                 return null;
             }
 
-            // 关键：必须回写数据库。此前只改内存对象，接口响应显示"已指派"而库里仍是 NEW/未指派。
+            // 只有默认 NEW 且工作流确实包含 ASSIGNED 时才做状态流转；
+            // 自定义初态及其他状态仅更新负责人，不能被自动化覆盖。
+            boolean moveToAssigned = "NEW".equals(bug.getStatus())
+                    && workflowService.statusCodes(projectId, WorkflowService.TYPE_BUG).contains("ASSIGNED");
             LambdaUpdateWrapper<com.devflow.entity.Bug> update =
                     new LambdaUpdateWrapper<com.devflow.entity.Bug>()
                             .eq(com.devflow.entity.Bug::getId, bug.getId())
                             .isNull(com.devflow.entity.Bug::getAssigneeId)
-                            .set(com.devflow.entity.Bug::getAssigneeId, rule.getAssignToUserId())
-                            .set(com.devflow.entity.Bug::getStatus, "ASSIGNED");
+                            .set(com.devflow.entity.Bug::getAssigneeId, rule.getAssignToUserId());
+            if (moveToAssigned) {
+                update.set(com.devflow.entity.Bug::getStatus, "ASSIGNED");
+            }
             int updated = bugMapper.update(null, update);
             if (updated == 0) {
                 return null; // 并发下已被别人指派，放弃
             }
             bug.setAssigneeId(rule.getAssignToUserId());
-            bug.setStatus("ASSIGNED");
+            if (moveToAssigned) {
+                bug.setStatus("ASSIGNED");
+            }
 
             notificationService.createNotification(
                     rule.getAssignToUserId(), "BUG_UPDATE",

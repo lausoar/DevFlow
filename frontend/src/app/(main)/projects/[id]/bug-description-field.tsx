@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { fileApi } from '@/lib/api/file';
 import { ImagePlus, Loader2 } from 'lucide-react';
@@ -25,21 +25,36 @@ export function BugDescriptionField({
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /** 在光标处插入文本（无光标时追加到末尾） */
+  useEffect(() => {
+    valueRef.current = value;
+    onChangeRef.current = onChange;
+  }, [value, onChange]);
+
+  const commitValue = (next: string) => {
+    // 同步更新 ref，下一次上传完成不必等待父组件重渲染即可看到最新文本。
+    valueRef.current = next;
+    onChangeRef.current(next);
+  };
+
+  /** 在光标处插入文本（无光标时追加到末尾），始终基于最新受控值。 */
   const insertAtCursor = (text: string) => {
     const el = textareaRef.current;
+    const currentValue = valueRef.current;
     if (!el) {
-      onChange(value + text);
+      commitValue(currentValue + text);
       return;
     }
-    const start = el.selectionStart ?? value.length;
-    const end = el.selectionEnd ?? start;
-    const next = value.slice(0, start) + text + value.slice(end);
-    onChange(next);
+    const start = Math.min(el.selectionStart ?? currentValue.length, currentValue.length);
+    const end = Math.min(el.selectionEnd ?? start, currentValue.length);
+    const next = currentValue.slice(0, start) + text + currentValue.slice(end);
+    commitValue(next);
     requestAnimationFrame(() => {
+      if (textareaRef.current !== el) return;
       el.focus();
       const pos = start + text.length;
       el.setSelectionRange(pos, pos);
@@ -107,7 +122,7 @@ export function BugDescriptionField({
       <textarea
         ref={textareaRef}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => commitValue(e.target.value)}
         onPaste={(e) => {
           // 剪贴板里有图片时拦截粘贴：自动上传并插入
           const files = Array.from(e.clipboardData?.files || []).filter((f) =>

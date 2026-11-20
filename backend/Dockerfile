@@ -29,13 +29,13 @@ COPY --from=build --chown=devflow:devflow /build/target/*.jar /app/app.jar
 
 ENV TZ=Asia/Shanghai \
     JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+UseG1GC -Dfile.encoding=UTF-8" \
-    SPRING_PROFILES_ACTIVE=prod
+    SPRING_PROFILES_ACTIVE=prod \
+    MANAGEMENT_PORT=9090
 
-EXPOSE 8080
+EXPOSE 8080 9090
 
-# 健康检查走 Spring Boot Actuator（默认未引入 actuator 时会失败，属预期：
-# 引入后即可用于 K8s liveness/readiness 与 compose healthcheck）
+# Actuator 监听独立管理端口，且不在 /api/v1 业务 context-path 下。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:8080/api/v1/actuator/health || exit 1
+    CMD wget -qO- "http://127.0.0.1:${MANAGEMENT_PORT:-9090}/actuator/health" || exit 1
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

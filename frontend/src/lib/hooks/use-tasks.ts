@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { taskApi } from '@/lib/api/task';
 import type { Task, PageQuery } from '@/types';
 
@@ -11,6 +11,22 @@ export function useTasks(projectId: string | null, params?: PageQuery) {
   return useQuery({
     queryKey: ['tasks', projectId, params],
     queryFn: () => taskApi.getByProject(projectId!, params),
+    enabled: !!projectId,
+  });
+}
+
+export type TaskListParams = Omit<PageQuery, 'page'> & { status?: string };
+
+/** 任务看板专用：按服务端分页元数据累积加载，筛选变化时自然回到第一页。 */
+export function useInfiniteTasks(projectId: string | null, params?: TaskListParams) {
+  return useInfiniteQuery({
+    queryKey: ['tasks', projectId, 'infinite', params],
+    queryFn: ({ pageParam }) => taskApi.getByProject(projectId!, { ...params, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => {
+      const result = lastPage.data;
+      return result.page < result.totalPages ? result.page + 1 : undefined;
+    },
     enabled: !!projectId,
   });
 }

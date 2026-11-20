@@ -51,6 +51,7 @@ public class TaskController {
     private final SprintMapper sprintMapper;
     private final AccessGuard guard;
     private final WorkflowService workflowService;
+    private final com.devflow.mapper.ProjectMapper projectMapper;
 
     /** 按项目获取任务列表（分页） */
     @Operation(summary = "获取项目的任务列表")
@@ -147,6 +148,7 @@ public class TaskController {
     /** 更新任务状态（仅 TODO/DOING/TESTING/DONE；只有真正流转到 DONE 才触发完成规则） */
     @Operation(summary = "更新任务状态")
     @PutMapping("/tasks/{id}/status")
+    @org.springframework.transaction.annotation.Transactional
     public R<Void> updateStatus(@PathVariable String id,
                                 @RequestBody Map<String, String> body,
                                 Authentication authentication) {
@@ -154,6 +156,9 @@ public class TaskController {
         TaskRef ref = requireTask(guard.userId(authentication), id);
         String projectId = ref.task().getProjectId();
         guard.requireProjectPermission(ref.userId(), projectId, PermissionCodes.TASK_MANAGE);
+        if (projectMapper.selectForUpdate(projectId) == null) {
+            throw new BusinessException(404, "项目不存在或已被删除");
+        }
 
         String from = ref.task().getStatus();
         // 状态取值与流转合法性都由项目工作流决定（不再硬编码四态白名单）

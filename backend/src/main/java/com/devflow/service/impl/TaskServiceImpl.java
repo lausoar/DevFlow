@@ -5,12 +5,15 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.devflow.entity.Task;
 import com.devflow.entity.TaskDependency;
+import com.devflow.entity.TaskStatusEvent;
 import com.devflow.mapper.TaskMapper;
+import com.devflow.mapper.TaskStatusEventMapper;
 import com.devflow.service.NotificationService;
 import com.devflow.service.TaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -32,6 +35,7 @@ public class TaskServiceImpl implements TaskService {
     private final com.devflow.service.SubscriptionService subscriptionService;
     private final com.devflow.service.NotificationRecipients notificationRecipients;
     private final com.devflow.mapper.TaskDependencyMapper taskDependencyMapper;
+    private final TaskStatusEventMapper taskStatusEventMapper;
 
     @Override
     public Page<Task> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
@@ -181,10 +185,14 @@ public class TaskServiceImpl implements TaskService {
     }
 
     @Override
+    @Transactional
     public void updateStatus(String id, String status, String operatorId) {
         Task task = taskMapper.selectById(id);
         if (task == null) return;
 
+        String previousStatus = task.getStatus();
+        String previousCategory = statusCategory(task.getProjectId(), previousStatus);
+        String nextCategory = statusCategory(task.getProjectId(), status);
         task.setStatus(status);
         // 完成时间只在"进入/离开 DONE 分类"时变，不能靠 updated_at 推断
         // （改标题、换负责人都会刷新 updated_at，历史燃尽曲线就被重画了）
@@ -199,6 +207,18 @@ public class TaskServiceImpl implements TaskService {
         if (statusRows == 0) {
             throw new com.devflow.common.exception.BusinessException(409,
                     "任务状态已被他人修改，请刷新后重试");
+        }
+        if (!java.util.Objects.equals(previousStatus, status)) {
+            TaskStatusEvent event = new TaskStatusEvent();
+            event.setTaskId(task.getId());
+            event.setProjectId(task.getProjectId());
+            event.setFromStatus(previousStatus);
+            event.setToStatus(status);
+            event.setFromCategory(previousCategory);
+            event.setToCategory(nextCategory);
+            event.setActorId(operatorId);
+            event.setCreatedAt(LocalDateTime.now());
+            taskStatusEventMapper.insert(event);
         }
 
         // 通知任务相关人员（报告人和被指派人）∪ 关注该任务的人
@@ -221,6 +241,14 @@ public class TaskServiceImpl implements TaskService {
             "任务 「" + task.getTitle() + "」 状态已更新为: " + statusLabel,
             "/projects/" + task.getProjectId() + "?tab=tasks"
         );
+    }
+
+    private String statusCategory(String projectId, String status) {
+        if (workflowService == null) {
+            return "DONE".equals(status) ? "DONE" : "TODO";
+        }
+        return workflowService.categoryOf(projectId,
+                com.devflow.service.WorkflowService.TYPE_TASK, status);
     }
 
     /** 是否属于该项目的 DONE 分类（项目可自定义终态标签） */

@@ -12,6 +12,10 @@ import java.util.List;
 @Mapper
 public interface TaskMapper extends BaseMapper<Task> {
 
+    /** 项目内仍在使用的状态码（工作流整体替换前校验）。 */
+    @Select("SELECT DISTINCT status FROM task WHERE project_id = #{projectId} AND status IS NOT NULL")
+    List<String> selectUsedStatusCodes(@Param("projectId") String projectId);
+
     /** 回收站：项目下已逻辑删除的记录（绕过 @TableLogic 过滤，需原生 SQL） */
     @Select("SELECT * FROM task WHERE project_id = #{projectId} AND deleted = 1 " +
             "ORDER BY deleted_at DESC, id DESC LIMIT 200")

@@ -17,6 +17,8 @@ public class Bug {
     private String title;
     private String description;
     private String projectId;
+    /** 通用更新也必须能显式写入 NULL，以便与其他字段共用一次乐观锁更新。 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String assigneeId;
     private String reporterId;
 

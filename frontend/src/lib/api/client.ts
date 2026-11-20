@@ -183,6 +183,17 @@ export async function request<T>(
     params,
   });
   const envelope = response as unknown as ApiResponse<T>;
+  const pageData = envelope.data as Record<string, unknown> | undefined;
+  if (pageData && typeof pageData.current === 'number'
+    && typeof pageData.size === 'number' && typeof pageData.pages === 'number') {
+    // MyBatis-Plus Page 的字段名与前端 PageResult 不同，统一在边界处映射。
+    envelope.data = {
+      ...pageData,
+      page: pageData.current,
+      pageSize: pageData.size,
+      totalPages: pageData.pages,
+    } as T;
+  }
   // 后端业务错误以 HTTP 200 + { code != 200 } 返回，必须显式转为异常，
   // 否则调用方的 catch 永远收不到（如"用户名或密码错误"）
   if (envelope && typeof envelope === 'object' && 'code' in envelope && envelope.code !== 200) {

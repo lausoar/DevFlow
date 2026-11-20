@@ -126,10 +126,7 @@ public class SprintController {
                 .eq(Sprint::getProjectId, sprint.getProjectId())
                 .eq(Sprint::getStatus, "ACTIVE"));
         for (Sprint running : otherActive) {
-            Sprint patch = new Sprint();
-            patch.setId(running.getId());
-            patch.setStatus("COMPLETED");
-            sprintMapper.updateById(patch);
+            completeAndMoveUnfinished(running);
         }
 
         sprint.setStatus("ACTIVE");
@@ -143,28 +140,33 @@ public class SprintController {
     @Transactional
     public R<Map<String, Object>> complete(@PathVariable String id, Authentication authentication) {
         Sprint sprint = requireManageable(id, authentication);
+        int movedOut = completeAndMoveUnfinished(sprint);
+        return R.ok(Map.of("sprint", sprint, "movedOut", movedOut));
+    }
+
+    /** 完成迭代并仅把非终态任务移回 backlog；自定义 DONE 状态留在原迭代。 */
+    private int completeAndMoveUnfinished(Sprint sprint) {
         sprint.setStatus("COMPLETED");
         sprintMapper.updateById(sprint);
 
-        // "完成"按工作流分类判定，自定义终态同样算完成
-        java.util.List<String> doneCodes = workflowService.statusCodesInCategory(
+        List<String> doneCodes = workflowService.statusCodesInCategory(
                 sprint.getProjectId(), com.devflow.service.WorkflowService.TYPE_TASK,
                 com.devflow.entity.WorkflowStatus.CATEGORY_DONE);
         LambdaQueryWrapper<Task> unfinishedWrapper = new LambdaQueryWrapper<Task>()
-                .eq(Task::getSprintId, id);
+                .eq(Task::getSprintId, sprint.getId());
         if (!doneCodes.isEmpty()) {
             unfinishedWrapper.notIn(Task::getStatus, doneCodes);
         }
         List<Task> unfinished = taskMapper.selectList(unfinishedWrapper);
         if (!unfinished.isEmpty()) {
             LambdaUpdateWrapper<Task> move = new LambdaUpdateWrapper<Task>()
-                    .eq(Task::getSprintId, id);
+                    .eq(Task::getSprintId, sprint.getId());
             if (!doneCodes.isEmpty()) {
                 move.notIn(Task::getStatus, doneCodes);
             }
             taskMapper.update(null, move.set(Task::getSprintId, null));
         }
-        return R.ok(Map.of("sprint", sprint, "movedOut", unfinished.size()));
+        return unfinished.size();
     }
 
     /** 删除 Sprint：未完成任务移出迭代后逻辑删除迭代 */

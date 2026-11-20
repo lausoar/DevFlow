@@ -30,8 +30,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * 安全口径（见 docs/AUDIT_REPORT_2026-11.md §A2）：
  * - CONNECT：token 缺失/无效直接拒绝连接，不存在"匿名连接"；
  * - SEND：必须有会话身份，且目标频道必须对当前用户可见（项目群按项目成员判定）；
- * - SUBSCRIBE：项目频道（/topic/channel.{id}）必须对当前用户可见，
- *   避免任意人订阅他人项目群实时窃听。
+ * - SUBSCRIBE：/topic/channel.{id} 与 /topic/chat.events.{id} 必须对当前用户可见，
+ *   /topic/presence.{enterpriseId} 必须属于当前用户企业，避免跨项目/跨租户窃听。
  */
 @Slf4j
 @Configuration
@@ -46,8 +46,12 @@ public class WebSocketAuthInterceptor implements WebSocketMessageBrokerConfigure
     private final com.devflow.service.TokenBlacklistService tokenBlacklistService;
     private final UserMapper userMapper;
 
-    /** 项目频道 topic 前缀：/topic/channel.{channelId} */
+    /** 项目频道消息与轻量事件 topic；两者使用同一个频道可见性判定。 */
     private static final String CHANNEL_TOPIC_PREFIX = "/topic/channel.";
+    private static final String CHAT_EVENTS_TOPIC = "/topic/chat.events";
+    private static final String CHAT_EVENTS_TOPIC_PREFIX = CHAT_EVENTS_TOPIC + ".";
+    private static final String PRESENCE_TOPIC = "/topic/presence";
+    private static final String PRESENCE_TOPIC_PREFIX = PRESENCE_TOPIC + ".";
 
     /** 会话 → userId 缓存（SEND/SUBSCRIBE 阶段 sessionAttributes 可能为空，用会话 ID 反查） */
     private final Map<String, String> sessionUsers = new ConcurrentHashMap<>();
@@ -154,24 +158,31 @@ public class WebSocketAuthInterceptor implements WebSocketMessageBrokerConfigure
 
     /** SEND：必须有会话身份，且只能向自己可见的项目频道发消息 */
     private void handleSend(StompHeaderAccessor accessor) {
-        String userId = requireSessionUser(accessor);
-        String destination = accessor.getDestination();
-        String channelId = channelIdOf(destination);
-        if (channelId != null && !canAccessChannel(userId, channelId)) {
-            throw new AccessDeniedException("无权向该频道发送消息");
-        }
+        String userId = requireSessionUser(accessor).getId();
+        requireChannelAccess(userId, accessor.getDestination(), "向该频道发送消息");
     }
 
-    /** SUBSCRIBE：项目频道需可见；个人队列 /user/** 天然按会话隔离 */
+    /** SUBSCRIBE：频道消息/轻量事件按项目授权，在线名单必须属于本企业。 */
     private void handleSubscribe(StompHeaderAccessor accessor) {
-        String userId = requireSessionUser(accessor);
-        String channelId = channelIdOf(accessor.getDestination());
-        if (channelId != null && !canAccessChannel(userId, channelId)) {
-            throw new AccessDeniedException("无权订阅该频道");
+        User user = requireSessionUser(accessor);
+        String destination = accessor.getDestination();
+        if (CHAT_EVENTS_TOPIC.equals(destination)) {
+            throw new AccessDeniedException("全局聊天事件订阅已禁用，请按频道订阅");
+        }
+        requireChannelAccess(user.getId(), destination, "订阅该频道");
+
+        if (PRESENCE_TOPIC.equals(destination)) {
+            throw new AccessDeniedException("在线名单必须按企业订阅");
+        }
+        if (destination != null && destination.startsWith(PRESENCE_TOPIC_PREFIX)) {
+            String enterpriseId = destination.substring(PRESENCE_TOPIC_PREFIX.length()).trim();
+            if (enterpriseId.isEmpty() || !enterpriseId.equals(user.getEnterpriseId())) {
+                throw new AccessDeniedException("无权订阅其他企业的在线名单");
+            }
         }
     }
 
-    private String requireSessionUser(StompHeaderAccessor accessor) {
+    private User requireSessionUser(StompHeaderAccessor accessor) {
         String sessionId = accessor.getSessionId();
         String userId = sessionId != null ? sessionUsers.get(sessionId) : null;
         String token = sessionId != null ? sessionTokens.get(sessionId) : null;
@@ -193,15 +204,32 @@ public class WebSocketAuthInterceptor implements WebSocketMessageBrokerConfigure
                 || JwtAuthFilter.sessionVersion(user) != jwtUtil.getSessionVersionFromToken(token)) {
             throw new AccessDeniedException("WebSocket 登录状态已失效");
         }
-        return userId;
+        return user;
     }
 
-    /** /topic/channel.{id} → id；其他目的地返回 null（不需要频道级校验） */
+    private void requireChannelAccess(String userId, String destination, String action) {
+        if (!isChannelDestination(destination)) {
+            return;
+        }
+        String channelId = channelIdOf(destination);
+        if (channelId == null || !canAccessChannel(userId, channelId)) {
+            throw new AccessDeniedException("无权" + action);
+        }
+    }
+
+    private boolean isChannelDestination(String destination) {
+        return destination != null && (destination.startsWith(CHANNEL_TOPIC_PREFIX)
+                || destination.startsWith(CHAT_EVENTS_TOPIC_PREFIX));
+    }
+
+    /** /topic/channel.{id} 与 /topic/chat.events.{id} → id；其他目的地返回 null。 */
     private String channelIdOf(String destination) {
-        if (destination == null || !destination.startsWith(CHANNEL_TOPIC_PREFIX)) {
+        if (!isChannelDestination(destination)) {
             return null;
         }
-        String id = destination.substring(CHANNEL_TOPIC_PREFIX.length()).trim();
+        String prefix = destination.startsWith(CHANNEL_TOPIC_PREFIX)
+                ? CHANNEL_TOPIC_PREFIX : CHAT_EVENTS_TOPIC_PREFIX;
+        String id = destination.substring(prefix.length()).trim();
         return id.isEmpty() ? null : id;
     }
 

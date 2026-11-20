@@ -41,6 +41,7 @@ class PermissionMatrixHttpTest {
 
     @BeforeAll
     static void loginAll() {
+        assumeBackendAvailable();
         adminToken = login("admin", "admin123");
         memberToken = login("member1_5c14", "DevFlow@2026");
         outsiderToken = login("dissolvetest", "test123456");
@@ -52,6 +53,20 @@ class PermissionMatrixHttpTest {
                 "跳过：缺少 member1_5c14 种子账号（需先用 verify-integration.sh 造数据）");
         org.junit.jupiter.api.Assumptions.assumeFalse(outsiderToken.isBlank(),
                 "跳过：缺少 dissolvetest 种子账号");
+    }
+
+    /** 仅把“本机端口未监听”视为跳过；登录后的鉴权/夹具错误仍原样失败。 */
+    private static void assumeBackendAvailable() {
+        URI base = URI.create(BASE);
+        boolean available;
+        try (var socket = new java.net.Socket()) {
+            socket.connect(new java.net.InetSocketAddress(base.getHost(), base.getPort()), 1000);
+            available = true;
+        } catch (java.io.IOException e) {
+            available = false;
+        }
+        org.junit.jupiter.api.Assumptions.assumeTrue(available,
+                "跳过：localhost:8080 未监听；需要直连后端时才运行权限矩阵 HTTP 测试");
     }
 
     private static String login(String u, String p) {
