@@ -133,6 +133,7 @@ public class DocumentIndexOutboxServiceImpl implements DocumentIndexOutboxServic
         document.setTitle(outbox.getTitle());
         document.setContent(outbox.getContent());
         document.setType(outbox.getDocType());
+        document.setVersion(outbox.getDocumentVersion());
         document.setUpdatedAt(outbox.getDocumentUpdatedAt());
         return document;
     }
@@ -162,6 +163,7 @@ public class DocumentIndexOutboxServiceImpl implements DocumentIndexOutboxServic
         outbox.setTitle(document.getTitle());
         outbox.setContent(document.getContent());
         outbox.setDocType(StringUtils.hasText(document.getType()) ? document.getType() : "DOC");
+        outbox.setDocumentVersion(document.getVersion() != null ? document.getVersion() : 0);
         outbox.setDocumentUpdatedAt(documentUpdatedAt);
         outbox.setStatus(PENDING);
         outbox.setAttempts(0);

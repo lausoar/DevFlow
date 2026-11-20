@@ -84,8 +84,11 @@ public class QueryController {
                 : Math.min(request.getPageSize(), (int) com.devflow.config.MyBatisPlusConfig.MAX_PAGE_SIZE);
 
         Page<?> result = switch (entity) {
-            case "BUG" -> bugMapper.selectPage(new Page<Bug>(page, pageSize),
-                    (QueryWrapper<Bug>) wrapper);
+            case "BUG" -> {
+                // 待确认的游客 Bug 不属于正式工作项，结构化查询同样排除
+                wrapper.eq("pending", 0);
+                yield bugMapper.selectPage(new Page<Bug>(page, pageSize), (QueryWrapper<Bug>) wrapper);
+            }
             case "REQUIREMENT" -> requirementMapper.selectPage(new Page<Requirement>(page, pageSize),
                     (QueryWrapper<Requirement>) wrapper);
             case "TASK" -> taskMapper.selectPage(new Page<Task>(page, pageSize),

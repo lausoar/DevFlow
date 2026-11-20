@@ -17,9 +17,11 @@ import com.devflow.service.AuditService;
 import com.devflow.service.GuestService;
 import com.devflow.service.PermissionService;
 import com.devflow.service.NotificationService;
+import com.devflow.service.TriageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
@@ -53,6 +55,7 @@ public class GuestServiceImpl implements GuestService {
     private final NotificationService notificationService;
     private final AuditService auditService;
     private final PermissionService permissionService;
+    private final TriageService triageService;
 
     private static final SecureRandom RANDOM = new SecureRandom();
     /** 单 token+IP 每小时提交上限 */
@@ -259,6 +262,7 @@ public class GuestServiceImpl implements GuestService {
     }
 
     @Override
+    @Transactional
     public Bug submitGuestBug(String token, String title, String description, String environment,
                               String nickname, String email, String ip) {
         ProjectGuest guest = resolveGuest(token);
@@ -281,13 +285,18 @@ public class GuestServiceImpl implements GuestService {
         bugMapper.insert(bug);
 
         rememberGuestContact(guest, nickname, email);
+        // 同时进入分诊收件箱：外部输入统一走"接受/拒绝/合并"，而不是直接混入列表
+        triageService.enqueue(guest.getProjectId(), com.devflow.entity.TriageItem.SOURCE_GUEST_BUG,
+                bug.getId(), bug.getTitle(), nickname.trim());
         notifyOwner(guest.getProjectId(), "游客提交了新 Bug 待确认",
-                "游客「" + nickname.trim() + "」提交了 Bug: " + title.trim(), "/projects/" + guest.getProjectId());
+                "游客「" + nickname.trim() + "」提交了 Bug: " + title.trim(),
+                "/projects/" + guest.getProjectId() + "?tab=triage");
         auditGuestSubmission(guest, "guest.bug.submit", bug.getId(), "游客「" + nickname.trim() + "」提交 Bug: " + title.trim());
         return bug;
     }
 
     @Override
+    @Transactional
     public ProjectFeedback submitGuestFeedback(String token, String type, String title, String content,
                                                String nickname, String email, String ip) {
         ProjectGuest guest = resolveGuest(token);
@@ -310,8 +319,11 @@ public class GuestServiceImpl implements GuestService {
         projectFeedbackMapper.insert(feedback);
 
         rememberGuestContact(guest, nickname, email);
+        triageService.enqueue(guest.getProjectId(), com.devflow.entity.TriageItem.SOURCE_GUEST_FEEDBACK,
+                feedback.getId(), feedback.getTitle(), nickname.trim());
         notifyOwner(guest.getProjectId(), "游客提交了新建议",
-                "游客「" + nickname.trim() + "」提交了建议: " + title.trim(), "/projects/" + guest.getProjectId());
+                "游客「" + nickname.trim() + "」提交了建议: " + title.trim(),
+                "/projects/" + guest.getProjectId() + "?tab=triage");
         auditGuestSubmission(guest, "guest.feedback.submit", feedback.getId(),
                 "游客「" + nickname.trim() + "」提交建议: " + title.trim());
         return feedback;

@@ -125,7 +125,7 @@ public class ProjectReleaseServiceImpl implements ProjectReleaseService {
         List<Task> tasks = taskMapper.selectList(
                 new LambdaQueryWrapper<Task>().eq(Task::getFixVersionId, releaseId));
         List<Bug> bugs = bugMapper.selectList(
-                new LambdaQueryWrapper<Bug>().eq(Bug::getFixVersionId, releaseId));
+                new LambdaQueryWrapper<Bug>().eq(Bug::getFixVersionId, releaseId).eq(Bug::getPending, 0));
 
         Set<String> doneTaskCodes = Set.copyOf(
                 workflowService.statusCodesInCategory(projectId, WorkflowService.TYPE_TASK, "DONE"));
@@ -222,7 +222,7 @@ public class ProjectReleaseServiceImpl implements ProjectReleaseService {
         List<Task> tasks = taskMapper.selectList(
                 new LambdaQueryWrapper<Task>().eq(Task::getFixVersionId, releaseId));
         List<Bug> bugs = bugMapper.selectList(
-                new LambdaQueryWrapper<Bug>().eq(Bug::getFixVersionId, releaseId));
+                new LambdaQueryWrapper<Bug>().eq(Bug::getFixVersionId, releaseId).eq(Bug::getPending, 0));
 
         Set<String> doneTaskCodes = Set.copyOf(
                 workflowService.statusCodesInCategory(projectId, WorkflowService.TYPE_TASK, "DONE"));

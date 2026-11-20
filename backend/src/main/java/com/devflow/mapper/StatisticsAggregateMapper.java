@@ -45,7 +45,7 @@ public interface StatisticsAggregateMapper {
     /** 按 (项目, 严重级别, 状态) 统计 Bug */
     @Select("<script>"
             + "SELECT project_id AS projectId, severity AS severity, status AS status, COUNT(*) AS n "
-            + "FROM bug WHERE deleted = 0 AND project_id IN "
+            + "FROM bug WHERE deleted = 0 AND pending = 0 AND project_id IN "
             + "<foreach collection='projectIds' item='p' open='(' separator=',' close=')'>#{p}</foreach> "
             + "GROUP BY project_id, severity, status"
             + "</script>")

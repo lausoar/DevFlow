@@ -22,6 +22,8 @@ class IndexDocumentRequest(BaseModel):
     doc_type: str = "doc"  # doc / wiki / report
     project_id: Optional[str] = None
     enterprise_id: Optional[str] = None
+    # 引用溯源：写入分片 metadata，前端据此判断来源是否已改版
+    version: Optional[int] = Field(default=None, ge=0)
     metadata: Optional[dict] = None
 
 

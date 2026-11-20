@@ -58,8 +58,21 @@ import { useAuthStore } from '@/stores/auth-store';
 import { BugDescriptionField } from './bug-description-field';
 import { RichDescription } from './rich-description';
 import { WalkthroughPanel } from './walkthrough-panel';
+import { DesignAssetPanel } from './design-asset-panel';
 import { CustomFieldsSection } from './custom-fields-section';
 import { useTasks } from '@/lib/hooks/use-tasks';
+import { SavedFiltersPanel } from './saved-filters-panel';
+import { RequirementScoreQuadrant } from './requirement-score-quadrant';
+import {
+  EMPTY_RICE,
+  RiceScoreBadge,
+  RiceScoreFields,
+  previewRiceScore,
+  riceDraftOf,
+  ricePayload,
+  type RiceDraft,
+} from './requirement-score-fields';
+import { queryApi } from '@/lib/api/query';
 import type { Requirement, RequirementStatus, Priority } from '@/types';
 
 // 列表分页大小
@@ -68,13 +81,28 @@ const PAGE_SIZE = 20;
 // ============================================
 // 需求标签页组件
 // ============================================
-export function RequirementsTab({ projectId }: { projectId: string }) {
+export function RequirementsTab({
+  projectId,
+  initialRequirementId,
+}: {
+  projectId: string;
+  /** 设计稿通知深链：打开后直接展示该需求详情 */
+  initialRequirementId?: string;
+}) {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  // 排序：默认按创建时间；按分数排时后端走 (project_id, rice_score) 索引
+  const [sortBy, setSortBy] = useState<string>('createdAt');
+  // 保存视图命中的需求 ID；非空时按 ID 过滤当前页数据
+  const [viewIds, setViewIds] = useState<Set<string> | null>(null);
+  const [viewLabel, setViewLabel] = useState('');
+  const [viewLoading, setViewLoading] = useState(false);
+  // 列表 / 四象限切换：象限图只看当前筛选结果，不额外请求
+  const [viewMode, setViewMode] = useState<'list' | 'quadrant'>('list');
   // 页码和它所属的筛选条件存一起：条件变了页码自动回 1，
   // 不需要 effect 回填（effect 版会先按旧页码发一次请求，再回第一页发第二次）
-  const filterKey = `${searchKeyword}|${priorityFilter}|${statusFilter}`;
+  const filterKey = `${searchKeyword}|${priorityFilter}|${statusFilter}|${sortBy}`;
   const [pageState, setPageState] = useState<{ key: string; page: number }>({ key: filterKey, page: 1 });
   const page = pageState.key === filterKey ? pageState.page : 1;
   const setPage = (updater: number | ((p: number) => number)) =>
@@ -83,10 +111,12 @@ export function RequirementsTab({ projectId }: { projectId: string }) {
       return { key: filterKey, page: typeof updater === 'function' ? updater(base) : updater };
     });
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(!!initialRequirementId);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   // 只存 ID，详情从最新列表派生：操作后弹窗能同步刷新，避免展示旧快照
-  const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
+  const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(
+    initialRequirementId ?? null,
+  );
   const [editingRequirementId, setEditingRequirementId] = useState<string | null>(null);
 
   // 获取需求列表
@@ -94,12 +124,17 @@ export function RequirementsTab({ projectId }: { projectId: string }) {
     keyword: searchKeyword || undefined,
     priority: priorityFilter || undefined,
     status: statusFilter || undefined,
+    sortBy: sortBy !== 'createdAt' ? sortBy : undefined,
+    sortOrder: 'desc',
     page,
     pageSize: PAGE_SIZE,
   });
 
-  const requirements = requirementsRes?.data?.records || [];
-  const total = requirementsRes?.data?.total || 0;
+  const allRequirements = requirementsRes?.data?.records || [];
+  const requirements = viewIds
+    ? allRequirements.filter((r) => viewIds.has(r.id))
+    : allRequirements;
+  const total = viewIds ? requirements.length : requirementsRes?.data?.total || 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const selectedRequirement = requirements.find((r) => r.id === selectedRequirementId) ?? null;
   const editingRequirement = requirements.find((r) => r.id === editingRequirementId) ?? null;
@@ -108,6 +143,33 @@ export function RequirementsTab({ projectId }: { projectId: string }) {
     setDetailDialogOpen(false);
     setEditingRequirementId(requirementId);
     setEditDialogOpen(true);
+  };
+
+  // 视图 = 一段结构化表达式；取齐所有命中项后按 ID 过滤，与任务看板同一套做法
+  const handleApplyView = async (expression: string) => {
+    setViewLoading(true);
+    try {
+      const pageSize = 200;
+      const first = await queryApi.run({
+        entity: 'REQUIREMENT',
+        expression,
+        projectId,
+        page: 1,
+        pageSize,
+      });
+      const records = [...(first.data.records || [])];
+      const totalPages = Math.max(1, Math.ceil(first.data.total / pageSize));
+      for (let p = 2; p <= totalPages; p += 1) {
+        const next = await queryApi.run({ entity: 'REQUIREMENT', expression, projectId, page: p, pageSize });
+        records.push(...(next.data.records || []));
+      }
+      setViewIds(new Set(records.map((r) => String((r as { id?: string }).id))));
+      setViewLabel(expression);
+    } catch (e) {
+      alert((e as { response?: { data?: { message?: string } } })?.response?.data?.message || '视图执行失败');
+    } finally {
+      setViewLoading(false);
+    }
   };
 
   return (
@@ -157,6 +219,38 @@ export function RequirementsTab({ projectId }: { projectId: string }) {
           </SelectContent>
         </Select>
 
+        {/* 排序：分数排序让"先做哪个"有据可依 */}
+        <Select value={sortBy} onValueChange={(v) => { if (v !== null) setSortBy(v); }}>
+          <SelectTrigger className="h-9 w-full sm:w-36" title="排序方式">
+            <SelectValue>
+              {sortBy === 'riceScore' ? '按 RICE 分数' : sortBy === 'effort' ? '按工作量' : '按创建时间'}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="createdAt">按创建时间</SelectItem>
+            <SelectItem value="riceScore">按 RICE 分数</SelectItem>
+            <SelectItem value="effort">按工作量</SelectItem>
+            <SelectItem value="priority">按优先级</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <SavedFiltersPanel projectId={projectId} entity="REQUIREMENT" onRun={handleApplyView} />
+
+        <div className="flex rounded-md border p-0.5">
+          <button
+            onClick={() => setViewMode('list')}
+            className={`rounded px-2 py-1 text-xs ${viewMode === 'list' ? 'bg-brand text-primary-foreground' : 'text-muted-foreground'}`}
+          >
+            列表
+          </button>
+          <button
+            onClick={() => setViewMode('quadrant')}
+            className={`rounded px-2 py-1 text-xs ${viewMode === 'quadrant' ? 'bg-brand text-primary-foreground' : 'text-muted-foreground'}`}
+          >
+            四象限
+          </button>
+        </div>
+
         {/* 新建按钮 */}
           <Button size="sm" className="w-full sm:w-auto" onClick={() => setCreateDialogOpen(true)}>
           <Plus className="mr-1.5 h-4 w-4" />
@@ -164,9 +258,35 @@ export function RequirementsTab({ projectId }: { projectId: string }) {
         </Button>
       </div>
 
-      {/* 需求列表 */}
+      {/* 当前视图提示：命中集合按 ID 过滤，清除后回到普通列表 */}
+      {viewIds && (
+        <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-1.5 text-xs sm:px-6">
+          <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">视图：</span>
+          {viewLoading ? (
+            <span className="text-muted-foreground">执行中...</span>
+          ) : (
+            <code className="truncate text-[11px]">{viewLabel}</code>
+          )}
+          <span className="ml-auto text-muted-foreground">命中 {requirements.length} 条</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 text-[11px]"
+            onClick={() => { setViewIds(null); setViewLabel(''); }}
+          >
+            <X className="h-3 w-3" /> 清除
+          </Button>
+        </div>
+      )}
+
+      {/* 需求列表 / 四象限 */}
       <div className="flex-1 overflow-auto">
-        {isLoading ? (
+        {viewMode === 'quadrant' ? (
+          <div className="p-4 sm:p-6">
+            <RequirementScoreQuadrant requirements={requirements} />
+          </div>
+        ) : isLoading ? (
           <div className="flex items-center justify-center h-40">
             <div className="text-sm text-muted-foreground">加载中...</div>
           </div>
@@ -290,6 +410,7 @@ function RequirementItem({
           <Badge variant="outline" className={priorityConfig.color}>
             {priorityConfig.label}
           </Badge>
+          <RiceScoreBadge score={requirement.riceScore} />
         </div>
         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
           <span>#{requirement.id.slice(-8)}</span>
@@ -350,6 +471,7 @@ function CreateRequirementDialog({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('MEDIUM');
   const [estimatedHours, setEstimatedHours] = useState('');
+  const [rice, setRice] = useState<RiceDraft>(EMPTY_RICE);
 
   const createRequirement = useCreateRequirement(projectId);
 
@@ -363,6 +485,7 @@ function CreateRequirementDialog({
         description: description.trim() || undefined,
         priority,
         estimatedHours: !isNaN(hours) ? hours : undefined,
+        ...ricePayload(rice),
       },
       {
         onSuccess: () => {
@@ -370,6 +493,7 @@ function CreateRequirementDialog({
           setDescription('');
           setPriority('MEDIUM');
           setEstimatedHours('');
+          setRice(EMPTY_RICE);
           onOpenChange(false);
         },
       }
@@ -431,6 +555,8 @@ function CreateRequirementDialog({
               />
             </div>
           </div>
+
+          <RiceScoreFields idPrefix="create-rice" value={rice} onChange={setRice} />
         </div>
 
         <DialogFooter>
@@ -452,6 +578,7 @@ function draftOf(r: Requirement | null) {
     description: r?.description ?? '',
     priority: (r?.priority ?? 'MEDIUM') as Priority,
     estimatedHours: r?.estimatedHours ? String(r.estimatedHours) : '',
+    rice: riceDraftOf(r),
   };
 }
 
@@ -475,9 +602,14 @@ function EditRequirementDialog({
   // 列表后台刷新不会打断正在输入的内容。走的是 React 官方的
   // "adjusting state when a prop changes" 模式，不需要 effect 回填。
   const dialogKey = `${requirement?.id ?? ''}|${open}`;
-  const [draft, setDraft] = useState<{ key: string; title: string; description: string; priority: Priority; estimatedHours: string }>(
-    () => ({ key: dialogKey, ...draftOf(requirement) }),
-  );
+  const [draft, setDraft] = useState<{
+    key: string;
+    title: string;
+    description: string;
+    priority: Priority;
+    estimatedHours: string;
+    rice: RiceDraft;
+  }>(() => ({ key: dialogKey, ...draftOf(requirement) }));
   const form = draft.key === dialogKey ? draft : { key: dialogKey, ...draftOf(requirement) };
   const setField = (patch: Partial<Omit<typeof form, 'key'>>) =>
     setDraft({ ...form, ...patch });
@@ -485,6 +617,7 @@ function EditRequirementDialog({
   const description = form.description;
   const priority = form.priority;
   const estimatedHours = form.estimatedHours;
+  const rice = form.rice;
 
   if (!requirement) return null;
 
@@ -500,6 +633,7 @@ function EditRequirementDialog({
           description: description.trim() || undefined,
           priority,
           estimatedHours: !isNaN(hours) ? hours : undefined,
+          ...ricePayload(rice),
         },
       },
       {
@@ -571,6 +705,16 @@ function EditRequirementDialog({
               />
             </div>
           </div>
+
+          <RiceScoreFields
+            idPrefix="edit-rice"
+            value={rice}
+            onChange={(next) => setField({ rice: next })}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            当前 RICE 分数：{previewRiceScore(rice) ?? requirement.riceScore ?? '未评分'}
+            {previewRiceScore(rice) !== null && ' （保存后生效）'}
+          </p>
         </div>
 
         <DialogFooter>
@@ -795,6 +939,13 @@ function RequirementDetailDialog({
             issueType="REQUIREMENT"
             issueId={effectiveRequirement.id}
             editable={canManageStatus}
+          />
+
+          {/* 设计稿（评审状态会影响"开发就绪"，只让可管理需求的人操作） */}
+          <DesignAssetPanel
+            requirementId={effectiveRequirement.id}
+            projectId={effectiveRequirement.projectId || projectId}
+            canManage={canManageStatus}
           />
 
           {/* UI 走查（只对参与需求管理的人可编辑） */}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +18,13 @@ import { MarkdownView } from '@/components/common/markdown-view';
 // ============================================
 export type DocSidePanel = 'preview' | 'versions' | 'comments';
 
+/** AI 引用跳转：原文区间 + 索引时的版本 */
+export interface CitationHighlight {
+  start?: number;
+  end?: number;
+  version?: number;
+}
+
 export function DocSidePanelView({
   mode,
   documentId,
@@ -25,6 +32,7 @@ export function DocSidePanelView({
   currentContent,
   onRestored,
   currentUserId,
+  citationHighlight,
 }: {
   mode: DocSidePanel;
   documentId: string;
@@ -33,6 +41,7 @@ export function DocSidePanelView({
   /** 恢复版本后回调（父组件刷新编辑器内容） */
   onRestored?: (title: string, content: string) => void;
   currentUserId?: string;
+  citationHighlight?: CitationHighlight;
 }) {
   if (mode === 'versions') {
     return <VersionsPanel documentId={documentId} currentTitle={currentTitle} currentContent={currentContent} onRestored={onRestored} />;
@@ -42,12 +51,59 @@ export function DocSidePanelView({
   }
   return (
     <>
-      <div className="border-b px-4 py-2 text-xs font-medium text-muted-foreground">预览</div>
+      <div className="flex items-center gap-2 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
+        预览
+        {citationHighlight?.start != null && (
+          <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning">
+            已定位引用片段
+          </span>
+        )}
+      </div>
       {/* 之前直接把 Markdown 字符串塞进 div，语法原样显示；现在真正渲染 */}
       <div className="p-4">
-        <MarkdownView content={currentContent} />
+        <CitationHighlightedContent content={currentContent} highlight={citationHighlight} />
       </div>
     </>
+  );
+}
+
+/**
+ * 引用回跳：按索引时的字符区间取出原文片段再渲染高亮。
+ * 不用区间直接在 Markdown 上做替换，避免把标记插进代码块或链接语法里。
+ */
+function CitationHighlightedContent({
+  content,
+  highlight,
+}: {
+  content: string;
+  highlight?: CitationHighlight;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const snippet = highlight?.start != null && highlight?.start >= 0
+    ? content.slice(highlight.start, highlight.end != null ? highlight.end : highlight.start + 400)
+    : '';
+
+  useEffect(() => {
+    if (!snippet) return;
+    // 渲染后滚动到高亮位置；找不到（版本已变）就停在顶部
+    const timer = setTimeout(() => {
+      ref.current?.querySelector('mark.citation-highlight')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [snippet]);
+
+  return (
+    <div ref={ref}>
+      {highlight?.version != null && (
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          引用基于 v{highlight.version} 生成，原文可能已更新
+        </p>
+      )}
+      <MarkdownView content={content} highlight={snippet || undefined} />
+    </div>
   );
 }
 

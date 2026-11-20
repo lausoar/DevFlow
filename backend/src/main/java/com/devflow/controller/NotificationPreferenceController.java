@@ -37,7 +37,11 @@ public class NotificationPreferenceController {
 
     /** 可配置的通知类型（与 NotificationServiceImpl 里的 type 对应） */
     private static final List<String> TYPES = List.of(
-            "COMMENT", "MENTION", "TASK_UPDATE", "BUG_UPDATE", "SPRINT_UPDATE", "SYSTEM", "AI");
+            "COMMENT", "MENTION", "TASK_UPDATE", "BUG_UPDATE", "SPRINT_UPDATE", "SYSTEM", "AI",
+            // 设计稿评审与变更：可单独静音，避免设计频繁改稿把其他通知淹没
+            "DESIGN_UPDATE",
+            // 分诊收件箱：外部提交与超时提醒
+            "TRIAGE", "GUEST_SUBMIT", "DEPLOY_APPROVAL");
 
     @Operation(summary = "我的通知偏好与免打扰设置")
     @GetMapping("/notification-preferences")

@@ -29,5 +29,8 @@ public class AiChatMessage {
     /** 生成该回复的模型（assistant 消息可选） */
     private String model;
 
+    /** RAG 引用来源（JSON 数组文本；非知识库回答为 null） */
+    private String sources;
+
     private LocalDateTime createdAt;
 }

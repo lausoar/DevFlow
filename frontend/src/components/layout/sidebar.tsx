@@ -19,6 +19,8 @@ import {
   Building2,
   FolderOpen,
   BarChart3,
+  Target,
+  Inbox,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -48,6 +50,11 @@ const navItems = [
     badgeKey: 'chat',
   },
   {
+    title: '收件箱',
+    href: '/inbox',
+    icon: Inbox,
+  },
+  {
     title: '通知',
     href: '/notifications',
     icon: Bell,
@@ -72,6 +79,11 @@ const navItems = [
     title: '报表',
     href: '/reports',
     icon: BarChart3,
+  },
+  {
+    title: '目标',
+    href: '/objectives',
+    icon: Target,
   },
   {
     title: '企业',

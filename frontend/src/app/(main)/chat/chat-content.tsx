@@ -23,6 +23,8 @@ import {
 } from '@/lib/hooks/use-chat-actions';
 import { MessageActions, ReactionBar, RecalledBubble } from './message-actions';
 import { chatApi } from '@/lib/api/chat';
+import { parseSources } from '@/lib/api/ai-history';
+import { AnswerWithCitations } from '@/components/common/answer-with-citations';
 import { useAuthStore } from '@/stores';
 import { usePresenceStore } from '@/stores/presence-store';
 import { useChatUnreadStore } from '@/stores/chat-unread-store';
@@ -981,6 +983,12 @@ function MessageContent({ message }: { message: ChatMessage }) {
     );
   }
 
-  // 纯文本消息直接展示
+  // 纯文本消息直接展示；AI 回复带引用来源时渲染角标与来源列表
+  if (message.sources) {
+    const sources = parseSources(message.sources);
+    if (sources.length > 0) {
+      return <AnswerWithCitations answer={message.content} sources={sources} />;
+    }
+  }
   return <>{message.content}</>;
 }

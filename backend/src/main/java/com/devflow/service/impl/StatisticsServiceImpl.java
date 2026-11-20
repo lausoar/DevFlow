@@ -303,7 +303,7 @@ public class StatisticsServiceImpl implements StatisticsService {
             new LambdaQueryWrapper<Task>().eq(Task::getProjectId, projectId)
         );
         List<Bug> bugs = bugMapper.selectList(
-            new LambdaQueryWrapper<Bug>().eq(Bug::getProjectId, projectId)
+            new LambdaQueryWrapper<Bug>().eq(Bug::getProjectId, projectId).eq(Bug::getPending, 0)
         );
         List<Requirement> requirements = requirementMapper.selectList(
             new LambdaQueryWrapper<Requirement>().eq(Requirement::getProjectId, projectId)

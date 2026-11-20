@@ -1,4 +1,5 @@
 import { request } from './client';
+import type { CitationSource } from './ai';
 
 // ============================================
 // AI 消息历史 API（Java 后端，按用户持久化）
@@ -12,6 +13,8 @@ export interface AiChatHistoryItem {
   kind: string;
   content: string;
   model?: string;
+  /** 引用来源（JSON 数组文本，仅知识库回答有值） */
+  sources?: string | null;
   createdAt: string;
 }
 
@@ -21,8 +24,13 @@ export const aiChatHistoryApi = {
     request<AiChatHistoryItem[]>('GET', '/ai/chat/history', undefined, { limit }),
 
   /** 保存一条 AI 消息 */
-  save: (data: { role: 'user' | 'assistant'; content: string; kind?: string; model?: string }) =>
-    request<AiChatHistoryItem>('POST', '/ai/chat/messages', data),
+  save: (data: {
+    role: 'user' | 'assistant';
+    content: string;
+    kind?: string;
+    model?: string;
+    sources?: string;
+  }) => request<AiChatHistoryItem>('POST', '/ai/chat/messages', data),
 
   /** 清空我的 AI 消息历史 */
   clear: () => request<void>('DELETE', '/ai/chat/history'),
@@ -44,7 +52,27 @@ export function persistAiMessage(
   role: 'user' | 'assistant',
   content: string,
   kind = 'CHAT',
-  model?: string
+  model?: string,
+  sources?: CitationSource[]
 ): void {
-  aiChatHistoryApi.save({ role, content, kind, model }).catch(() => {});
+  aiChatHistoryApi
+    .save({
+      role,
+      content,
+      kind,
+      model,
+      sources: sources && sources.length > 0 ? JSON.stringify(sources) : undefined,
+    })
+    .catch(() => {});
+}
+
+/** 历史里的 sources 是 JSON 文本；解析失败按无来源处理，不让坏数据影响渲染 */
+export function parseSources(raw?: string | null): CitationSource[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as CitationSource[]) : [];
+  } catch {
+    return [];
+  }
 }

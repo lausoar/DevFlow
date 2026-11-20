@@ -57,12 +57,14 @@ public class RequirementController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String priority,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String sortOrder,
             Authentication authentication) {
         if (!projectAccessService.canView((String) authentication.getPrincipal(), projectId)) {
             throw new BusinessException(404, "项目不存在或已被删除");
         }
         Page<RequirementResponse> result = requirementService.listRequirements(
-                projectId, status, priority, keyword, page, pageSize);
+                projectId, status, priority, keyword, page, pageSize, sortBy, sortOrder);
         return R.ok(result);
     }
 
@@ -130,7 +132,7 @@ public class RequirementController {
     @org.springframework.transaction.annotation.Transactional
     public R<Requirement> update(
             @PathVariable String id,
-            @RequestBody UpdateRequirementRequest request,
+            @Valid @RequestBody UpdateRequirementRequest request,
             Authentication authentication) {
 
         String userId = guard.userId(authentication);

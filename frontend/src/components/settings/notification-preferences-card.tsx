@@ -39,6 +39,10 @@ export function NotificationPreferencesCard() {
     SPRINT_UPDATE: '迭代变更',
     SYSTEM: '系统消息',
     AI: 'AI 助手',
+    DESIGN_UPDATE: '设计稿变更',
+    TRIAGE: '分诊待处理',
+    GUEST_SUBMIT: '外部提交',
+    DEPLOY_APPROVAL: '部署审批',
   };
 
   const toggleType = async (type: string, enabled: boolean) => {

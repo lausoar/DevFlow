@@ -2,27 +2,44 @@
 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { rehypeCitations, rehypeHighlightFirst, type CitationLink } from '@/lib/markdown/rehype-text';
 
 /**
  * 统一的 Markdown 渲染组件。
  *
  * 安全前提：禁用原始 HTML（react-markdown 默认不渲染 raw HTML），
  * 链接一律 noopener/noreferrer、图片走 CSS 限宽，避免文档内容引入脚本或撑破布局。
+ *
+ * 应答场景额外支持：
+ *  - citations：把 [n] 渲染为可点击来源角标；
+ *  - highlight：渲染后高亮指定原文片段（来自 RAG 引用回跳）。
  */
 export function MarkdownView({
   content,
   className,
+  citations,
+  highlight,
 }: {
   content: string;
   className?: string;
+  citations?: Record<number, CitationLink>;
+  highlight?: string | null;
 }) {
   if (!content || !content.trim()) {
     return <p className="text-[13px] text-ink-subtle">（空）</p>;
+  }
+  const rehypePlugins = [] as Array<ReturnType<typeof rehypeHighlightFirst>>;
+  if (citations && Object.keys(citations).length > 0) {
+    rehypePlugins.push(rehypeCitations(citations));
+  }
+  if (highlight) {
+    rehypePlugins.push(rehypeHighlightFirst(highlight));
   }
   return (
     <div className={`markdown-body text-sm leading-relaxed ${className ?? ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={rehypePlugins}
         components={{
           h1: ({ children }) => <h1 className="mb-3 mt-5 text-xl font-bold first:mt-0">{children}</h1>,
           h2: ({ children }) => <h2 className="mb-2 mt-5 text-lg font-semibold first:mt-0">{children}</h2>,
@@ -49,21 +66,38 @@ export function MarkdownView({
           pre: ({ children }) => (
             <pre className="my-3 overflow-x-auto rounded-lg bg-muted p-3 text-xs">{children}</pre>
           ),
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-brand underline underline-offset-2"
-            >
-              {children}
-            </a>
-          ),
+          a: ({ href, children, className: linkClass }) => {
+            // 引用角标是站内锚点，不新开窗口
+            if (linkClass?.includes('citation-marker')) {
+              return (
+                <a
+                  href={href}
+                  title={href}
+                  className="mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-brand/10 px-1 align-super text-[10px] font-medium text-brand no-underline hover:bg-brand/20"
+                >
+                  {children}
+                </a>
+              );
+            }
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-brand underline underline-offset-2"
+              >
+                {children}
+              </a>
+            );
+          },
           img: ({ src, alt }) => (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={typeof src === 'string' ? src : undefined} alt={alt || ''} className="my-3 max-w-full rounded-lg" />
           ),
           hr: () => <hr className="my-4 border-hairline" />,
+          mark: ({ children }) => (
+            <mark className="rounded bg-warning/25 px-0.5 text-foreground">{children}</mark>
+          ),
           table: ({ children }) => (
             <div className="my-3 overflow-x-auto">
               <table className="w-full border-collapse text-xs">{children}</table>

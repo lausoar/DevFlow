@@ -19,6 +19,9 @@ export const requirementApi = {
     status?: string;
     priority?: string;
     keyword?: string;
+    /** 排序字段：createdAt（默认）/ priority / riceScore / effort / estimatedHours */
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
   }) =>
     request<PageResult<Requirement>>('GET', `/projects/${projectId}/requirements`, undefined, params as Record<string, unknown>),
 

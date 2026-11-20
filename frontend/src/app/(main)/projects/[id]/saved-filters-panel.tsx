@@ -24,6 +24,19 @@ const EXAMPLES = [
   'title ~ 登录 AND status != DONE',
 ];
 
+/** 字段说明按查询对象给出：白名单本身就是按对象区分的，写全反而会误导 */
+const FIELD_HINTS: Record<string, string> = {
+  TASK: 'status / priority / assignee / reporter / sprint / fixVersion / title / dueDate / createdAt / updatedAt',
+  BUG: 'status / priority / severity / assignee / reporter / fixVersion / title / createdAt / updatedAt',
+  REQUIREMENT: 'status / priority / assignee / fixVersion / title / createdAt / updatedAt / score / reach / impact / confidence / effort',
+};
+
+const EXAMPLES_BY_ENTITY: Record<string, string[]> = {
+  TASK: EXAMPLES,
+  BUG: ['status != CLOSED AND priority = HIGH', 'severity IN (BLOCKER, CRITICAL)', 'assignee = currentUser()'],
+  REQUIREMENT: ['score >= 20', 'effort <= 5 AND priority = HIGH', 'status = OPEN AND assignee = currentUser()'],
+};
+
 export function SavedFiltersPanel({
   projectId,
   entity = 'TASK',
@@ -145,7 +158,7 @@ export function SavedFiltersPanel({
                 className="h-8 font-mono text-xs"
               />
               <div className="flex flex-wrap gap-1">
-                {EXAMPLES.map((ex) => (
+                {(EXAMPLES_BY_ENTITY[entity] ?? EXAMPLES).map((ex) => (
                   <button
                     key={ex}
                     onClick={() => setExpression(ex)}
@@ -156,8 +169,8 @@ export function SavedFiltersPanel({
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground">
-                支持字段：status / priority / assignee / reporter / sprint / fixVersion / title /
-                dueDate / createdAt / updatedAt；函数 currentUser()、today()、startOfWeek()、endOfWeek()、startOfMonth()、endOfMonth()
+                支持字段：{FIELD_HINTS[entity] ?? FIELD_HINTS.TASK}；
+                函数 currentUser()、today()、startOfWeek()、endOfWeek()、startOfMonth()、endOfMonth()
               </p>
               <div className="flex gap-2">
                 <Button

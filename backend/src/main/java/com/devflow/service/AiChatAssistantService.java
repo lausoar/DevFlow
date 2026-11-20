@@ -39,6 +39,9 @@ public class AiChatAssistantService {
     private static final Pattern AI_MENTION =
             Pattern.compile("(?i)(^|\\s)@(ai助手|ai 助手|ai)\\b");
 
+    /** 单条消息最多保留的引用来源数 */
+    private static final int MAX_SOURCES = 20;
+
     private final ChatMessageMapper messageMapper;
     private final UserMapper userMapper;
     private final com.devflow.mapper.ChatChannelMapper channelMapper;
@@ -96,16 +99,18 @@ public class AiChatAssistantService {
      */
     @Async("aiExecutor")
     public void replyToChannel(String channelId, String question) {
-        String answer = askAi(question, channelId);
+        AiAnswer answer = askAi(question, channelId);
         try {
             User aiUser = ensureAiUser();
             ChatMessage reply = new ChatMessage();
             reply.setChannelId(channelId);
             reply.setSenderId(aiUser.getId());
-            reply.setContent(answer);
+            reply.setContent(answer.content());
             reply.setType("TEXT");
             reply.setIsEdited(0);
             reply.setIsDeleted(0);
+            // 引用来源随消息持久化，历史消息里也能核对出处
+            reply.setSources(answer.sourcesJson());
             messageMapper.insert(reply);
 
             // 广播时带上发送者信息，与历史消息联表查询的返回结构一致
@@ -117,8 +122,12 @@ public class AiChatAssistantService {
         }
     }
 
+    /** 答案正文 + 引用来源 JSON（无来源时为 null，避免大量空数组） */
+    private record AiAnswer(String content, String sourcesJson) {
+    }
+
     /** RAG 问答优先，知识库未命中或调用失败时降级为普通对话 */
-    private String askAi(String question) {
+    private AiAnswer askAi(String question) {
         return askAi(question, null);
     }
 
@@ -127,7 +136,7 @@ public class AiChatAssistantService {
      * 频道属于某个项目时把 project_id / enterprise_id 传给 AI 服务，
      * 否则 AI 侧无法做隔离会直接拒绝（宁可降级也不跨项目检索）。
      */
-    private String askAi(String question, String channelId) {
+    private AiAnswer askAi(String question, String channelId) {
         Map<String, Object> ragBody = new java.util.HashMap<>();
         ragBody.put("question", question);
         ragBody.put("top_k", 4);
@@ -140,7 +149,7 @@ public class AiChatAssistantService {
         }
         if (scope.projectId() == null && scope.enterpriseId() == null) {
             // 无范围可检索：直接走普通对话，避免把全平台知识库暴露给无归属频道
-            return plainChat(question);
+            return new AiAnswer(plainChat(question), null);
         }
         try {
             String raw = restClient.post()
@@ -151,14 +160,32 @@ public class AiChatAssistantService {
                     .retrieve()
                     .body(String.class);
             JsonNode node = objectMapper.readTree(raw);
-            boolean hasSources = node.path("sources").isArray() && !node.path("sources").isEmpty();
-            if (hasSources) {
-                return node.path("answer").asText("");
+            JsonNode sources = node.path("sources");
+            if (sources.isArray() && !sources.isEmpty()) {
+                return new AiAnswer(node.path("answer").asText(""),
+                        limitSourcesJson(sources));
             }
         } catch (Exception e) {
             log.info("RAG 问答不可用，降级为普通对话: {}", e.getMessage());
         }
-        return plainChat(question);
+        return new AiAnswer(plainChat(question), null);
+    }
+
+    /** 来源最多保留 20 条；超出说明检索配置异常，截断防止单条消息过大。 */
+    private String limitSourcesJson(JsonNode sources) {
+        try {
+            if (sources.size() <= MAX_SOURCES) {
+                return objectMapper.writeValueAsString(sources);
+            }
+            var trimmed = objectMapper.createArrayNode();
+            for (int i = 0; i < MAX_SOURCES; i++) {
+                trimmed.add(sources.get(i));
+            }
+            return objectMapper.writeValueAsString(trimmed);
+        } catch (Exception e) {
+            log.debug("引用来源序列化失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     /** 普通对话兜底（不带知识库上下文） */

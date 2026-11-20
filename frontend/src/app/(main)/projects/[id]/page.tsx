@@ -16,6 +16,7 @@ const TABS = new Set([
   'tasks',
   'bugs',
   'feedback',
+  'triage',
   'testing',
   'releases',
   'deployments',
@@ -29,14 +30,18 @@ export default async function ProjectDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; requirement?: string }>;
 }) {
   const { id } = await params;
-  const { tab } = await searchParams;
+  const { tab, requirement } = await searchParams;
 
   return (
     <MainLayout>
-      <ProjectDetailContent projectId={id} initialTab={TABS.has(tab || '') ? tab : undefined} />
+      <ProjectDetailContent
+        projectId={id}
+        initialTab={TABS.has(tab || '') ? tab : undefined}
+        initialRequirementId={requirement}
+      />
     </MainLayout>
   );
 }

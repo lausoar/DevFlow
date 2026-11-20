@@ -17,6 +17,8 @@ export function useRequirements(
     status?: string;
     priority?: string;
     keyword?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
   }
 ) {
   return useQuery({

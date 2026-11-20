@@ -44,6 +44,12 @@ public class Project {
     /** 所属项目集（program.id，可空） */
     private String programId;
 
+    /** 所属目标（objective.id，可空） */
+    private String objectiveId;
+
+    /** 分诊首次响应时限（小时；空或 0 = 不限时） */
+    private Integer triageSlaHours;
+
     /** 状态: ACTIVE / ARCHIVED / PLANNING */
     private String status;
 

@@ -21,7 +21,7 @@ public interface ChatMessageMapper extends BaseMapper<ChatMessage> {
      * 返回后由调用方反转为升序渲染。
      */
     @Select("SELECT m.id, m.channel_id, m.sender_id, m.content, m.type, " +
-            "m.reply_to_id, m.is_edited, m.is_deleted, m.created_at, " +
+            "m.reply_to_id, m.is_edited, m.is_deleted, m.created_at, m.sources, " +
             "COALESCE(NULLIF(u.real_name, ''), u.username) AS sender_name, u.avatar AS sender_avatar " +
             "FROM chat_message m " +
             "LEFT JOIN sys_user u ON m.sender_id = u.id " +

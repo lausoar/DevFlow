@@ -17,6 +17,9 @@ import {
   Zap,
   Info,
   Bot,
+  Palette,
+  Inbox,
+  Rocket,
   Loader2,
 } from 'lucide-react';
 import type { Notification, NotificationType } from '@/types';
@@ -34,6 +37,10 @@ const TYPE_CONFIG: Record<NotificationType, { label: string; icon: React.ReactNo
   SPRINT_UPDATE: { label: '迭代', icon: <Zap className="h-3.5 w-3.5" />, color: 'text-warning' },
   SYSTEM: { label: '系统', icon: <Info className="h-3.5 w-3.5" />, color: 'text-ink-tertiary' },
   AI: { label: 'AI', icon: <Bot className="h-3.5 w-3.5" />, color: 'text-info' },
+  DESIGN_UPDATE: { label: '设计', icon: <Palette className="h-3.5 w-3.5" />, color: 'text-purple-500' },
+  TRIAGE: { label: '分诊', icon: <Inbox className="h-3.5 w-3.5" />, color: 'text-warning' },
+  GUEST_SUBMIT: { label: '外部提交', icon: <Inbox className="h-3.5 w-3.5" />, color: 'text-info' },
+  DEPLOY_APPROVAL: { label: '部署审批', icon: <Rocket className="h-3.5 w-3.5" />, color: 'text-brand' },
 };
 
 // ============================================

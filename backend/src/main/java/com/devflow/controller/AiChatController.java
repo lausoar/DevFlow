@@ -4,6 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.devflow.common.result.R;
 import com.devflow.entity.AiChatMessage;
 import com.devflow.mapper.AiChatMessageMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +27,11 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AiChatController {
 
+    /** 单条消息最多保留的引用来源数 */
+    private static final int MAX_SOURCES = 20;
+
     private final AiChatMessageMapper messageMapper;
+    private final ObjectMapper objectMapper;
 
     @Operation(summary = "获取我的 AI 消息历史（时间正序，最近 limit 条）")
     @GetMapping("/history")
@@ -61,8 +69,65 @@ public class AiChatController {
         if (message.getContent().length() > 20000) {
             message.setContent(message.getContent().substring(0, 20000));
         }
+        message.setSources(sanitizeSources(message.getSources()));
         messageMapper.insert(message);
         return R.ok(message);
+    }
+
+    /**
+     * 来源是客户端回传的展示数据，按最大值重建而不是原样落库：
+     * 丢失/非法 JSON 直接置空，条目与章节文本均有上限。
+     */
+    private String sanitizeSources(String sources) {
+        if (sources == null || sources.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode parsed = objectMapper.readTree(sources);
+            if (!parsed.isArray()) {
+                return null;
+            }
+            ArrayNode sanitized = objectMapper.createArrayNode();
+            int count = 0;
+            for (JsonNode item : parsed) {
+                if (count++ >= MAX_SOURCES) {
+                    break;
+                }
+                String title = truncate(item.path("title").asText(""), 300);
+                String content = truncate(item.path("content").asText(""), 500);
+                ObjectNode entry = sanitized.addObject();
+                entry.put("index", item.path("index").asInt(count));
+                entry.put("title", title);
+                entry.put("doc_id", truncate(item.path("doc_id").asText(""), 64));
+                entry.put("doc_type", truncate(item.path("doc_type").asText(""), 20));
+                entry.put("content", content);
+                if (item.hasNonNull("chunk_index")) {
+                    entry.put("chunk_index", item.path("chunk_index").asInt());
+                }
+                if (item.hasNonNull("char_start")) {
+                    entry.put("char_start", item.path("char_start").asInt());
+                }
+                if (item.hasNonNull("char_end")) {
+                    entry.put("char_end", item.path("char_end").asInt());
+                }
+                if (item.hasNonNull("document_version")) {
+                    entry.put("document_version", item.path("document_version").asInt());
+                }
+                if (item.hasNonNull("score")) {
+                    entry.put("score", item.path("score").asDouble());
+                }
+            }
+            return sanitized.isEmpty() ? null : objectMapper.writeValueAsString(sanitized);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String truncate(String value, int limit) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= limit ? value : value.substring(0, limit);
     }
 
     @Operation(summary = "清空我的 AI 消息历史")

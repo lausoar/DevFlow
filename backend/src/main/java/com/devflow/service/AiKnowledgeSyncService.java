@@ -75,6 +75,10 @@ public class AiKnowledgeSyncService {
         body.put("title", doc.getTitle());
         body.put("content", doc.getContent());
         body.put("doc_type", doc.getType() != null ? doc.getType().toLowerCase() : "doc");
+        if (doc.getVersion() != null) {
+            // 引用溯源：来源要能判断“答案基于哪一版”，改版后前端可提示原文已更新
+            body.put("version", doc.getVersion());
+        }
         if (StringUtils.hasText(doc.getProjectId())) {
             body.put("project_id", doc.getProjectId());
         }

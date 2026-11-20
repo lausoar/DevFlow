@@ -9,7 +9,9 @@ import com.devflow.entity.AutomationRule;
 import com.devflow.entity.User;
 import com.devflow.mapper.AutomationRuleMapper;
 import com.devflow.mapper.UserMapper;
+import com.devflow.service.AutomationMessage;
 import com.devflow.service.AutomationRuleService;
+import com.devflow.service.DesignAssetService;
 import com.devflow.service.NotificationService;
 import com.devflow.service.PermissionService;
 import com.devflow.service.ProjectAccessService;
@@ -58,6 +60,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         if (rule.getEnabled() == null) {
             rule.setEnabled(1);
         }
+        validateTrigger(rule);
         validateTargets(rule);
         automationRuleMapper.insert(rule);
         return rule;
@@ -86,6 +89,7 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         if (updates.getEnabled() != null) {
             existing.setEnabled(updates.getEnabled());
         }
+        validateTrigger(existing);
         validateTargets(existing);
         automationRuleMapper.updateById(existing);
         return existing;
@@ -104,6 +108,12 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
     @Override
     public int fire(String triggerType, String projectId, String objectId,
                     String objectTitle, String creatorId) {
+        return fire(triggerType, projectId, objectId, objectTitle, creatorId, null);
+    }
+
+    @Override
+    public int fire(String triggerType, String projectId, String objectId,
+                    String objectTitle, String creatorId, AutomationMessage message) {
         try {
             List<AutomationRule> rules = automationRuleMapper.selectList(
                     new LambdaQueryWrapper<AutomationRule>()
@@ -122,11 +132,20 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
                 // 通知
                 if (StringUtils.hasText(rule.getNotifyUserId())
                         && !rule.getNotifyUserId().equals(creatorId)) {
+                    String title = message != null && StringUtils.hasText(message.title())
+                            ? message.title()
+                            : "自动化: " + triggerType;
+                    String content = message != null && StringUtils.hasText(message.content())
+                            ? message.content()
+                            : "规则「" + rule.getName() + "」触发：" + objectTitle;
+                    String actionUrl = message != null && StringUtils.hasText(message.actionUrl())
+                            ? message.actionUrl()
+                            : "/projects/" + projectId;
                     notificationService.createNotification(
                             rule.getNotifyUserId(), "SYSTEM",
-                            "自动化: " + triggerType,
-                            "规则「" + rule.getName() + "」触发：" + objectTitle,
-                            "/projects/" + projectId);
+                            title,
+                            content,
+                            actionUrl);
                     handled++;
                 }
             }
@@ -202,6 +221,20 @@ public class AutomationRuleServiceImpl implements AutomationRuleService {
         }
         if (!permissionService.hasProjectPermission(userId, projectId, PermissionCodes.TESTCASE_MANAGE)) {
             throw new BusinessException(403, "仅测试人员或项目管理员可管理自动化规则");
+        }
+    }
+
+    /**
+     * 触发器白名单。之前可写入任意字符串，规则永久静默且无任何提示；
+     * 设计稿事件也走同一入口，因此必须在这里登记。
+     */
+    private static final java.util.Set<String> TRIGGERS = java.util.Set.of(
+            "BUG_CREATED", "BUG_FAIL", "CASE_FAIL", "TASK_DONE",
+            DesignAssetService.TRIGGER_DESIGN_CHANGED, DesignAssetService.TRIGGER_DESIGN_APPROVED);
+
+    private void validateTrigger(AutomationRule rule) {
+        if (!StringUtils.hasText(rule.getTriggerType()) || !TRIGGERS.contains(rule.getTriggerType())) {
+            throw new BusinessException(400, "不支持的触发器: " + rule.getTriggerType());
         }
     }
 

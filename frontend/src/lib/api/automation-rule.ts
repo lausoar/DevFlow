@@ -9,7 +9,14 @@ export interface AutomationRuleInfo {
   id: string;
   projectId: string;
   name: string;
-  triggerType: 'BUG_CREATED' | 'BUG_FAIL' | 'CASE_FAIL' | 'TASK_DONE';
+  triggerType:
+    | 'BUG_CREATED'
+    | 'BUG_FAIL'
+    | 'CASE_FAIL'
+    | 'TASK_DONE'
+    // 设计稿评审：改稿/打回 → DESIGN_CHANGED；主稿通过 → DESIGN_APPROVED
+    | 'DESIGN_CHANGED'
+    | 'DESIGN_APPROVED';
   assignToUserId?: string;
   notifyUserId?: string;
   enabled: number;

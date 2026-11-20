@@ -37,24 +37,48 @@ public class QueryExpressionParser {
     public record ParsedQuery(List<Condition> andConditions, List<Condition> orConditions) {
     }
 
-    /** 允许查询的字段 → 列名（白名单，禁止任意列） */
-    private static final Map<String, String> FIELD_COLUMNS = Map.ofEntries(
+    /**
+     * 允许查询的字段 → 列名。
+     *
+     * 按查询对象分别维护：三种工作项的列并不相同（requirement 没有 reporter_id /
+     * sprint_id，bug 没有 sprint_id，task 没有 severity）。用一份全局白名单会让
+     * REQUIREMENT 的合法表达式生成引用不存在列的 SQL，直接把 400 变成 500。
+     */
+    private static final Map<String, String> COMMON_COLUMNS = Map.ofEntries(
             Map.entry("status", "status"),
             Map.entry("priority", "priority"),
             Map.entry("assignee", "assignee_id"),
             Map.entry("assigneeId", "assignee_id"),
-            Map.entry("reporter", "reporter_id"),
-            Map.entry("sprint", "sprint_id"),
-            Map.entry("sprintId", "sprint_id"),
             Map.entry("fixVersion", "fix_version_id"),
             Map.entry("title", "title"),
             Map.entry("keyword", "title"),
             Map.entry("createdAt", "created_at"),
             Map.entry("updatedAt", "updated_at"),
-            Map.entry("dueDate", "due_date"),
-            Map.entry("severity", "severity"),
-            Map.entry("type", "type"),
             Map.entry("project", "project_id"));
+
+    private static final Map<String, Map<String, String>> ENTITY_COLUMNS = Map.of(
+            "TASK", merge(COMMON_COLUMNS, Map.ofEntries(
+                    Map.entry("reporter", "reporter_id"),
+                    Map.entry("sprint", "sprint_id"),
+                    Map.entry("sprintId", "sprint_id"),
+                    Map.entry("dueDate", "due_date"))),
+            "BUG", merge(COMMON_COLUMNS, Map.ofEntries(
+                    Map.entry("reporter", "reporter_id"),
+                    Map.entry("severity", "severity"))),
+            "REQUIREMENT", merge(COMMON_COLUMNS, Map.ofEntries(
+                    // RICE 评分：分数是生成列，可按价值筛选与排序
+                    Map.entry("score", "rice_score"),
+                    Map.entry("riceScore", "rice_score"),
+                    Map.entry("reach", "reach"),
+                    Map.entry("impact", "impact"),
+                    Map.entry("confidence", "confidence"),
+                    Map.entry("effort", "effort"))));
+
+    private static Map<String, String> merge(Map<String, String> base, Map<String, String> extra) {
+        Map<String, String> merged = new java.util.HashMap<>(base);
+        merged.putAll(extra);
+        return Map.copyOf(merged);
+    }
 
     /** 可接受的时间函数 */
     private static final Set<String> TIME_FUNCTIONS = Set.of(
@@ -63,13 +87,15 @@ public class QueryExpressionParser {
     private static final Set<String> OPERATORS = Set.of(
             "=", "!=", ">", ">=", "<", "<=", "~", "IN", "NOT IN", "IS NULL", "IS NOT NULL");
 
-    private final Set<String> allowedFields;
+    private final String entity;
+    private final Map<String, String> fieldColumns;
 
     /**
-     * @param entity 查询对象（TASK/BUG/REQUIREMENT），用于在错误信息里提示
+     * @param entity 查询对象（TASK/BUG/REQUIREMENT），决定字段白名单与错误提示
      */
     public QueryExpressionParser(String entity) {
-        this.allowedFields = FIELD_COLUMNS.keySet();
+        this.entity = entity == null ? "TASK" : entity.toUpperCase(Locale.ROOT);
+        this.fieldColumns = ENTITY_COLUMNS.getOrDefault(this.entity, ENTITY_COLUMNS.get("TASK"));
     }
 
     /**
@@ -171,8 +197,8 @@ public class QueryExpressionParser {
 
     private String requireField(String raw) {
         String field = raw.trim();
-        if (!allowedFields.contains(field)) {
-            throw new BusinessException(400, "不支持的查询字段: " + field);
+        if (!fieldColumns.containsKey(field)) {
+            throw new BusinessException(400, "不支持的查询字段: " + field + "（" + entity + "）");
         }
         return field;
     }
@@ -219,7 +245,7 @@ public class QueryExpressionParser {
     // ==================== 条件落到 QueryWrapper ====================
 
     private void apply(QueryWrapper<?> wrapper, Condition c, String userId, boolean andMode) {
-        String column = FIELD_COLUMNS.get(c.field());
+        String column = fieldColumns.get(c.field());
         List<String> values = resolveValues(c.values(), userId);
         switch (c.operator()) {
             case "=" -> wrapper.eq(column, values.get(0));

@@ -50,6 +50,12 @@ public class SchemaSelfCheck implements ApplicationRunner {
             {"activity_log", "idx_activity_ent_created"},
             {"chat_message", "idx_msg_channel_created"},
             {"document", "idx_doc_parent"},
+            // P2：评分排序、目标汇总与分诊热路径
+            {"requirement", "idx_requirement_rice_score"},
+            {"project", "idx_project_objective"},
+            {"requirement", "idx_requirement_objective"},
+            {"bug", "idx_bug_project_pending"},
+            {"project_feedback", "idx_feedback_project_status"},
     };
 
     /** 必须有全文索引的表（检索降级为 LIKE 时性能会塌，属于必须知道的事） */

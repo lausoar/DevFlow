@@ -37,6 +37,9 @@ public class ChatMessage {
     /** 撤回前的原文（仅审计可见，不返回给前端） */
     private String originalContent;
 
+    /** RAG 引用来源（JSON 数组文本；仅 @AI 知识库回答写入） */
+    private String sources;
+
     /** 表情聚合（非表字段，列表接口批量填充）：emoji → userId 列表 */
     @TableField(exist = false)
     private java.util.Map<String, java.util.List<String>> reactions;

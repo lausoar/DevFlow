@@ -29,6 +29,8 @@ public class DocumentIndexOutbox {
     private String title;
     private String content;
     private String docType;
+    /** 索引时的文档版本（引用溯源据此判断来源是否已改版） */
+    private Integer documentVersion;
     private LocalDateTime documentUpdatedAt;
     private String status;
     private Integer attempts;

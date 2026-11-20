@@ -5,6 +5,7 @@ import com.devflow.common.EnterpriseRoles;
 import com.devflow.common.exception.BusinessException;
 import com.devflow.entity.DeployEnvironment;
 import com.devflow.entity.Deployment;
+import com.devflow.entity.ProjectMember;
 import com.devflow.entity.ProjectRelease;
 import com.devflow.mapper.DeployEnvironmentMapper;
 import com.devflow.mapper.DeploymentMapper;
@@ -44,6 +45,7 @@ public class DeploymentServiceImpl implements DeploymentService {
     private final DeploymentMapper deploymentMapper;
     private final ProjectReleaseMapper releaseMapper;
     private final ProjectMemberMapper projectMemberMapper;
+    private final com.devflow.service.NotificationService notificationService;
 
     // ==================== 环境 ====================
 
@@ -177,7 +179,35 @@ public class DeploymentServiceImpl implements DeploymentService {
         d.setStatus(Integer.valueOf(1).equals(env.getRequiresApproval())
                 ? "PENDING_APPROVAL" : "APPROVED");
         deploymentMapper.insert(d);
+        if ("PENDING_APPROVAL".equals(d.getStatus())) {
+            notifyApprovers(d, operatorId);
+        }
         return d;
+    }
+
+    /**
+     * 审批通知：否则"待审批"只能靠部署页自己翻。
+     * 只发给有 project:edit 的项目成员，且排除发起人（自己不能审批自己）。
+     */
+    private void notifyApprovers(Deployment deployment, String operatorId) {
+        try {
+            List<ProjectMember> members = projectMemberMapper.selectList(
+                    new LambdaQueryWrapper<ProjectMember>()
+                            .eq(ProjectMember::getProjectId, deployment.getProjectId())
+                            .in(ProjectMember::getRole, List.of("OWNER", "MANAGER")));
+            for (ProjectMember member : members) {
+                if (member.getUserId().equals(operatorId)) {
+                    continue;
+                }
+                notificationService.createNotification(member.getUserId(), "DEPLOY_APPROVAL",
+                        "部署待审批",
+                        "版本 " + (deployment.getVersion() == null ? "" : deployment.getVersion())
+                                + " 的部署等待你审批",
+                        "/projects/" + deployment.getProjectId() + "?tab=deployments");
+            }
+        } catch (Exception e) {
+            log.warn("部署审批通知发送失败（不影响创建）: {}", e.getMessage());
+        }
     }
 
     @Override

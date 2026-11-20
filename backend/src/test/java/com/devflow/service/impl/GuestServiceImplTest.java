@@ -58,6 +58,8 @@ class GuestServiceImplTest {
     private AuditService auditService;
     @Mock
     private PermissionService permissionService;
+    @Mock
+    private com.devflow.service.TriageService triageService;
 
     @InjectMocks
     private GuestServiceImpl service;

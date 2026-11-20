@@ -65,8 +65,31 @@ public class Requirement {
     /** 父需求ID */
     private String parentId;
 
+    /** 所属目标（objective.id，可空） */
+    private String objectiveId;
+
     /** 排序号 */
     private Integer sort;
+
+    /** RICE 评分输入：触达人数 */
+    private Integer reach;
+
+    /** RICE 评分输入：影响程度 0.25 / 0.5 / 1 / 2 / 3 */
+    private java.math.BigDecimal impact;
+
+    /** RICE 评分输入：置信度百分比 1-100 */
+    private Integer confidence;
+
+    /** RICE 评分输入：工作量（人日） */
+    private java.math.BigDecimal effort;
+
+    /**
+     * RICE 分数：数据库生成列（reach×impact×confidence%÷effort）。
+     * 只读——写回会被 MyBatis 拒绝，避免与生成列冲突。
+     */
+    @TableField(value = "rice_score", insertStrategy = FieldStrategy.NEVER,
+            updateStrategy = FieldStrategy.NEVER)
+    private java.math.BigDecimal riceScore;
 
     @TableLogic
     private Integer deleted;

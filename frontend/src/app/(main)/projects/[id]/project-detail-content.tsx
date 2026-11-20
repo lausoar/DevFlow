@@ -60,6 +60,7 @@ import {
   Users,
   MessageSquarePlus,
   Globe,
+  Inbox,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -78,6 +79,8 @@ import { TasksTab } from './tasks-tab';
 import { BugsTab } from './bugs-tab';
 import { RequirementsTab } from './requirements-tab';
 import { FeedbackTab } from './feedback-tab';
+import { TriageTab } from './triage-tab';
+import { useTriageCounts } from '@/lib/hooks/use-triage';
 import { TestCasesTab } from './test-cases-tab';
 import { GuestLinksPanel } from './guest-links-panel';
 
@@ -87,15 +90,21 @@ import { GuestLinksPanel } from './guest-links-panel';
 export default function ProjectDetailContent({
   projectId,
   initialTab,
+  initialRequirementId,
 }: {
   projectId: string;
   /** 从 URL ?tab= 进入时直达指定标签页（全局搜索跳转用） */
   initialTab?: string;
+  /** 设计稿通知/引用的深链：直达并把该需求详情打开 */
+  initialRequirementId?: string;
 }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState(initialTab || 'dashboard');
   const { data: projectRes, isLoading } = useProject(projectId);
   const project = projectRes?.data;
+  // 分诊待处理数量：标签页上的徽标，避免"有没有新外部提交"要靠点进去才知道
+  const { data: triageCountsRes } = useTriageCounts(projectId);
+  const pendingTriageCount = triageCountsRes?.data?.PENDING ?? 0;
 
   // 自动化规则弹窗
   const [automationOpen, setAutomationOpen] = useState(false);
@@ -374,6 +383,15 @@ export default function ProjectDetailContent({
               <Bug className="h-3.5 w-3.5" />
               Bug
             </TabsTrigger>
+            <TabsTrigger value="triage" className="gap-1.5 text-xs">
+              <Inbox className="h-3.5 w-3.5" />
+              分诊
+              {pendingTriageCount > 0 && (
+                <span className="ml-0.5 rounded-full bg-warning/20 px-1 text-[10px] text-warning">
+                  {pendingTriageCount}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="feedback" className="gap-1.5 text-xs">
               <MessageSquarePlus className="h-3.5 w-3.5" />
               反馈
@@ -397,13 +415,16 @@ export default function ProjectDetailContent({
           <DashboardTab projectId={projectId} />
         </TabsContent>
         <TabsContent value="requirements" className="flex-1 overflow-auto">
-          <RequirementsTab projectId={projectId} />
+          <RequirementsTab projectId={projectId} initialRequirementId={initialRequirementId} />
         </TabsContent>
         <TabsContent value="tasks" className="flex-1 overflow-auto p-6">
           <TasksTab projectId={projectId} />
         </TabsContent>
         <TabsContent value="bugs" className="flex-1 overflow-auto p-6">
           <BugsTab projectId={projectId} />
+        </TabsContent>
+        <TabsContent value="triage" className="flex-1 overflow-auto p-6">
+          <TriageTab projectId={projectId} canManage={canEditProject} />
         </TabsContent>
         <TabsContent value="feedback" className="flex-1 overflow-auto p-6">
           <FeedbackTab projectId={projectId} />

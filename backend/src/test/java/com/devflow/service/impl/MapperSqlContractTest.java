@@ -53,4 +53,15 @@ class MapperSqlContractTest {
                 .contains("WHERE id = #{id} AND deleted = 0")
                 .contains("FOR UPDATE");
     }
+
+    @Test
+    void designStatusTransitionIsConditionalOnPreviousStatus() throws Exception {
+        var method = com.devflow.mapper.DesignAssetMapper.class
+                .getMethod("transitionStatus", String.class, String.class, String.class);
+        var update = method.getAnnotation(org.apache.ibatis.annotations.Update.class);
+        assertThat(update).isNotNull();
+        assertThat(String.join(" ", update.value()))
+                .contains("WHERE id = #{id} AND status = #{from}")
+                .contains("deleted = 0");
+    }
 }

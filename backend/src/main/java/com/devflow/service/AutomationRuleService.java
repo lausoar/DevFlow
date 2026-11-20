@@ -41,4 +41,13 @@ public interface AutomationRuleService {
      */
     int fire(String triggerType, String projectId, String objectId,
              String objectTitle, String creatorId);
+
+    /**
+     * 带自定义通知文案的触发入口（设计稿变更等需要携带上下文的场景）。
+     * 没有文案时等价于上面的 5 参版本。
+     *
+     * @param message 通知标题/正文/跳转链接；为 null 时使用默认文案
+     */
+    int fire(String triggerType, String projectId, String objectId,
+             String objectTitle, String creatorId, AutomationMessage message);
 }

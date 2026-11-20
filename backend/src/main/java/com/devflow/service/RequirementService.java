@@ -24,9 +24,13 @@ public interface RequirementService {
 
     /**
      * 分页查询需求
+     *
+     * @param sortBy    排序字段：createdAt（默认）/ priority / riceScore / effort / estimatedHours
+     * @param sortOrder asc / desc（默认 desc）
      */
     Page<RequirementResponse> listRequirements(String projectId, String status, String priority,
-                                                String keyword, int page, int size);
+                                                String keyword, int page, int size,
+                                                String sortBy, String sortOrder);
 
     /**
      * 更新需求

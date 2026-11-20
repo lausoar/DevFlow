@@ -22,13 +22,14 @@ public interface DocumentIndexOutboxMapper extends BaseMapper<DocumentIndexOutbo
     @Insert("""
             INSERT INTO document_index_outbox
                 (id, document_id, project_id, enterprise_id, operation,
-                 title, content, doc_type, document_updated_at, status,
+                 title, content, doc_type, document_version, document_updated_at, status,
                  attempts, next_attempt_at, last_error, created_at, updated_at)
             VALUES
                 (#{outbox.id}, #{outbox.documentId}, #{outbox.projectId}, #{outbox.enterpriseId},
                  #{outbox.operation}, #{outbox.title}, #{outbox.content}, #{outbox.docType},
-                 #{outbox.documentUpdatedAt}, #{outbox.status}, #{outbox.attempts},
-                 #{outbox.nextAttemptAt}, #{outbox.lastError}, #{outbox.createdAt}, #{outbox.updatedAt})
+                 #{outbox.documentVersion}, #{outbox.documentUpdatedAt}, #{outbox.status},
+                 #{outbox.attempts}, #{outbox.nextAttemptAt}, #{outbox.lastError},
+                 #{outbox.createdAt}, #{outbox.updatedAt})
             ON DUPLICATE KEY UPDATE document_id = VALUES(document_id)
             """)
     int insertIfAbsent(@Param("outbox") DocumentIndexOutbox outbox);

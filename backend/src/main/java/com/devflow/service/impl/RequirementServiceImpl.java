@@ -9,6 +9,7 @@ import com.devflow.dto.response.RequirementResponse;
 import com.devflow.dto.response.RequirementStatsResponse;
 import com.devflow.entity.*;
 import com.devflow.mapper.*;
+import com.devflow.service.ObjectiveService;
 import com.devflow.service.RequirementService;
 import com.devflow.service.WorkflowService;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class RequirementServiceImpl implements RequirementService {
     private final ProjectMemberMapper projectMemberMapper;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
+    private final ObjectiveService objectiveService;
 
     @Override
     @Transactional
@@ -57,6 +59,15 @@ public class RequirementServiceImpl implements RequirementService {
         requirement.setCategory(request.getCategory());
         requirement.setEstimatedHours(request.getEstimatedHours());
         requirement.setParentId(request.getParentId());
+        if (org.springframework.util.StringUtils.hasText(request.getObjectiveId())) {
+            // 目标必须属于同一企业：否则需求会把别家企业的 OKR 拉进自己的汇总
+            objectiveService.requireInEnterprise(request.getObjectiveId(), project.getEnterpriseId());
+            requirement.setObjectiveId(request.getObjectiveId());
+        }
+        requirement.setReach(request.getReach());
+        requirement.setImpact(request.getImpact());
+        requirement.setConfidence(request.getConfidence());
+        requirement.setEffort(request.getEffort());
         requirement.setDeleted(0);
 
         requirementMapper.insert(requirement);
@@ -75,7 +86,8 @@ public class RequirementServiceImpl implements RequirementService {
 
     @Override
     public Page<RequirementResponse> listRequirements(String projectId, String status, String priority,
-                                                        String keyword, int page, int size) {
+                                                        String keyword, int page, int size,
+                                                        String sortBy, String sortOrder) {
         // 构建查询条件
         LambdaQueryWrapper<Requirement> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Requirement::getProjectId, projectId);
@@ -91,7 +103,7 @@ public class RequirementServiceImpl implements RequirementService {
                     .or().like(Requirement::getDescription, keyword));
         }
 
-        wrapper.orderByDesc(Requirement::getCreatedAt);
+        applySort(wrapper, sortBy, sortOrder);
 
         // 分页查询
         Page<Requirement> pageParam = new Page<>(page, size);
@@ -105,6 +117,23 @@ public class RequirementServiceImpl implements RequirementService {
         responsePage.setRecords(records);
 
         return responsePage;
+    }
+
+    /**
+     * 白名单排序：排序字段来自请求参数，必须映射到固定列，不能拼接任意列名。
+     * riceScore 固定高分优先（asc 无意义）；未评分（null）由 MySQL 排序规则排在最后。
+     * 末位追加 id 保证分页稳定，不会因同分记录跨页重复或遗漏。
+     */
+    private void applySort(LambdaQueryWrapper<Requirement> wrapper, String sortBy, String sortOrder) {
+        boolean asc = "asc".equalsIgnoreCase(sortOrder);
+        switch (sortBy == null ? "" : sortBy) {
+            case "priority" -> wrapper.orderBy(true, asc, Requirement::getPriority);
+            case "riceScore" -> wrapper.orderByDesc(Requirement::getRiceScore);
+            case "effort" -> wrapper.orderBy(true, asc, Requirement::getEffort);
+            case "estimatedHours" -> wrapper.orderBy(true, asc, Requirement::getEstimatedHours);
+            default -> wrapper.orderByDesc(Requirement::getCreatedAt);
+        }
+        wrapper.orderByAsc(Requirement::getId);
     }
 
     @Override
@@ -158,6 +187,42 @@ public class RequirementServiceImpl implements RequirementService {
         if (request.getStatus() != null) {
             addChange(changes, requirement, "status", requirement.getStatus(), request.getStatus(), userId);
             requirement.setStatus(request.getStatus());
+        }
+        if (request.getObjectiveId() != null) {
+            String nextObjective = request.getObjectiveId().isBlank() ? null : request.getObjectiveId();
+            if (nextObjective != null) {
+                Project project = projectMapper.selectById(requirement.getProjectId());
+                if (project == null) {
+                    throw new BusinessException(404, "项目不存在");
+                }
+                objectiveService.requireInEnterprise(nextObjective, project.getEnterpriseId());
+            }
+            addChange(changes, requirement, "objectiveId", requirement.getObjectiveId(), nextObjective, userId);
+            requirement.setObjectiveId(nextObjective);
+        }
+        if (request.getReach() != null) {
+            addChange(changes, requirement, "reach",
+                    requirement.getReach() == null ? null : String.valueOf(requirement.getReach()),
+                    String.valueOf(request.getReach()), userId);
+            requirement.setReach(request.getReach());
+        }
+        if (request.getImpact() != null) {
+            addChange(changes, requirement, "impact",
+                    requirement.getImpact() == null ? null : requirement.getImpact().toPlainString(),
+                    request.getImpact().toPlainString(), userId);
+            requirement.setImpact(request.getImpact());
+        }
+        if (request.getConfidence() != null) {
+            addChange(changes, requirement, "confidence",
+                    requirement.getConfidence() == null ? null : String.valueOf(requirement.getConfidence()),
+                    String.valueOf(request.getConfidence()), userId);
+            requirement.setConfidence(request.getConfidence());
+        }
+        if (request.getEffort() != null) {
+            addChange(changes, requirement, "effort",
+                    requirement.getEffort() == null ? null : requirement.getEffort().toPlainString(),
+                    request.getEffort().toPlainString(), userId);
+            requirement.setEffort(request.getEffort());
         }
 
         requirementMapper.updateById(requirement);
@@ -388,7 +453,13 @@ public class RequirementServiceImpl implements RequirementService {
                 .rejectedAt(requirement.getRejectedAt())
                 .rejectReason(requirement.getRejectReason())
                 .parentId(requirement.getParentId())
+                .objectiveId(requirement.getObjectiveId())
                 .sort(requirement.getSort())
+                .reach(requirement.getReach())
+                .impact(requirement.getImpact())
+                .confidence(requirement.getConfidence())
+                .effort(requirement.getEffort())
+                .riceScore(requirement.getRiceScore())
                 .createdAt(requirement.getCreatedAt())
                 .updatedAt(requirement.getUpdatedAt())
                 .linkedTasks(linkedTasks)

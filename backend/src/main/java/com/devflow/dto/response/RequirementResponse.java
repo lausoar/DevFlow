@@ -31,7 +31,17 @@ public class RequirementResponse {
     private LocalDateTime rejectedAt;
     private String rejectReason;
     private String parentId;
+    /** 所属目标（OKR） */
+    private String objectiveId;
     private Integer sort;
+
+    /** RICE 评分输入与派生分数（riceScore 由数据库生成列计算，未评分为 null） */
+    private Integer reach;
+    private java.math.BigDecimal impact;
+    private Integer confidence;
+    private java.math.BigDecimal effort;
+    private java.math.BigDecimal riceScore;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 

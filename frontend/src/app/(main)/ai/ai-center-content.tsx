@@ -7,11 +7,18 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { aiApi, type AiMessage, type AgentResult, type RagSearchResult } from '@/lib/api/ai';
+import { aiApi, type AiMessage, type AgentResult, type RagSearchResult, type CitationSource } from '@/lib/api/ai';
 import { useProjects } from '@/lib/hooks/use-projects';
 import { useAuthStore } from '@/stores/auth-store';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { aiChatHistoryApi, aiKindLabels, persistAiMessage, type AiChatHistoryItem } from '@/lib/api/ai-history';
+import {
+  aiChatHistoryApi,
+  aiKindLabels,
+  parseSources,
+  persistAiMessage,
+  type AiChatHistoryItem,
+} from '@/lib/api/ai-history';
+import { AnswerWithCitations } from '@/components/common/answer-with-citations';
 import {
   Bot,
   Send,
@@ -97,13 +104,23 @@ export default function AiCenterContent() {
 // ============================================
 // AI 对话面板（消息按用户账号持久化）
 // ============================================
+/** 展示用消息：在 AiMessage 基础上带引用来源（仅知识库回答有值） */
+interface DisplayMessage extends AiMessage {
+  sources?: CitationSource[];
+}
+
 function AiChatPanel() {
-  const [messages, setMessages] = useState<AiMessage[]>([]);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 选定项目时走 RAG（答案带来源），否则普通对话
+  const { data: projectsRes } = useProjects({ page: 1, pageSize: 50 });
+  const projects = projectsRes?.data?.records || [];
+  const [pickedProjectId, setProjectId] = useState<string>('');
+  const projectId = pickedProjectId || projects[0]?.id || '';
 
   // 进入页面时加载该账号的历史记录
   useEffect(() => {
@@ -118,6 +135,8 @@ function AiChatPanel() {
             role: m.role,
             // 非 CHAT 行为在内容前加类型标签，便于回看历史
             content: aiKindLabels[m.kind] ? `【${aiKindLabels[m.kind]}】\n${m.content}` : m.content,
+            // 历史里的来源是 JSON 文本，解析失败按无来源处理
+            sources: parseSources(m.sources),
           }))
         );
         setHistoryLoading(false);
@@ -147,7 +166,7 @@ function AiChatPanel() {
   const handleSend = async () => {
     if (!input.trim() || loading) return;
 
-    const userMsg: AiMessage = { role: 'user', content: input };
+    const userMsg: DisplayMessage = { role: 'user', content: input };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput('');
@@ -155,13 +174,25 @@ function AiChatPanel() {
     persistAiMessage('user', input, 'CHAT');
 
     try {
-      const res = await aiApi.chat(newMessages);
-      const assistantMsg: AiMessage = {
-        role: 'assistant',
-        content: res.data.content,
-      };
-      setMessages([...newMessages, assistantMsg]);
-      persistAiMessage('assistant', res.data.content, 'CHAT', res.data.model);
+      if (projectId) {
+        // 选定项目时走 RAG：答案带可点击来源，用户能核对出处
+        const res = await aiApi.ragQuery(input, projectId, 5);
+        const assistantMsg: DisplayMessage = {
+          role: 'assistant',
+          content: res.data.answer,
+          sources: res.data.sources || [],
+        };
+        setMessages([...newMessages, assistantMsg]);
+        persistAiMessage('assistant', res.data.answer, 'RAG', undefined, res.data.sources);
+      } else {
+        const res = await aiApi.chat(newMessages);
+        const assistantMsg: DisplayMessage = {
+          role: 'assistant',
+          content: res.data.content,
+        };
+        setMessages([...newMessages, assistantMsg]);
+        persistAiMessage('assistant', res.data.content, 'CHAT', res.data.model);
+      }
     } catch (e: unknown) {
       const isTimeout =
         (e as { code?: string })?.code === 'ECONNABORTED' ||
@@ -228,6 +259,25 @@ function AiChatPanel() {
 
       {/* 输入区 */}
       <div className="border-t px-6 py-3">
+        <div className="mb-2 flex items-center gap-2">
+          <Select
+            value={projectId || '__none'}
+            onValueChange={(v) => setProjectId(!v || v === '__none' ? '' : v)}
+          >
+            <SelectTrigger className="h-8 w-48 text-xs">
+              <SelectValue placeholder="选择项目（启用知识库）" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none">不限定项目（普通对话）</SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-[11px] text-muted-foreground">
+            {projectId ? '回答将引用项目知识库，并标注来源' : '选择项目后可引用文档并核对出处'}
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           <Input
             value={input}
@@ -258,9 +308,10 @@ function AiChatPanel() {
 // ============================================
 // 聊天气泡
 // ============================================
-function ChatBubble({ message }: { message: AiMessage }) {
+function ChatBubble({ message }: { message: DisplayMessage }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
+  const hasSources = !isUser && !!message.sources && message.sources.length > 0;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -289,7 +340,11 @@ function ChatBubble({ message }: { message: AiMessage }) {
             : 'bg-muted'
         }`}
       >
-        <div className="whitespace-pre-wrap break-words">{message.content}</div>
+        {hasSources ? (
+          <AnswerWithCitations answer={message.content} sources={message.sources} />
+        ) : (
+          <div className="whitespace-pre-wrap break-words">{message.content}</div>
+        )}
 
         {/* 复制按钮 */}
         {!isUser && (

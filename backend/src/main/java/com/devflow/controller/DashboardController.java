@@ -59,7 +59,7 @@ public class DashboardController {
 
         // 统计 Bug
         List<Bug> bugs = bugMapper.selectList(
-            new LambdaQueryWrapper<Bug>().eq(Bug::getProjectId, projectId)
+            new LambdaQueryWrapper<Bug>().eq(Bug::getProjectId, projectId).eq(Bug::getPending, 0)
         );
         java.util.Set<String> resolvedBugCodes = new java.util.HashSet<>(workflowService.statusCodesInCategory(
                 projectId, WorkflowService.TYPE_BUG, WorkflowStatus.CATEGORY_DONE));

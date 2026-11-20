@@ -33,8 +33,40 @@ export interface AgentResult {
 export interface RagSearchResult {
   content: string;
   score: number;
-  metadata: { doc_id: string; title: string; chunk_index: number };
+  metadata: {
+    doc_id: string;
+    title: string;
+    doc_type?: string;
+    chunk_index: number;
+    char_start?: number;
+    char_end?: number;
+    document_version?: number;
+  };
 }
+
+/**
+ * RAG 引用来源：编号与答案里的 [n] 角标一一对应。
+ * char_start/char_end 是索引时的原文偏移，document_version 用于判断来源是否已改版。
+ */
+export interface CitationSource {
+  index: number;
+  title: string;
+  doc_id: string;
+  doc_type?: string;
+  chunk_index?: number;
+  content?: string;
+  score?: number;
+  char_start?: number | null;
+  char_end?: number | null;
+  document_version?: number | null;
+}
+
+/** RAG 问答响应（带可点击的来源） */
+export interface RagQueryResponse {
+  answer: string;
+  sources: CitationSource[];
+}
+
 
 /** 代码审查结果 */
 export interface CodeReviewResult {
@@ -63,9 +95,9 @@ export const aiApi = {
   ragSearch: (query: string, projectId: string, topK = 5) =>
     aiClient.post<RagSearchResult[]>('/rag/search', { query, project_id: projectId, top_k: topK }),
 
-  /** RAG 问答（检索 + 生成） */
+  /** RAG 问答（检索 + 生成，返回正文与可点击来源） */
   ragQuery: (question: string, projectId?: string, topK = 5) =>
-    aiClient.post('/rag/query', { question, project_id: projectId, top_k: topK }),
+    aiClient.post<RagQueryResponse>('/rag/query', { question, project_id: projectId, top_k: topK }),
 
   /** 索引文档 */
   ragIndex: (docId: string, title: string, content: string, docType = 'DOC') =>

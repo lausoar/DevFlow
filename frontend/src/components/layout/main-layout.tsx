@@ -20,13 +20,20 @@ export function MainLayout({ children }: { children: ReactNode }) {
   const { sidebarCollapsed, mobileMenuOpen, setMobileMenuOpen } = useAppStore();
   const router = useRouter();
 
+  // 移动端底部导航最多 5 项：多加会让 320px 屏幕挤成一排光点。
+  // 抽屉保留全部入口，底部只放最高频的四条路径 + 收件箱。
   const mobileNavItems = [
     { title: '工作台', href: '/workspace', icon: '🏠' },
+    { title: '收件箱', href: '/inbox', icon: '📥' },
     { title: '项目', href: '/projects', icon: '📁' },
+    { title: '通知', href: '/notifications', icon: '🔔' },
+    { title: '我的', href: '/settings', icon: '⚙️' },
+  ];
+  const drawerNavItems = [
+    ...mobileNavItems,
     { title: '报表', href: '/reports', icon: '📊' },
     { title: '企业', href: '/enterprise', icon: '🏢' },
     { title: 'AI', href: '/ai', icon: '🤖' },
-    { title: '我的', href: '/settings', icon: '⚙️' },
   ];
 
   return (
@@ -53,7 +60,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
               </Button>
             </div>
             <nav className="flex-1 space-y-0.5 p-2">
-              {mobileNavItems.map((item) => (
+              {drawerNavItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
@@ -78,13 +85,20 @@ export function MainLayout({ children }: { children: ReactNode }) {
         )}
       >
         <TopBar />
-        <main className="flex-1 min-h-0 overflow-auto bg-canvas p-4 pb-20 md:px-6 md:py-5 md:pb-6">
+        <main
+          className="flex-1 min-h-0 overflow-auto bg-canvas p-4 md:px-6 md:py-5 md:pb-6"
+          // 刘海屏底部安全区 + 固定底栏高度，避免内容被 Home 指示条遮挡
+          style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
+        >
           {children}
         </main>
       </div>
 
       {/* 移动端底部导航 */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t border-hairline bg-canvas/95 backdrop-blur-xl md:hidden">
+      <nav
+        className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-hairline bg-canvas/95 backdrop-blur-xl md:hidden"
+        style={{ height: 'calc(4rem + env(safe-area-inset-bottom, 0px))', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
         {mobileNavItems.map((item) => (
           <button
             key={item.href}

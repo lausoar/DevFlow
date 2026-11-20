@@ -39,6 +39,8 @@ const TRIGGER_LABELS: Record<string, string> = {
   BUG_FAIL: 'Bug 标记失败时',
   CASE_FAIL: '用例执行失败时',
   TASK_DONE: '任务完成时',
+  DESIGN_CHANGED: '设计稿变更 / 被打回时',
+  DESIGN_APPROVED: '设计稿通过评审时',
 };
 
 export function AutomationRulesDialog({
@@ -187,17 +189,20 @@ export function AutomationRulesDialog({
               ))}
             </SelectContent>
           </Select>
-          <Select value={assignTo} onValueChange={(v) => { if (v !== null) setAssignTo(v); }}>
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue>{assignTo ? `指派 ${memberName(assignTo)}` : '自动指派给（可选）'}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">不自动指派</SelectItem>
-              {members.map((m) => (
-                <SelectItem key={m.id} value={m.userId}>{m.realName || m.username}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* 自动指派只对"新建 Bug"有意义；设计稿事件没有可指派的接收人 */}
+          {trigger === 'BUG_CREATED' && (
+            <Select value={assignTo} onValueChange={(v) => { if (v !== null) setAssignTo(v); }}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue>{assignTo ? `指派 ${memberName(assignTo)}` : '自动指派给（可选）'}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">不自动指派</SelectItem>
+                {members.map((m) => (
+                  <SelectItem key={m.id} value={m.userId}>{m.realName || m.username}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Button className="w-full" size="sm" disabled={!name.trim() || !notifyUser.trim() || createRule.isPending} onClick={handleAdd}>
             {createRule.isPending ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
             添加规则

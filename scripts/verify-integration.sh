@@ -195,6 +195,11 @@ count_indexes() {
       UNION ALL SELECT 'chat_message','idx_msg_channel_created'
       UNION ALL SELECT 'document','idx_doc_parent'
       UNION ALL SELECT 'department_member','idx_dept_member_ent'
+      UNION ALL SELECT 'requirement','idx_requirement_rice_score'
+      UNION ALL SELECT 'project','idx_project_objective'
+      UNION ALL SELECT 'requirement','idx_requirement_objective'
+      UNION ALL SELECT 'bug','idx_bug_project_pending'
+      UNION ALL SELECT 'project_feedback','idx_feedback_project_status'
     ) want
     WHERE EXISTS (SELECT 1 FROM information_schema.statistics s
                   WHERE s.table_schema='$db' AND s.table_name=want.t AND s.index_name=want.i);"
@@ -246,7 +251,7 @@ DEMO_QUARANTINE=$(mysql_exec -N -e "SELECT GROUP_CONCAT(CONCAT(username, ':', st
     || bad "默认演示账号隔离结果错误：$DEMO_QUARANTINE"
 
 # 3b. 表必须都在（回归："新表从未创建"）
-REQUIRED_TABLES="workflow workflow_status workflow_transition task_status_event project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference subscription schema_migration"
+REQUIRED_TABLES="workflow workflow_status workflow_transition task_status_event project_release test_plan test_cycle test_cycle_case test_case_version design_asset design_asset_version saved_filter deploy_environment deployment design_walkthrough design_walkthrough_item custom_field custom_field_value program chat_read_state chat_reaction notification_preference subscription objective triage_item schema_migration"
 MISSING=""
 for t in $REQUIRED_TABLES; do
     n=$(mysql_exec -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_name='$t';")
@@ -260,10 +265,10 @@ fi
 
 # 3c. 索引与全文索引
 N_AFTER_BOOT=$(count_indexes "$DB_NAME")
-if [ "${N_AFTER_BOOT:-0}" = "14" ]; then
-    ok "14 个热点索引全部创建（应用路径生效）"
+if [ "${N_AFTER_BOOT:-0}" = "19" ]; then
+    ok "19 个热点索引全部创建（应用路径生效）"
 else
-    bad "只有 ${N_AFTER_BOOT:-0}/14 个热点索引"
+    bad "只有 ${N_AFTER_BOOT:-0}/19 个热点索引"
     grep -iE "ERROR|migrat" "$WORK_DIR/boot1.log" | tail -5
 fi
 
@@ -421,9 +426,9 @@ LEGACY_DONE_EVENT=$(mysql_exec -N -e "SELECT CONCAT(IFNULL(from_category,'NULL')
     || bad "V9 完成事件回填错误：$LEGACY_DONE_EVENT（期望 NULL:DONE:1）"
 
 LEGACY_IDX=$(count_indexes "$LEGACY_DB")
-[ "${LEGACY_IDX:-0}" = "14" ] \
-    && ok "老库缺失的索引被 V3 补齐（14 个）" \
-    || bad "老库只有 ${LEGACY_IDX:-0}/14 个热点索引"
+[ "${LEGACY_IDX:-0}" = "19" ] \
+    && ok "老库缺失的索引被后续迁移补齐（19 个）" \
+    || bad "老库只有 ${LEGACY_IDX:-0}/19 个热点索引"
 
 LEGACY_R_CUSTOM=$(mysql_exec -N -e "SELECT status FROM \`$LEGACY_DB\`.requirement WHERE id='legacy-r-custom';")
 LEGACY_T_CUSTOM=$(mysql_exec -N -e "SELECT status FROM \`$LEGACY_DB\`.task WHERE id='legacy-t-custom';")
@@ -673,6 +678,81 @@ print(f\"{codes.count('200')}|{len(ids)}|{bug_id}\")
 else
     bad "无法建立并发转缺陷夹具"
 fi
+
+# 9b) RICE 评分：生成列由数据库计算，列表可按分数排序
+RICE_REQ=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/requirements" -H "$AUTH"     -H "Content-Type: application/json"     -d '{"title":"ci-rice","reach":500,"impact":2,"confidence":80,"effort":5}'     | json_field "['data']['id']")
+if [ -n "$RICE_REQ" ]; then
+    RICE_DB=$(mysql_exec -N -e "SELECT CONCAT(IFNULL(rice_score,'NULL'), ':', IFNULL(reach,0), ':', IFNULL(effort,0))
+        FROM \`$DB_NAME\`.requirement WHERE id='$RICE_REQ';")
+    [ "$RICE_DB" = "160.0:500:5.0" ]         && ok "RICE 生成列按 reach×impact×confidence÷effort 计算（$RICE_DB）"         || bad "RICE 分数错误：$RICE_DB（期望 160.0:500:5.0）"
+
+    RICE_SORTED=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/requirements?sortBy=riceScore&pageSize=50" -H "$AUTH"         | python -c "
+import sys, json
+records = json.load(sys.stdin)['data']['records']
+scores = [r.get('riceScore') for r in records if r.get('riceScore') is not None]
+print('ok' if scores == sorted(scores, reverse=True) and scores else 'bad')
+" 2>/dev/null)
+    [ "$RICE_SORTED" = "ok" ]         && ok "需求列表按 RICE 分数降序排序"         || bad "需求列表 RICE 排序错误：$RICE_SORTED"
+fi
+
+# 9c) 目标（OKR）：项目对齐后汇总工时与完成数
+OBJ_ID=$(curl -s -m 10 -X POST "$BASE/enterprises/$ENT_ID/objectives" -H "$AUTH"     -H "Content-Type: application/json"     -d '{"name":"ci-objective","period":"2026Q4"}' | json_field "['data']['id']")
+if [ -n "$OBJ_ID" ]; then
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X PUT "$BASE/projects/$PROJ_ID/objective" -H "$AUTH"         -H "Content-Type: application/json" -d "{\"objectiveId\":\"$OBJ_ID\"}")
+    OBJ_ROLLUP=$(curl -s -m 10 "$BASE/objectives/$OBJ_ID" -H "$AUTH"         | python -c "
+import sys, json
+d = json.load(sys.stdin)['data']
+print(f\"{d['projectCount']}:{len(d['projects'])}\")
+" 2>/dev/null)
+    [ "$CODE" = "200" ] && [ "$OBJ_ROLLUP" = "1:1" ]         && ok "目标汇总包含已对齐项目（$OBJ_ROLLUP）"         || bad "目标汇总错误：code=$CODE projects=$OBJ_ROLLUP（期望 200/1:1）"
+
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X POST "$BASE/projects/$PROJ_ID/requirements" -H "$AUTH"         -H "Content-Type: application/json"         -d "{\"title\":\"ci-obj-req\",\"objectiveId\":\"$OBJ_ID\"}")
+    [ "$CODE" = "200" ] && ok "需求可对齐到同企业目标" || bad "需求对齐目标返回 $CODE（期望 200）"
+fi
+
+# 9d) 分诊：游客提交进入收件箱，接受后离开待处理
+GUEST_TOKEN=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/guest-links" -H "$AUTH"     -H "Content-Type: application/json" -d '{}' | json_field "['data']['token']")
+if [ -n "$GUEST_TOKEN" ]; then
+    GUEST_BUG=$(curl -s -m 10 -X POST "$BASE/guest/$GUEST_TOKEN/bugs" -H "Content-Type: application/json"         -d '{"title":"ci-guest-triage","description":"from guest","nickname":"guest"}'         | json_field "['data']['id']")
+    TRIAGE_PENDING=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/triage/counts" -H "$AUTH"         | json_field "['data']['PENDING']")
+    [ "${TRIAGE_PENDING:-0}" -ge 1 ]         && ok "游客提交进入分诊收件箱（待处理 $TRIAGE_PENDING）"         || bad "分诊收件箱没有待处理条目：$TRIAGE_PENDING"
+
+    LISTED=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/bugs?pageSize=200" -H "$AUTH"         | python -c "
+import sys, json
+ids = [b['id'] for b in json.load(sys.stdin)['data']['records']]
+print('absent' if '$GUEST_BUG' not in ids else 'present')
+" 2>/dev/null)
+    [ "$LISTED" = "absent" ]         && ok "待确认的游客 Bug 不进入正式缺陷列表"         || bad "待确认的游客 Bug 泄漏进正式列表：$LISTED"
+
+    TRIAGE_ID=$(curl -s -m 10 "$BASE/projects/$PROJ_ID/triage?status=PENDING" -H "$AUTH"         | python -c "
+import sys, json
+items = [i for i in json.load(sys.stdin)['data'] if i['sourceRefId'] == '$GUEST_BUG']
+print(items[0]['id'] if items else '')
+" 2>/dev/null)
+    if [ -n "$TRIAGE_ID" ]; then
+        CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 -X POST "$BASE/triage/$TRIAGE_ID/accept" -H "$AUTH")
+        AFTER=$(mysql_exec -N -e "SELECT CONCAT(pending, ':', status) FROM \`$DB_NAME\`.bug WHERE id='$GUEST_BUG';")
+        [ "$CODE" = "200" ] && [ "$AFTER" = "0:NEW" ]             && ok "接受分诊后游客 Bug 转为正式条目（$AFTER）"             || bad "接受分诊结果错误：code=$CODE bug=$AFTER（期望 200/0:NEW）"
+    fi
+fi
+
+# 9e) AI 引用溯源：消息表具备来源列，索引命令携带文档版本
+CITE_COLS=$(mysql_exec -N -e "SELECT CONCAT(
+    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$DB_NAME'
+       AND table_name='chat_message' AND column_name='sources'), ':',
+    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$DB_NAME'
+       AND table_name='ai_chat_message' AND column_name='sources'), ':',
+    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$DB_NAME'
+       AND table_name='document_index_outbox' AND column_name='document_version'));")
+[ "$CITE_COLS" = "1:1:1" ]     && ok "AI 消息与索引发件箱具备引用溯源字段"     || bad "引用溯源字段缺失：$CITE_COLS（期望 1:1:1）"
+
+# 9f) 收件箱：聚合接口只返回可见项目的数据
+INBOX_TOTAL=$(curl -s -m 10 "$BASE/inbox" -H "$AUTH"     | python -c "
+import sys, json
+d = json.load(sys.stdin)['data']
+print(sum(len(d[k]) for k in ('assignments', 'approvals', 'triage')))
+" 2>/dev/null)
+[ -n "$INBOX_TOTAL" ]     && ok "收件箱聚合接口可用（$INBOX_TOTAL 件待处理）"     || bad "收件箱接口无响应"
 
 # ============================================
 # 10. 结构化查询的注入防护

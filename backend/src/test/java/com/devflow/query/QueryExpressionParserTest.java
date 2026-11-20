@@ -117,4 +117,35 @@ class QueryExpressionParserTest {
         wrapper.getSqlSegment();
         assertThat(wrapper.getParamNameValuePairs()).containsValue("u-123");
     }
+
+    @Test
+    @DisplayName("字段白名单按查询对象区分：REQUIREMENT 不接受 sprint / reporter")
+    void fieldWhitelistIsEntityScoped() {
+        var requirementParser = new QueryExpressionParser("REQUIREMENT");
+        assertThatThrownBy(() -> requirementParser.parse("sprint = s1"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不支持的查询字段");
+        assertThatThrownBy(() -> requirementParser.parse("reporter = currentUser()"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("REQUIREMENT");
+        // BUG 同样没有 sprint
+        assertThatThrownBy(() -> new QueryExpressionParser("BUG").parse("sprint = s1"))
+                .isInstanceOf(BusinessException.class);
+        // TASK 有 sprint
+        assertThat(new QueryExpressionParser("TASK").parse("sprint = s1").andConditions()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("REQUIREMENT 支持 RICE 分数与工作量字段")
+    void requirementScoreFieldsAllowed() {
+        var requirementParser = new QueryExpressionParser("REQUIREMENT");
+        for (String field : new String[]{"score", "riceScore", "reach", "impact", "confidence", "effort"}) {
+            var wrapper = requirementParser.toWrapper(field + " >= 1", "u1", java.util.List.of("p1"));
+            assertThat(wrapper.getSqlSegment()).contains("rice_score".equals(field) || "riceScore".equals(field)
+                    ? "rice_score" : field);
+        }
+        // 这些字段只属于 REQUIREMENT，TASK 上不应被接受
+        assertThatThrownBy(() -> new QueryExpressionParser("TASK").parse("riceScore > 1"))
+                .isInstanceOf(BusinessException.class);
+    }
 }

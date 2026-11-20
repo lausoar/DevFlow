@@ -104,7 +104,8 @@ public class ProgramServiceImpl implements ProgramService {
         List<Task> tasks = projectIds.isEmpty() ? List.of()
                 : taskMapper.selectList(new LambdaQueryWrapper<Task>().in(Task::getProjectId, projectIds));
         List<Bug> bugs = projectIds.isEmpty() ? List.of()
-                : bugMapper.selectList(new LambdaQueryWrapper<Bug>().in(Bug::getProjectId, projectIds));
+                : bugMapper.selectList(new LambdaQueryWrapper<Bug>()
+                        .in(Bug::getProjectId, projectIds).eq(Bug::getPending, 0));
 
         // 按各项目自己的工作流分类统计（项目可自定义状态）
         long doneTasks = 0;

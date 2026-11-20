@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { useDocuments, useCreateDocument, useUpdateDocument } from '@/lib/hooks/use-documents';
+import { documentApi } from '@/lib/api/document';
 import { DocSidePanelView, type DocSidePanel } from './doc-side-panel';
 import { History, MessageSquare } from 'lucide-react';
 import {
@@ -28,6 +29,13 @@ import {
 } from 'lucide-react';
 import type { Document, DocType } from '@/types';
 
+/** AI 引用跳转：原文区间 + 索引时的版本（用于提示文档已改版） */
+export interface CitationHighlight {
+  start?: number;
+  end?: number;
+  version?: number;
+}
+
 // 文档类型配置
 const DOC_TYPES = [
   { value: 'ALL', label: '全部' },
@@ -40,11 +48,18 @@ const DOC_TYPES = [
 // ============================================
 // 文档中心内容
 // ============================================
-export default function DocsContent() {
+export default function DocsContent({
+  initialDocId,
+  initialHighlight,
+}: {
+  initialDocId?: string;
+  initialHighlight?: CitationHighlight;
+} = {}) {
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [editingDoc, setEditingDoc] = useState<Document | null>(null);
+  const [highlight, setHighlight] = useState<CitationHighlight | undefined>(initialHighlight);
 
   const { data: docsRes, isLoading } = useDocuments(
     typeFilter !== 'ALL' ? { type: typeFilter } : undefined
@@ -52,6 +67,28 @@ export default function DocsContent() {
   const createDoc = useCreateDocument();
 
   const docs = docsRes?.data || [];
+
+  // AI 引用深链：文档可能不在当前筛选结果里，单独按 id 拉取后打开
+  useEffect(() => {
+    if (!initialDocId || docs.some((d) => d.id === initialDocId)) return;
+    let cancelled = false;
+    documentApi
+      .getById(initialDocId)
+      .then((res) => {
+        if (!cancelled && res.data) setEditingDoc(res.data);
+      })
+      .catch(() => {
+        // 文档已被删除或无权访问：保持列表页，不打断浏览
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialDocId, docs]);
+
+  const openDoc = (doc: Document) => {
+    setHighlight(undefined);
+    setEditingDoc(doc);
+  };
 
   const filteredDocs = search
     ? docs.filter((d) => d.title.toLowerCase().includes(search.toLowerCase()))
@@ -163,7 +200,7 @@ export default function DocsContent() {
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
             {filteredDocs.map((doc) => (
-              <DocCard key={doc.id} doc={doc} onEdit={() => setEditingDoc(doc)} />
+              <DocCard key={doc.id} doc={doc} onEdit={() => openDoc(doc)} />
             ))}
           </div>
         )}
@@ -173,6 +210,7 @@ export default function DocsContent() {
       {editingDoc && (
         <DocEditor
           doc={editingDoc}
+          initialHighlight={editingDoc.id === initialDocId ? highlight : undefined}
           onClose={() => setEditingDoc(null)}
         />
       )}
@@ -220,7 +258,15 @@ function DocCard({ doc, onEdit }: { doc: Document; onEdit: () => void }) {
 // ============================================
 // 文档编辑器（简单 Markdown）
 // ============================================
-function DocEditor({ doc, onClose }: { doc: Document; onClose: () => void }) {
+function DocEditor({
+  doc,
+  initialHighlight,
+  onClose,
+}: {
+  doc: Document;
+  initialHighlight?: CitationHighlight;
+  onClose: () => void;
+}) {
   const [content, setContent] = useState(doc.content || '');
   const [title, setTitle] = useState(doc.title);
   const [saved, setSaved] = useState(false);
@@ -304,6 +350,7 @@ function DocEditor({ doc, onClose }: { doc: Document; onClose: () => void }) {
             currentTitle={title}
             currentContent={content}
             currentUserId={doc.authorId}
+            citationHighlight={initialHighlight}
             onRestored={(t, c) => { setTitle(t); setContent(c); setSaved(false); }}
           />
         </div>

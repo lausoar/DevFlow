@@ -371,6 +371,8 @@ export interface ChatMessage {
   recalledBy?: string | null;
   /** 表情聚合：emoji → userId 列表 */
   reactions?: Record<string, string[]>;
+  /** AI 知识库回答的引用来源（JSON 数组文本） */
+  sources?: string | null;
 }
 
 export type MessageType = 'TEXT' | 'IMAGE' | 'FILE' | 'CODE' | 'SYSTEM';
@@ -407,7 +409,14 @@ export type NotificationType =
   | 'BUG_UPDATE'
   | 'SPRINT_UPDATE'
   | 'SYSTEM'
-  | 'AI';
+  | 'AI'
+  // 设计稿评审与改稿通知（自动化 DESIGN_CHANGED / DESIGN_APPROVED）
+  | 'DESIGN_UPDATE'
+  // 分诊收件箱：外部提交待处理与首响超时
+  | 'TRIAGE'
+  | 'GUEST_SUBMIT'
+  // 部署审批：待我审批的部署
+  | 'DEPLOY_APPROVAL';
 
 // 文件相关类型
 export interface FileItem {
@@ -480,6 +489,13 @@ export interface Requirement {
   rejectReason?: string;
   parentId?: string;
   sort: number;
+  /** RICE 评分输入（都填了才有分数；未评分为 null/undefined） */
+  reach?: number | null;
+  impact?: number | null;
+  confidence?: number | null;
+  effort?: number | null;
+  /** RICE 分数：后端生成列计算，前端只读 */
+  riceScore?: number | null;
   createdAt: string;
   updatedAt: string;
   linkedTasks?: LinkedTask[];
@@ -518,6 +534,10 @@ export interface CreateRequirementRequest {
   category?: RequirementCategory;
   estimatedHours?: number;
   parentId?: string;
+  reach?: number;
+  impact?: number;
+  confidence?: number;
+  effort?: number;
 }
 
 export interface UpdateRequirementRequest {
@@ -528,6 +548,10 @@ export interface UpdateRequirementRequest {
   category?: RequirementCategory;
   estimatedHours?: number;
   status?: RequirementStatus;
+  reach?: number;
+  impact?: number;
+  confidence?: number;
+  effort?: number;
 }
 
 export interface ApprovalRequest {

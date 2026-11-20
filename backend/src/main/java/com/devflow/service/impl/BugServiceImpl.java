@@ -38,6 +38,8 @@ public class BugServiceImpl implements BugService {
     public Page<Bug> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
         LambdaQueryWrapper<Bug> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Bug::getProjectId, projectId);
+        // 待确认的游客 Bug 只出现在分诊收件箱，不能混进正式列表（否则等于没有闸门）
+        wrapper.eq(Bug::getPending, 0);
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(Bug::getTitle, keyword)
                     .or().like(Bug::getDescription, keyword));
