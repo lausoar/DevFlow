@@ -13,6 +13,8 @@ import com.devflow.mapper.TaskMapper;
 import com.devflow.mapper.UserMapper;
 import com.devflow.service.ProjectAccessService;
 import com.devflow.service.StatisticsService;
+import com.devflow.service.AuditService;
+import com.devflow.util.CsvUtils;
 import com.devflow.security.AccessGuard;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -46,6 +48,7 @@ public class StatisticsController {
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
     private final AccessGuard guard;
+    private final AuditService auditService;
 
     // ============================================
     // 企业级统计
@@ -62,6 +65,56 @@ public class StatisticsController {
         }
         EnterpriseStatsResponse stats = statisticsService.getEnterpriseStats(user.getEnterpriseId());
         return R.ok(stats);
+    }
+
+    @Operation(summary = "导出企业统计 CSV")
+    @GetMapping("/enterprises/{enterpriseId}/export/summary.csv")
+    public void exportEnterpriseSummary(@PathVariable String enterpriseId,
+                                        Authentication authentication,
+                                        HttpServletResponse response) throws IOException {
+        String userId = guard.userId(authentication);
+        guard.requireEnterpriseMember(userId, enterpriseId);
+        EnterpriseStatsResponse stats = statisticsService.getEnterpriseStats(enterpriseId);
+        List<List<String>> rows = enterpriseRows(stats);
+        auditService.logRequired(userId, enterpriseId, null, "export.enterprise",
+                "enterprise", enterpriseId, "导出企业统计 CSV：" + rows.size() + " 行");
+        writeCsv(response, "企业统计报表.csv", List.of("指标", "数值"), rows);
+    }
+
+    private List<List<String>> enterpriseRows(EnterpriseStatsResponse stats) {
+        List<List<String>> rows = new ArrayList<>();
+        add(rows, "项目总数", stats.getProjectOverview().getTotalProjects());
+        add(rows, "进行中项目", stats.getProjectOverview().getActiveProjects());
+        add(rows, "企业成员数", stats.getProjectOverview().getTotalMembers());
+        add(rows, "任务总数", stats.getTaskOverview().getTotalTasks());
+        add(rows, "已完成任务", stats.getTaskOverview().getCompletedTasks());
+        add(rows, "逾期任务", stats.getTaskOverview().getOverdueTasks());
+        add(rows, "任务完成率 %", stats.getTaskOverview().getCompletionRate());
+        add(rows, "Bug 总数", stats.getBugOverview().getTotalBugs());
+        add(rows, "未关闭 Bug", stats.getBugOverview().getOpenBugs());
+        add(rows, "Bug 解决率 %", stats.getBugOverview().getResolutionRate());
+        add(rows, "需求总数", stats.getRequirementOverview().getTotalRequirements());
+        add(rows, "活跃需求", stats.getRequirementOverview().getOpenRequirements());
+        add(rows, "已完成需求", stats.getRequirementOverview().getCompletedRequirements());
+        return rows;
+    }
+
+    private void add(List<List<String>> rows, String label, Object value) {
+        rows.add(List.of(label, value == null ? "" : String.valueOf(value)));
+    }
+
+    private void writeCsv(HttpServletResponse response, String fileName,
+                          List<String> headers, List<List<String>> rows) throws IOException {
+        response.setContentType("text/csv;charset=UTF-8");
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''"
+                + URLEncoder.encode(fileName, StandardCharsets.UTF_8));
+        StringBuilder csv = new StringBuilder("﻿");
+        csv.append(headers.stream().map(CsvUtils::escape).collect(Collectors.joining(","))).append("\r\n");
+        for (List<String> row : rows) {
+            csv.append(row.stream().map(CsvUtils::escape).collect(Collectors.joining(","))).append("\r\n");
+        }
+        response.getWriter().write(csv.toString());
     }
 
     // ============================================

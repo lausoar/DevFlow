@@ -24,6 +24,14 @@ public interface AuditService {
     void log(String userId, String enterpriseId, String projectId,
              String action, String targetType, String targetId, String detail);
 
+    /**
+     * 记录必须成功的审计日志（导出等合规场景）。
+     * 与 log 的"不影响业务主流程"不同：写失败会抛出异常，调用方必须放弃导出，
+     * 不能出现"数据已导出但审计缺失"。
+     */
+    void logRequired(String userId, String enterpriseId, String projectId,
+                     String action, String targetType, String targetId, String detail);
+
     /** 按企业分页查询审计日志（时间倒序） */
     Page<AuditLog> pageByEnterprise(String enterpriseId, int page, int pageSize);
 

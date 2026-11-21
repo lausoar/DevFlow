@@ -27,6 +27,7 @@ public class DepartmentController {
 
     private final EnterpriseService enterpriseService;
     private final AccessGuard guard;
+    private final com.devflow.service.ContactVisibility contactVisibility;
 
     /** 获取企业部门树 */
     @Operation(summary = "获取企业部门树结构")
@@ -34,8 +35,14 @@ public class DepartmentController {
     public R<List<EnterpriseDetailResponse.DepartmentTree>> getTree(
             @RequestParam String enterpriseId,
             Authentication authentication) {
-        guard.requireEnterpriseMember(guard.userId(authentication), enterpriseId);
-        return R.ok(enterpriseService.getDepartmentTree(enterpriseId));
+        String userId = guard.userId(authentication);
+        guard.requireEnterpriseMember(userId, enterpriseId);
+        // 部门树里的成员是完整 User 实体：没有成员管理权限的人必须脱敏
+        List<EnterpriseDetailResponse.DepartmentTree> tree = enterpriseService.getDepartmentTree(enterpriseId);
+        if (!contactVisibility.canSeeContactInfo(userId)) {
+            maskTree(tree);
+        }
+        return R.ok(tree);
     }
 
     /** 创建部门 */
@@ -66,5 +73,25 @@ public class DepartmentController {
         String userId = (String) authentication.getPrincipal();
         enterpriseService.deleteDepartment(id, userId);
         return R.ok();
+    }
+
+    /** 递归脱敏部门树中的成员邮箱与手机号（与企业详情页同一规则） */
+    private void maskTree(List<EnterpriseDetailResponse.DepartmentTree> departments) {
+        if (departments == null) {
+            return;
+        }
+        for (EnterpriseDetailResponse.DepartmentTree dept : departments) {
+            if (dept.getMembers() != null) {
+                dept.getMembers().forEach(m -> {
+                    if (m.getEmail() != null) {
+                        m.setEmail(com.devflow.util.Masking.email(m.getEmail()));
+                    }
+                    if (m.getPhone() != null) {
+                        m.setPhone(com.devflow.util.Masking.phone(m.getPhone()));
+                    }
+                });
+            }
+            maskTree(dept.getChildren());
+        }
     }
 }

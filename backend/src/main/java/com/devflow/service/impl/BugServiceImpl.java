@@ -33,6 +33,7 @@ public class BugServiceImpl implements BugService {
     private final com.devflow.service.NotificationRecipients notificationRecipients;
     private final com.devflow.service.SubscriptionService subscriptionService;
     private final com.devflow.service.WorkflowService workflowService;
+    private final com.devflow.service.ProjectAccessService projectAccessService;
 
     @Override
     public Page<Bug> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
@@ -53,9 +54,16 @@ public class BugServiceImpl implements BugService {
 
     @Override
     public java.util.List<Bug> listMyBugs(String userId) {
+        List<String> visibleProjectIds = projectAccessService.visibleProjectIds(userId);
+        if (visibleProjectIds.isEmpty()) {
+            return java.util.List.of();
+        }
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Bug> wrapper =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
         wrapper.eq(Bug::getAssigneeId, userId);
+        // 历史指派不会随成员移除自动清空，读取时必须按当前可见项目收口
+        wrapper.in(Bug::getProjectId, visibleProjectIds);
+        wrapper.eq(Bug::getPending, 0);
         wrapper.orderByAsc(Bug::getPriority).orderByDesc(Bug::getCreatedAt);
         wrapper.last("LIMIT 200");
         return bugMapper.selectList(wrapper);

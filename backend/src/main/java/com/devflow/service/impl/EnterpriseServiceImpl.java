@@ -70,9 +70,27 @@ public class EnterpriseServiceImpl implements EnterpriseService {
 
         // 更新用户的 enterpriseId（创建者成为超级管理员）
         User user = userMapper.selectById(ownerId);
-        user.setEnterpriseId(enterprise.getId());
-        user.setRole(EnterpriseRoles.SUPER_ADMIN);
-        userMapper.updateById(user);
+        String previousEnterpriseId = user.getEnterpriseId();
+        if (previousEnterpriseId != null && !previousEnterpriseId.equals(enterprise.getId())) {
+            // 创建新企业等于离开旧企业：必须清掉旧租户关联，否则旧 project_member
+            // 仍会让 visibleProjectIds 继续授权；同时递增会话版本，旧 Token 立即失效。
+            departmentMemberMapper.delete(new LambdaQueryWrapper<DepartmentMember>()
+                    .eq(DepartmentMember::getUserId, ownerId)
+                    .eq(DepartmentMember::getEnterpriseId, previousEnterpriseId));
+            projectMemberMapper.delete(new LambdaQueryWrapper<ProjectMember>()
+                    .eq(ProjectMember::getUserId, ownerId)
+                    .in(ProjectMember::getProjectId, projectIdsOfEnterprise(previousEnterpriseId)));
+        }
+        LambdaUpdateWrapper<User> patch = new LambdaUpdateWrapper<User>()
+                .eq(User::getId, ownerId)
+                .set(User::getEnterpriseId, enterprise.getId())
+                .set(User::getRole, EnterpriseRoles.SUPER_ADMIN);
+        if (previousEnterpriseId != null && !previousEnterpriseId.equals(enterprise.getId())) {
+            // 只有从旧企业切换才需要撤销会话。首次创建企业没有旧租户可泄露，
+            // 递增会话版本只会让创建者当前 Token 立刻 401，正常建项目流程被中断。
+            patch.setSql("session_version = COALESCE(session_version, 0) + 1");
+        }
+        userMapper.update(null, patch);
 
         auditService.log(ownerId, enterprise.getId(), null, "enterprise.create",
                 "enterprise", enterprise.getId(), "创建企业: " + enterprise.getName());
@@ -214,7 +232,13 @@ public class EnterpriseServiceImpl implements EnterpriseService {
         }
 
         // 未注册 -> 创建临时账号
-        String username = request.getEmail().split("@")[0] + "_" + UUID.randomUUID().toString().substring(0, 4);
+        // 用户名不能由邮箱前缀派生：否则成员列表即使把 email 脱敏，
+        // 也能从 username 还原出完整邮箱，脱敏形同虚设。
+        String username;
+        do {
+            username = "member_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        } while (userMapper.selectCount(new LambdaQueryWrapper<User>()
+                .eq(User::getUsername, username)) > 0);
         User newUser = new User();
         newUser.setUsername(username);
         newUser.setEmail(request.getEmail());
@@ -273,10 +297,13 @@ public class EnterpriseServiceImpl implements EnterpriseService {
         }
 
         // updateById 跳过 null 字段，必须显式 set 才能把 enterprise_id 清空
+        // 递增会话版本：被移除的人手上可能还有未过期的 Access/Refresh Token，
+        // 只清 enterprise_id 不会让它们失效（JwtAuthFilter 只比对 session_version）。
         userMapper.update(null, new LambdaUpdateWrapper<User>()
                 .eq(User::getId, memberId)
                 .set(User::getEnterpriseId, null)
-                .set(User::getRole, EnterpriseRoles.MEMBER));
+                .set(User::getRole, EnterpriseRoles.MEMBER)
+                .setSql("session_version = COALESCE(session_version, 0) + 1"));
 
         // 清除部门关联
         departmentMemberMapper.delete(
@@ -335,12 +362,20 @@ public class EnterpriseServiceImpl implements EnterpriseService {
         }
 
         String oldRole = member.getRole();
-        member.setRole(newRole);
-        userMapper.updateById(member);
+        // 只更新角色列：把 select 出来的整实体写回会在并发下把刚发生的
+        // 移除（enterprise_id 清空 + session_version 递增）覆盖回去。
+        int updated = userMapper.update(null, new LambdaUpdateWrapper<User>()
+                .eq(User::getId, memberId)
+                .eq(User::getEnterpriseId, enterpriseId)
+                .set(User::getRole, newRole));
+        if (updated == 0) {
+            throw new BusinessException(409, "成员所属企业已变化，请刷新后重试");
+        }
         auditService.log(operatorId, enterpriseId, null, "member.role",
                 "user", memberId, "调整成员 " + member.displayName() + " 职级: " + oldRole + " → " + newRole);
-        member.setPassword(null);
-        return member;
+        User updatedMember = userMapper.selectById(memberId);
+        updatedMember.setPassword(null);
+        return updatedMember;
     }
 
     @Override
@@ -403,10 +438,12 @@ public class EnterpriseServiceImpl implements EnterpriseService {
 
         // 1. 清退所有成员（enterprise_id 置空、角色降为 MEMBER）
         // 注意：updateById 会跳过 null 字段，必须用 UpdateWrapper 显式 set null
+        // 解散企业同样要撤销所有成员的会话，否则原 Token 在过期前仍可访问。
         userMapper.update(null, new LambdaUpdateWrapper<User>()
                 .eq(User::getEnterpriseId, enterpriseId)
                 .set(User::getEnterpriseId, null)
-                .set(User::getRole, "MEMBER"));
+                .set(User::getRole, "MEMBER")
+                .setSql("session_version = COALESCE(session_version, 0) + 1"));
 
         // 2. 删除部门及其成员关联
         List<Department> departments = departmentMapper.selectList(
@@ -458,7 +495,8 @@ public class EnterpriseServiceImpl implements EnterpriseService {
         userMapper.update(null, new LambdaUpdateWrapper<User>()
                 .eq(User::getId, userId)
                 .set(User::getEnterpriseId, null)
-                .set(User::getRole, "MEMBER"));
+                .set(User::getRole, "MEMBER")
+                .setSql("session_version = COALESCE(session_version, 0) + 1"));
 
         // 2. 移除部门关联
         List<Department> departments = departmentMapper.selectList(

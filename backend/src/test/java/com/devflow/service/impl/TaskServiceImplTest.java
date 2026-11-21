@@ -47,6 +47,7 @@ class TaskServiceImplTest {
     @Mock private NotificationRecipients notificationRecipients;
     @Mock private TaskDependencyMapper taskDependencyMapper;
     @Mock private TaskStatusEventMapper taskStatusEventMapper;
+    @Mock private com.devflow.service.ProjectAccessService projectAccessService;
 
     @InjectMocks private TaskServiceImpl service;
 
@@ -208,5 +209,26 @@ class TaskServiceImplTest {
         verify(taskDependencyMapper).delete(any());
         // 改用带审计的软删除后，不再是 deleteById
         verify(taskMapper).softDelete("t1", "u-operator");
+    }
+
+    @Test
+    void myTasksAreLimitedToCurrentlyVisibleProjects() {
+        when(projectAccessService.visibleProjectIds("u1")).thenReturn(List.of("p1"));
+        when(taskMapper.selectList(any())).thenReturn(List.of());
+
+        service.listMyTasks("u1");
+
+        verify(taskMapper).selectList(org.mockito.ArgumentMatchers.argThat(wrapper -> {
+            String sql = wrapper.getSqlSegment();
+            return sql.contains("assignee_id") && sql.contains("project_id") && sql.contains("IN");
+        }));
+    }
+
+    @Test
+    void myTasksAreEmptyWhenNoProjectIsVisible() {
+        when(projectAccessService.visibleProjectIds("u1")).thenReturn(List.of());
+
+        assertThat(service.listMyTasks("u1")).isEmpty();
+        verify(taskMapper, org.mockito.Mockito.never()).selectList(any());
     }
 }

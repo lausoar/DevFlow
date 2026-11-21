@@ -53,6 +53,18 @@ public class AuditServiceImpl implements AuditService {
     @Override
     public void log(String userId, String enterpriseId, String projectId,
                     String action, String targetType, String targetId, String detail) {
+        writeLog(userId, enterpriseId, projectId, action, targetType, targetId, detail, false);
+    }
+
+    @Override
+    public void logRequired(String userId, String enterpriseId, String projectId,
+                            String action, String targetType, String targetId, String detail) {
+        writeLog(userId, enterpriseId, projectId, action, targetType, targetId, detail, true);
+    }
+
+    private void writeLog(String userId, String enterpriseId, String projectId,
+                          String action, String targetType, String targetId, String detail,
+                          boolean failOnError) {
         try {
             AuditLog auditLog = new AuditLog();
             auditLog.setUserId(userId);
@@ -89,7 +101,11 @@ public class AuditServiceImpl implements AuditService {
                 chainHeadByEnterprise.put(chainKey, auditLog.getRecordHash());
             }
         } catch (Exception e) {
-            // 审计失败不能影响业务主流程
+            if (failOnError) {
+                // 导出类合规场景不允许"审计缺失但数据照常外流"
+                throw e instanceof RuntimeException runtime ? runtime : new IllegalStateException(e);
+            }
+            // 普通业务审计失败不能影响业务主流程
             log.warn("审计日志写入失败: action={}, user={}, err={}", action, userId, e.getMessage());
         }
     }

@@ -63,6 +63,11 @@ async function refreshAccessToken(failedAccessToken: string | null): Promise<str
 
 function createResponseInterceptor(client: AxiosInstance) {
   return async (error: AxiosError) => {
+    // 只记录失败请求的追踪号：成功请求的 ID 不能拿来解释随后发生的渲染异常
+    const failedRequestId = error.response?.headers?.['x-request-id'];
+    if (failedRequestId && typeof window !== 'undefined') {
+      sessionStorage.setItem('devflow-last-error-request-id', String(failedRequestId));
+    }
     const originalRequest = error.config as RetryableRequest | undefined;
     const status = error.response?.status;
     const requestUrl = originalRequest?.url || '';

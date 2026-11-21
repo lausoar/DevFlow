@@ -14,16 +14,21 @@ import com.devflow.mapper.TestExecutionMapper;
 import java.util.List;
 import java.util.Map;
 import com.devflow.service.AutomationRuleService;
+import com.devflow.service.AuditService;
 import com.devflow.service.PermissionService;
 import com.devflow.service.NotificationService;
 import com.devflow.service.ProjectAccessService;
 import com.devflow.service.WorkflowService;
+import com.devflow.util.CsvUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -49,6 +54,7 @@ public class TestCaseController {
     private final NotificationService notificationService;
     private final com.devflow.service.ImPushService imPushService;
     private final AutomationRuleService automationRuleService;
+    private final AuditService auditService;
 
     // ==================== 用例 CRUD ====================
 
@@ -245,6 +251,97 @@ public class TestCaseController {
         requireCaseManageable(id, authentication);
         testCaseMapper.deleteById(id);
         return R.ok();
+    }
+
+    /** 导出用例：复用列表的同一份结果，避免"列表显示与导出内容不一致" */
+    @Operation(summary = "导出项目测试用例 CSV")
+    @GetMapping("/projects/{projectId}/export/test-cases.csv")
+    public void exportCases(@PathVariable String projectId,
+                            Authentication authentication,
+                            HttpServletResponse response) throws IOException {
+        Map<String, Object> listed = list(projectId, null, null, authentication).getData();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> cases = (List<Map<String, Object>>) listed.get("cases");
+        List<List<String>> rows = new ArrayList<>();
+        for (Map<String, Object> item : cases) {
+            rows.add(List.of(
+                    text(item.get("title")),
+                    priorityLabel(text(item.get("priority"))),
+                    text(item.get("precondition")),
+                    stepsSummary(text(item.get("steps"))),
+                    text(item.get("expectedResult")),
+                    resultLabel(text(item.get("latestResult"))),
+                    text(item.get("executionCount")),
+                    text(item.get("latestExecutorName"))
+            ));
+        }
+        auditService.logRequired((String) authentication.getPrincipal(), null, projectId,
+                "export.test_cases", "project", projectId, "导出测试用例 CSV：" + rows.size() + " 行");
+        writeCsv(response, "测试用例.csv",
+                List.of("标题", "优先级", "前置条件", "步骤", "预期结果", "最新结果", "执行次数", "最近执行人"),
+                rows);
+    }
+
+    private String stepsSummary(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "无";
+        }
+        try {
+            List<Map<String, Object>> steps = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(raw, new com.fasterxml.jackson.core.type.TypeReference<List<Map<String, Object>>>() {});
+            if (steps.isEmpty()) {
+                return "无";
+            }
+            List<String> parts = new ArrayList<>();
+            for (int i = 0; i < steps.size(); i++) {
+                Map<String, Object> step = steps.get(i);
+                String expected = text(step.get("expected"));
+                parts.add((i + 1) + ". " + text(step.get("action"))
+                        + (expected.isBlank() ? "" : "（预期：" + expected + "）"));
+            }
+            return String.join("\n", parts);
+        } catch (Exception e) {
+            return raw;
+        }
+    }
+
+    private String priorityLabel(String value) {
+        return switch (value) {
+            case "CRITICAL" -> "紧急";
+            case "HIGH" -> "高";
+            case "MEDIUM" -> "中";
+            case "LOW" -> "低";
+            default -> value;
+        };
+    }
+
+    private String resultLabel(String value) {
+        return switch (value) {
+            case "PASS" -> "通过";
+            case "FAIL" -> "失败";
+            case "BLOCKED" -> "阻塞";
+            case "SKIP" -> "跳过";
+            case "UNEXECUTED" -> "未执行";
+            default -> value;
+        };
+    }
+
+    private String text(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private void writeCsv(HttpServletResponse response, String fileName,
+                          List<String> headers, List<List<String>> rows) throws IOException {
+        response.setContentType("text/csv;charset=UTF-8");
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''"
+                + java.net.URLEncoder.encode(fileName, StandardCharsets.UTF_8));
+        StringBuilder csv = new StringBuilder("﻿");
+        csv.append(headers.stream().map(CsvUtils::escape).collect(Collectors.joining(","))).append("\r\n");
+        for (List<String> row : rows) {
+            csv.append(row.stream().map(CsvUtils::escape).collect(Collectors.joining(","))).append("\r\n");
+        }
+        response.getWriter().write(csv.toString());
     }
 
     // ==================== 执行 ====================

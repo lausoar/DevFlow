@@ -26,6 +26,10 @@ services:
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
       --default-authentication-plugin=mysql_native_password
+      --slow-query-log=1
+      --slow-query-log-file=/var/lib/mysql/slow.log
+      --long-query-time=1
+      --min-examined-row-limit=1000
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -107,6 +111,8 @@ services:
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75 -XX:+UseG1GC}
     volumes:
       - backend_logs:/app/logs
+    # 与 server.shutdown=graceful（20s 等待期）对齐，docker stop 不能比应用先杀进程
+    stop_grace_period: 30s
     networks: [devflow]
 
   ai:

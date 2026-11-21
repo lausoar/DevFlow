@@ -13,6 +13,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("UserServiceImpl 自助改密会话失效")
@@ -42,9 +43,12 @@ class UserServiceImplPasswordTest {
         service.changePassword("u1", "OldPass1", "NewPass2");
 
         assertThat(user.getPassword()).isEqualTo("new-hash");
-        assertThat(user.getSessionVersion()).isEqualTo(5L);
-        assertThat(user.getMustChangePassword()).isZero();
-        assertThat(user.getPasswordUpdatedAt()).isNotNull();
-        verify(userMapper).updateById(user);
+        // 会话版本由数据库原子递增，不能靠整实体回写（避免并发覆盖）
+        org.mockito.ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<User>> captor =
+                org.mockito.ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class);
+        verify(userMapper).update(eq(null), captor.capture());
+        assertThat(captor.getValue().getSqlSet()).contains("session_version");
+        assertThat(captor.getValue().getSqlSet()).contains("password_updated_at");
+        verify(userMapper, org.mockito.Mockito.never()).updateById(user);
     }
 }

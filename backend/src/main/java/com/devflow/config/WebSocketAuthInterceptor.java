@@ -100,7 +100,10 @@ public class WebSocketAuthInterceptor implements WebSocketMessageBrokerConfigure
                     return message;
                 }
                 try {
-                    requireSessionUser(accessor);
+                    User user = requireSessionUser(accessor);
+                    // 订阅时授权不等于永久授权：成员被移出项目后，已建立的订阅
+                    // 也必须在每一条出站消息上重新校验，否则仍会持续收到内容。
+                    requireChannelAccess(user.getId(), accessor.getDestination(), "接收该频道消息");
                     return message;
                 } catch (RuntimeException e) {
                     return null;

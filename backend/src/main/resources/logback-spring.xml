@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  日志配置。
+
+  之前只有 application.yml 里的级别设置：没有文件输出、没有滚动、没有请求 ID，
+  生产上出问题只能靠 docker logs 翻屏。这里补三件事：
+  1. 每行都带 [requestId]，与 X-Request-Id 响应头对应；
+  2. prod profile 下写文件并按大小+时间滚动（14 天，总量 2GB 上限）；
+  3. dev 保持只输出控制台，避免本地堆日志文件。
+-->
+<configuration>
+    <property name="LOG_PATH" value="${LOG_PATH:-logs}"/>
+    <property name="PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId:-}] %logger{36} - %msg%n"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/devflow.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/devflow.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <springProfile name="prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+        </root>
+        <!-- MyBatis SQL 日志在 prod 默认关闭：参数里可能有手机号、消息正文 -->
+        <logger name="com.devflow.mapper" level="INFO"/>
+    </springProfile>
+
+    <springProfile name="!prod">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

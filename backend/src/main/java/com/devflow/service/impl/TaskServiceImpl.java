@@ -36,6 +36,7 @@ public class TaskServiceImpl implements TaskService {
     private final com.devflow.service.NotificationRecipients notificationRecipients;
     private final com.devflow.mapper.TaskDependencyMapper taskDependencyMapper;
     private final TaskStatusEventMapper taskStatusEventMapper;
+    private final com.devflow.service.ProjectAccessService projectAccessService;
 
     @Override
     public Page<Task> listByProject(String projectId, int page, int pageSize, String keyword, String status) {
@@ -62,8 +63,14 @@ public class TaskServiceImpl implements TaskService {
 
     @Override
     public List<Task> listMyTasks(String userId) {
+        List<String> visibleProjectIds = projectAccessService.visibleProjectIds(userId);
+        if (visibleProjectIds.isEmpty()) {
+            return List.of();
+        }
         LambdaQueryWrapper<Task> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Task::getAssigneeId, userId);
+        // 被移出项目后，历史指派关系仍然存在；可见性必须按当前项目成员关系过滤
+        wrapper.in(Task::getProjectId, visibleProjectIds);
         wrapper.orderByAsc(Task::getDueDate).orderByDesc(Task::getCreatedAt);
         wrapper.last("LIMIT 200");
         return taskMapper.selectList(wrapper);

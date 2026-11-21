@@ -41,7 +41,7 @@ import {
   X,
   Download,
 } from 'lucide-react';
-import { downloadCsv } from '@/lib/csv';
+import { exportApi } from '@/lib/api/export';
 import type { TestCase, TestCaseView, TestCaseStep } from '@/types';
 
 // ============================================
@@ -76,14 +76,6 @@ function parseSteps(steps?: string): TestCaseStep[] {
 }
 
 /** 步骤文本摘要（卡片/缺陷描述用） */
-function stepsSummary(steps?: string): string {
-  const list = parseSteps(steps);
-  if (list.length === 0) return '无';
-  return list
-    .map((s, i) => `${i + 1}. ${s.action}${s.expected ? `（预期：${s.expected}）` : ''}`)
-    .join('\n');
-}
-
 export function TestCasesTab({ projectId }: { projectId: string }) {
   const [keyword, setKeyword] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
@@ -139,23 +131,10 @@ export function TestCasesTab({ projectId }: { projectId: string }) {
         <Button
           variant="outline"
           className="gap-1.5"
-          onClick={() =>
-            downloadCsv(
-              `测试用例-${new Date().toISOString().slice(0, 10)}`,
-              ['标题', '优先级', '前置条件', '步骤', '预期结果', '最新结果', '执行次数', '最近执行人'],
-              cases.map((c) => [
-                c.title,
-                { CRITICAL: '紧急', HIGH: '高', MEDIUM: '中', LOW: '低' }[c.priority] || c.priority,
-                c.precondition || '',
-                stepsSummary(c.steps),
-                c.expectedResult || '',
-                RESULT_CONFIG[c.latestResult]?.label || c.latestResult,
-                c.executionCount,
-                c.latestExecutorName || '',
-              ]),
-            )
-          }
-          title="导出用例列表"
+          onClick={() => {
+            exportApi.downloadTestCases(projectId).catch(() => alert('导出失败，请稍后重试'));
+          }}
+          title="从服务端导出全部用例（含审计记录）"
         >
           <Download className="h-4 w-4" />
           导出

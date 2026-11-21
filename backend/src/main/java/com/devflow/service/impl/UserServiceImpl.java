@@ -3,6 +3,7 @@ package com.devflow.service.impl;
 import com.devflow.entity.User;
 import com.devflow.mapper.UserMapper;
 import com.devflow.service.UserService;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.devflow.common.exception.BusinessException;
@@ -34,31 +35,34 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("用户不存在");
         }
 
-        // 只允许修改特定字段
+        // 只写允许的字段，不能整实体回写：否则会把并发的企业移除/会话版本递增覆盖掉
+        LambdaUpdateWrapper<User> patch = new LambdaUpdateWrapper<User>().eq(User::getId, userId);
         if (updates.getUsername() != null) {
-            user.setUsername(updates.getUsername());
+            patch.set(User::getUsername, updates.getUsername());
         }
         if (updates.getRealName() != null) {
             // 空串而非 null：updateById 跳过 null，置 null 无法清空（聊天 sender_name 的 COALESCE 兼容空串）
-            user.setRealName(updates.getRealName().trim());
+            patch.set(User::getRealName, updates.getRealName().trim());
         }
         if (updates.getAvatar() != null) {
-            user.setAvatar(updates.getAvatar());
+            patch.set(User::getAvatar, updates.getAvatar());
         }
         if (updates.getPhone() != null) {
-            user.setPhone(updates.getPhone());
+            patch.set(User::getPhone, updates.getPhone());
         }
 
-        userMapper.updateById(user);
+        userMapper.update(null, patch);
         return userMapper.selectById(userId);
     }
 
     /** 改密成功后的公共收尾：记录时间、清除强制改密标记 */
     private void afterPasswordChange(User user) {
-        user.setMustChangePassword(0);
-        user.setPasswordUpdatedAt(java.time.LocalDateTime.now());
-        user.setSessionVersion((user.getSessionVersion() == null ? 0L : user.getSessionVersion()) + 1);
-        userMapper.updateById(user);
+        userMapper.update(null, new LambdaUpdateWrapper<User>()
+                .eq(User::getId, user.getId())
+                .set(User::getPassword, user.getPassword())
+                .set(User::getMustChangePassword, 0)
+                .set(User::getPasswordUpdatedAt, java.time.LocalDateTime.now())
+                .setSql("session_version = COALESCE(session_version, 0) + 1"));
     }
 
     @Override
@@ -94,8 +98,9 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             throw new RuntimeException("用户不存在");
         }
-        user.setAvatar(avatarUrl);
-        userMapper.updateById(user);
+        userMapper.update(null, new LambdaUpdateWrapper<User>()
+                .eq(User::getId, userId)
+                .set(User::getAvatar, avatarUrl));
         return userMapper.selectById(userId);
     }
 }

@@ -110,6 +110,8 @@ public class SecurityConfig {
                 .toList());
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
+        // 前端错误页要展示请求 ID 供用户反馈；不暴露的话浏览器读不到这个头
+        config.setExposedHeaders(List.of(com.devflow.config.RequestIdFilter.HEADER));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 

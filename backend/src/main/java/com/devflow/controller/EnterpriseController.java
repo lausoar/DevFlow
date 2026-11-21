@@ -40,6 +40,7 @@ public class EnterpriseController {
     private final EnterpriseService enterpriseService;
     private final AuditService auditService;
     private final PermissionService permissionService;
+    private final com.devflow.service.ContactVisibility contactVisibility;
     private final AccessGuard guard;
 
     /** 获取当前用户的企业 */
@@ -132,11 +133,37 @@ public class EnterpriseController {
 
     /** 能否看到成员完整联系方式：拥有成员管理或企业设置权限 */
     private boolean canSeeContactInfo(String userId) {
-        var codes = permissionService.enterprisePermissions(userId);
-        return codes.contains(PermissionCodes.MEMBER_MANAGE)
-                || codes.contains(PermissionCodes.MEMBER_INVITE)
-                || codes.contains(PermissionCodes.ENTERPRISE_MANAGE);
+        return contactVisibility.canSeeContactInfo(userId);
     }
+
+    /** 角色/部门变更响应同样要脱敏：不能只在列表接口隐藏，写接口又把原文返回 */
+    private com.devflow.entity.User maskContact(com.devflow.entity.User user, String operatorId) {
+        if (user == null || canSeeContactInfo(operatorId)) {
+            return user;
+        }
+        user.setEmail(com.devflow.util.Masking.email(user.getEmail()));
+        user.setPhone(com.devflow.util.Masking.phone(user.getPhone()));
+        return user;
+    }
+
+    /** 审计正文里可能带受邀邮箱；无联系人权限的人只能拿到脱敏副本，数据库原文不变 */
+    private void maskAuditContact(com.devflow.entity.AuditLog log) {
+        String detail = log.getDetail();
+        if (detail == null || detail.isBlank()) {
+            return;
+        }
+        java.util.regex.Matcher matcher = EMAIL_PATTERN.matcher(detail);
+        StringBuffer masked = new StringBuffer();
+        while (matcher.find()) {
+            matcher.appendReplacement(masked,
+                    java.util.regex.Matcher.quoteReplacement(com.devflow.util.Masking.email(matcher.group())));
+        }
+        matcher.appendTail(masked);
+        log.setDetail(masked.toString());
+    }
+
+    private static final java.util.regex.Pattern EMAIL_PATTERN = java.util.regex.Pattern.compile(
+            "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
 
     /** 邀请成员 */
     @Operation(summary = "邀请新成员加入企业")
@@ -186,7 +213,7 @@ public class EnterpriseController {
                                     Authentication authentication) {
         String operatorId = guard.userId(authentication);
         guard.requireEnterprisePermission(operatorId, id, PermissionCodes.MEMBER_ROLE);
-        return R.ok(enterpriseService.updateMemberRole(id, memberId, request.getRole(), operatorId));
+        return R.ok(maskContact(enterpriseService.updateMemberRole(id, memberId, request.getRole(), operatorId), operatorId));
     }
 
     @Operation(summary = "调整成员部门（departmentId 为空表示移出部门）")
@@ -197,7 +224,7 @@ public class EnterpriseController {
                                           Authentication authentication) {
         String operatorId = guard.userId(authentication);
         guard.requireEnterprisePermission(operatorId, id, PermissionCodes.MEMBER_DEPARTMENT);
-        return R.ok(enterpriseService.updateMemberDepartment(id, memberId, request.getDepartmentId(), operatorId));
+        return R.ok(maskContact(enterpriseService.updateMemberDepartment(id, memberId, request.getDepartmentId(), operatorId), operatorId));
     }
 
     @Operation(summary = "解散企业（仅企业管理员）")
@@ -230,7 +257,11 @@ public class EnterpriseController {
         String userId = guard.userId(authentication);
         // 关键：先校验路径企业在调用者企业范围内，再校验权限点，避免跨租户读日志
         guard.requireEnterprisePermission(userId, id, PermissionCodes.AUDIT_READ);
-        return R.ok(auditService.pageByEnterprise(id, page, pageSize));
+        var auditPage = auditService.pageByEnterprise(id, page, pageSize);
+        if (!canSeeContactInfo(userId)) {
+            auditPage.getRecords().forEach(this::maskAuditContact);
+        }
+        return R.ok(auditPage);
     }
 
     /** 审计日志导出（CSV，含哈希链字段，便于离线取证） */
@@ -244,6 +275,9 @@ public class EnterpriseController {
         guard.requireEnterprisePermission(userId, id, PermissionCodes.AUDIT_READ);
 
         var logs = auditService.listForExport(id, limit);
+        if (!canSeeContactInfo(userId)) {
+            logs.forEach(this::maskAuditContact);
+        }
         String fileName = java.net.URLEncoder.encode("审计日志-" + id + ".csv",
                 java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20");
         response.setContentType("text/csv;charset=UTF-8");

@@ -22,6 +22,12 @@ services:
       MYSQL_CHARSET: utf8mb4
       MYSQL_COLLATION: utf8mb4_unicode_ci
       TZ: Asia/Shanghai
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --slow-query-log=1
+      --long-query-time=1
     ports:
       # 仅绑定回环地址：数据库不应暴露给同网段其他主机
       - "127.0.0.1:3306:3306"
@@ -29,10 +35,6 @@ services:
       - mysql_data:/var/lib/mysql
       # 注：不在挂载 schema.sql 初始化——Windows 下单文件 bind mount 会变成目录导致
       # init 失败（batch_readline 错误）。建表由后端启动时的 spring.sql.init 自动完成。
-    command: >
-      --character-set-server=utf8mb4
-      --collation-server=utf8mb4_unicode_ci
-      --default-authentication-plugin=mysql_native_password
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s

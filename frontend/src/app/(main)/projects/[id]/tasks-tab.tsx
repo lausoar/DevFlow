@@ -33,8 +33,8 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Loader2 } from 'lucide-react';
 import { Plus, Search, GripVertical, Calendar, User, Zap, ChevronDown, ChevronRight, Pencil, Trash2, MessageSquare, X, Link2, Timer, Download } from 'lucide-react';
-import { downloadCsv } from '@/lib/csv';
-import { useProjectMembers } from '@/lib/hooks/use-projects';
+import { exportApi } from '@/lib/api/export';
+import { useProject, useProjectMembers } from '@/lib/hooks/use-projects';
 import { useWorkflow } from '@/lib/hooks/use-workflow';
 import type { WorkflowStatusDef } from '@/lib/api/workflow';
 import {
@@ -137,6 +137,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
 
   // 成员名解析（导出列用）
   const { data: taskMembersRes } = useProjectMembers(projectId);
+  const { data: projectRes } = useProject(projectId);
   const taskMemberMap: Record<string, string> = {};
   (taskMembersRes?.data || []).forEach((m) => {
     taskMemberMap[m.userId] = m.realName || m.username || '';
@@ -176,20 +177,14 @@ export function TasksTab({ projectId }: { projectId: string }) {
     }
   };
 
+  // 导出走服务端：取全量数据、统一转义并写审计，不再只导出已加载的那一页
   const handleExportTasks = () => {
-    downloadCsv(
-      `任务列表-${new Date().toISOString().slice(0, 10)}`,
-      ['标题', '状态', '优先级', '指派给', '所属迭代', '截止日期', '故事点'],
-      filteredTasks.map((t) => [
-        t.title,
-        labelOf(COLUMNS, t.status),
-        PRIORITY_CONFIG[t.priority]?.label || t.priority,
-        t.assigneeId ? taskMemberMap[t.assigneeId] || '' : '',
-        t.sprintId ? sprints.find((s) => s.id === t.sprintId)?.name || '' : '',
-        t.dueDate ? t.dueDate.slice(0, 10) : '',
-        t.storyPoints ?? '',
-      ]),
-    );
+    exportApi.downloadIssues(projectId, 'tasks', {
+      keyword: search.trim() || undefined,
+      expression: viewLabel || undefined,
+    }, projectRes?.data?.name).catch(() => {
+      alert('导出失败，请稍后重试');
+    });
   };
 
   // 搜索由服务端完成；保存视图只在已加载的搜索结果内按 id 过滤。
@@ -304,7 +299,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
           size="sm"
           className="gap-1"
           onClick={handleExportTasks}
-          title={hiddenTaskCount > 0 ? '导出已加载的当前看板任务（尚有未加载任务）' : '导出当前看板任务'}
+          title="从服务端导出全部任务（含审计记录）"
         >
           <Download className="h-3.5 w-3.5" />
           导出
@@ -570,7 +565,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
         <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
           <span>
             已加载 {tasks.length} / {taskTotal} 条任务，剩余 {hiddenTaskCount} 条。
-            当前看板与导出仅包含已加载结果。
+            当前看板仅显示已加载结果；导出由服务端按当前条件生成。
           </span>
           <Button
             variant="outline"

@@ -20,6 +20,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,6 +45,7 @@ class BugServiceImplTest {
     @Mock private NotificationRecipients notificationRecipients;
     @Mock private SubscriptionService subscriptionService;
     @Mock private WorkflowService workflowService;
+    @Mock private com.devflow.service.ProjectAccessService projectAccessService;
 
     @InjectMocks private BugServiceImpl service;
 
@@ -143,5 +146,26 @@ class BugServiceImplTest {
         verify(notificationService).createNotification(
                 eq("new-assignee"), eq("BUG_UPDATE"), eq("Bug 指派变更"),
                 contains("新标题"), contains("/projects/p1?tab=bugs"));
+    }
+
+    @Test
+    void myBugsAreLimitedToCurrentlyVisibleProjectsAndExcludePending() {
+        when(projectAccessService.visibleProjectIds("u1")).thenReturn(List.of("p1"));
+        when(bugMapper.selectList(any())).thenReturn(List.of());
+
+        service.listMyBugs("u1");
+
+        verify(bugMapper).selectList(org.mockito.ArgumentMatchers.argThat(wrapper -> {
+            String sql = wrapper.getSqlSegment();
+            return sql.contains("assignee_id") && sql.contains("project_id") && sql.contains("pending");
+        }));
+    }
+
+    @Test
+    void myBugsAreEmptyWhenNoProjectIsVisible() {
+        when(projectAccessService.visibleProjectIds("u1")).thenReturn(List.of());
+
+        assertThat(service.listMyBugs("u1")).isEmpty();
+        verify(bugMapper, org.mockito.Mockito.never()).selectList(any());
     }
 }

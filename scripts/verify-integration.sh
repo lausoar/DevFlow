@@ -679,6 +679,112 @@ else
     bad "无法建立并发转缺陷夹具"
 fi
 
+# 9a) 成员移除后会话必须失效 & 服务端导出审计 & request-id 透传
+MEM_EMAIL="ci-member-$(date +%s)@devflow.test"
+INV=$(curl -s -m 10 -X POST "$BASE/enterprises/$ENT_ID/members/invite" -H "$AUTH" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$MEM_EMAIL\",\"realName\":\"CI Member\",\"role\":\"MEMBER\"}")
+MEM_ID=$(echo "$INV" | json_field "['data']['user']['id']")
+MEM_PWD=$(echo "$INV" | json_field "['data']['initialPassword']")
+if [ -n "$MEM_ID" ] && [ -n "$MEM_PWD" ]; then
+    MEM_USERNAME=$(mysql_exec -N -e "SELECT username FROM \`$DB_NAME\`.sys_user WHERE id='$MEM_ID';")
+    MEM_TOKEN=$(curl -s -m 10 -X POST "$BASE/auth/login" -H "Content-Type: application/json" \
+        -d "{\"username\":\"$MEM_USERNAME\",\"password\":\"$MEM_PWD\"}" \
+        | json_field "['data']['accessToken']")
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 \
+        -X DELETE "$BASE/enterprises/$ENT_ID/members/$MEM_ID" -H "$AUTH")
+    BEFORE_SV=$(mysql_exec -N -e "SELECT session_version FROM \`$DB_NAME\`.sys_user WHERE id='$MEM_ID';")
+    if [ -n "$MEM_TOKEN" ]; then
+        AFTER_CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 10 "$BASE/auth/me" \
+            -H "Authorization: Bearer $MEM_TOKEN")
+    else
+        AFTER_CODE="no-token"
+    fi
+    [ "$CODE" = "200" ] && [ "${BEFORE_SV:-0}" -ge 1 ] && [ "$AFTER_CODE" = "401" ] \
+        && ok "移除成员后会话立即失效（session_version=$BEFORE_SV，旧 Token 401）" \
+        || bad "移除成员后会话未失效：delete=$CODE session_version=$BEFORE_SV old-token=$AFTER_CODE"
+fi
+
+# 导出：服务端生成 CSV 并写审计
+EXPORT_TYPE=$(curl -s -m 10 -o "$WORK_DIR/export.csv" -w "%{content_type}" \
+    "$BASE/projects/$PROJ_ID/export/bugs.csv" -H "$AUTH")
+case "$EXPORT_TYPE" in
+    text/csv*) ok "缺陷导出由服务端生成 CSV" ;;
+    *) bad "缺陷导出响应类型错误：$EXPORT_TYPE" ;;
+esac
+EXPORT_AUDIT=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.activity_log
+    WHERE project_id='$PROJ_ID' AND action='export.bugs';")
+[ "${EXPORT_AUDIT:-0}" -ge 1 ] \
+    && ok "导出写入审计日志（export.bugs）" \
+    || bad "导出未写审计日志：$EXPORT_AUDIT"
+
+# 测试用例导出：复用列表投影，并写审计
+CASE_EXPORT_TYPE=$(curl -s -m 10 -o "$WORK_DIR/export-cases.csv" -w "%{content_type}" \
+    "$BASE/projects/$PROJ_ID/export/test-cases.csv" -H "$AUTH")
+case "$CASE_EXPORT_TYPE" in
+    text/csv*) ok "测试用例导出由服务端生成 CSV" ;;
+    *) bad "测试用例导出响应类型错误：$CASE_EXPORT_TYPE" ;;
+esac
+CASE_EXPORT_AUDIT=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.activity_log
+    WHERE project_id='$PROJ_ID' AND action='export.test_cases';")
+[ "${CASE_EXPORT_AUDIT:-0}" -ge 1 ] \
+    && ok "测试用例导出写入审计日志（export.test_cases）" \
+    || bad "测试用例导出未写审计日志：$CASE_EXPORT_AUDIT"
+
+# 企业统计导出：服务端生成摘要 CSV，并写审计
+SUMMARY_EXPORT_TYPE=$(curl -s -m 10 -o "$WORK_DIR/export-summary.csv" -w "%{content_type}" \
+    "$BASE/statistics/enterprises/$ENT_ID/export/summary.csv" -H "$AUTH")
+case "$SUMMARY_EXPORT_TYPE" in
+    text/csv*) ok "企业统计导出由服务端生成 CSV" ;;
+    *) bad "企业统计导出响应类型错误：$SUMMARY_EXPORT_TYPE" ;;
+esac
+SUMMARY_EXPORT_AUDIT=$(mysql_exec -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.activity_log
+    WHERE enterprise_id='$ENT_ID' AND action='export.enterprise';")
+[ "${SUMMARY_EXPORT_AUDIT:-0}" -ge 1 ] \
+    && ok "企业统计导出写入审计日志（export.enterprise）" \
+    || bad "企业统计导出未写审计日志：$SUMMARY_EXPORT_AUDIT"
+
+# 邀请用户名不能由邮箱前缀派生，否则邮箱脱敏可被 username 还原
+INVITE_EMAIL="ci-privacy-$(date +%s)@example.com"
+INVITE_RES=$(curl -s -m 10 -X POST "$BASE/enterprises/$ENT_ID/members/invite" -H "$AUTH" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$INVITE_EMAIL\",\"role\":\"MEMBER\"}")
+INVITE_USERNAME=$(echo "$INVITE_RES" | json_field "['data']['user']['username']")
+case "$INVITE_USERNAME" in
+    ci-privacy-*|*@*) bad "邀请用户名泄露邮箱前缀：$INVITE_USERNAME" ;;
+    *) ok "邀请用户名不包含邮箱前缀" ;;
+esac
+
+# 任务导出：必须带迭代列，并遵守当前筛选条件
+EXPORT_TASK_A=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/tasks" -H "$AUTH" \
+    -H "Content-Type: application/json" -d '{"title":"export-only-alpha"}' | json_field "['data']['id']")
+curl -s -m 10 -o "$WORK_DIR/export-filtered.csv" -w "%{http_code}" \
+    "$BASE/projects/$PROJ_ID/export/tasks.csv?keyword=export-only-alpha" -H "$AUTH" \
+    > "$WORK_DIR/export-filtered.code"
+EXPORT_FILTER_OK=$(python -c "
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text(encoding='utf-8-sig') if p.exists() else ''
+print('ok' if (chr(0x6240)+chr(0x5c5e)+chr(0x8fed)+chr(0x4ee3)) in text and 'export-only-alpha' in text and 'ci-task' not in text else 'bad')
+" "$WORK_DIR/export-filtered.csv" 2>/dev/null)
+[ "$EXPORT_FILTER_OK" = "ok" ] \
+    && ok "任务导出包含迭代列并遵守关键字筛选" \
+    || bad "任务导出筛选/迭代列错误：$EXPORT_FILTER_OK"
+
+# request-id：合法入站值被复用，非法值被替换
+RID=$(curl -s -m 10 -D - -o /dev/null "$BASE/projects" -H "$AUTH" \
+    -H "X-Request-Id: ci-request-abc123" | tr -d '\r' \
+    | awk -F': ' 'tolower($1)=="x-request-id"{print $2}')
+[ "$RID" = "ci-request-abc123" ] \
+    && ok "X-Request-Id 透传并回传一致" \
+    || bad "X-Request-Id 回传错误：$RID"
+RID_BAD=$(curl -s -m 10 -D - -o /dev/null "$BASE/projects" -H "$AUTH" \
+    -H "X-Request-Id: bad value with spaces" | tr -d '\r' \
+    | awk -F': ' 'tolower($1)=="x-request-id"{print $2}')
+[ -n "$RID_BAD" ] && [ "$RID_BAD" != "bad value with spaces" ] \
+    && ok "非法 X-Request-Id 被替换为生成的追踪号" \
+    || bad "非法 X-Request-Id 未被替换：$RID_BAD"
+
 # 9b) RICE 评分：生成列由数据库计算，列表可按分数排序
 RICE_REQ=$(curl -s -m 10 -X POST "$BASE/projects/$PROJ_ID/requirements" -H "$AUTH"     -H "Content-Type: application/json"     -d '{"title":"ci-rice","reach":500,"impact":2,"confidence":80,"effort":5}'     | json_field "['data']['id']")
 if [ -n "$RICE_REQ" ]; then

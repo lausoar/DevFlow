@@ -33,6 +33,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     private final TaskMapper taskMapper;
     private final BugMapper bugMapper;
     private final RequirementMapper requirementMapper;
+    private final com.devflow.service.ProjectAccessService projectAccessService;
 
     @Override
     public void subscribe(String userId, String targetType, String targetId, String projectId) {
@@ -92,8 +93,14 @@ public class SubscriptionServiceImpl implements SubscriptionService {
             wrapper.eq(Subscription::getTargetType, targetType.toUpperCase());
         }
         List<Subscription> rows = subscriptionMapper.selectList(wrapper);
+        // 被移出项目后，订阅关系本身还在，但不能再泄露原项目的标题与 ID
+        java.util.Set<String> visibleProjectIds = new java.util.HashSet<>(
+                projectAccessService.visibleProjectIds(userId));
         List<Map<String, Object>> out = new ArrayList<>();
         for (Subscription s : rows) {
+            if (s.getProjectId() != null && !visibleProjectIds.contains(s.getProjectId())) {
+                continue;
+            }
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("targetType", s.getTargetType());
             m.put("targetId", s.getTargetId());

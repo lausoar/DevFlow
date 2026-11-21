@@ -56,6 +56,7 @@ class TestCaseControllerTest {
     @Mock private NotificationService notificationService;
     @Mock private ImPushService imPushService;
     @Mock private AutomationRuleService automationRuleService;
+    @Mock private com.devflow.service.AuditService auditService;
     @Mock private Authentication authentication;
 
     @InjectMocks private TestCaseController controller;
@@ -220,5 +221,23 @@ class TestCaseControllerTest {
                 .getAnnotation(Transactional.class);
         assertThat(transactional).isNotNull();
         verify(notificationService, never()).createNotification(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void exportUsesListProjectionAndWritesAudit() throws Exception {
+        when(projectAccessService.canView("tester", "p1")).thenReturn(true);
+        when(testCaseMapper.selectList(any())).thenReturn(List.of(testCase()));
+        TestExecution failed = execution("e1", "FAIL", null);
+        failed.setExecutorName("执行人");
+        when(testExecutionMapper.selectByProject("p1")).thenReturn(List.of(failed));
+
+        org.springframework.mock.web.MockHttpServletResponse response =
+                new org.springframework.mock.web.MockHttpServletResponse();
+        controller.exportCases("p1", authentication, response);
+
+        assertThat(response.getContentType()).contains("text/csv");
+        assertThat(response.getContentAsString()).contains("登录用例", "失败", "执行人");
+        verify(auditService).logRequired(eq("tester"), eq(null), eq("p1"), eq("export.test_cases"),
+                eq("project"), eq("p1"), eq("导出测试用例 CSV：1 行"));
     }
 }

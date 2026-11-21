@@ -53,6 +53,7 @@ public class ProjectController {
 
     private final ProjectMapper projectMapper;
     private final ProjectMemberMapper projectMemberMapper;
+    private final com.devflow.service.ContactVisibility contactVisibility;
     private final com.devflow.service.ProjectAccessService projectAccessService;
     private final UserMapper userMapper;
     private final ChatChannelMapper chatChannelMapper;
@@ -238,8 +239,11 @@ public class ProjectController {
     @Operation(summary = "获取项目成员列表")
     @GetMapping("/{id}/members")
     public R<List<ProjectMember>> getMembers(@PathVariable String id, Authentication authentication) {
-        guard.requireView(guard.userId(authentication), id);
-        return R.ok(projectMemberMapper.selectMembersWithUser(id));
+        String userId = guard.userId(authentication);
+        guard.requireView(userId, id);
+        // 邮箱属于联系人信息：没有成员管理权限的人只看脱敏值，与企业页口径一致
+        return R.ok(contactVisibility.maskProjectMembers(userId, id,
+                projectMemberMapper.selectMembersWithUser(id)));
     }
 
     /** 添加项目成员（仅 OWNER/MANAGER；目标用户须同企业，角色须白名单） */

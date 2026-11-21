@@ -31,7 +31,8 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useEnterpriseStats } from '@/lib/hooks/use-statistics';
-import { downloadCsv } from '@/lib/csv';
+import { useAuthStore } from '@/stores/auth-store';
+import { exportApi } from '@/lib/api/export';
 import { useProjects } from '@/lib/hooks';
 import EnterpriseStatsTab from './tabs/enterprise-stats-tab';
 import ProjectHealthTab from './tabs/project-health-tab';
@@ -46,6 +47,7 @@ export default function ReportsContent() {
   const [activeTab, setActiveTab] = useState('enterprise');
   const { data: enterpriseRes, isLoading } = useEnterpriseStats();
   const enterprise = enterpriseRes?.data;
+  const enterpriseId = useAuthStore((state) => state.user?.enterpriseId);
 
   const tabs = [
     { key: 'enterprise', label: '企业统计', icon: BarChart3 },
@@ -70,30 +72,10 @@ export default function ReportsContent() {
             variant="outline"
             className="gap-1.5"
             onClick={() => {
-              if (!enterprise) return;
-              const o = enterprise.projectOverview;
-              const t = enterprise.taskOverview;
-              const b = enterprise.bugOverview;
-              const q = enterprise.requirementOverview;
-              downloadCsv(
-                `企业统计报表-${new Date().toISOString().slice(0, 10)}`,
-                ['指标', '数值'],
-                [
-                  ['项目总数', o.totalProjects],
-                  ['进行中项目', o.activeProjects],
-                  ['企业成员数', o.totalMembers],
-                  ['任务总数', t.totalTasks],
-                  ['已完成任务', t.completedTasks],
-                  ['逾期任务', t.overdueTasks],
-                  ['任务完成率 %', t.completionRate],
-                  ['Bug 总数', b.totalBugs],
-                  ['未关闭 Bug', b.openBugs],
-                  ['Bug 解决率 %', b.resolutionRate],
-                  ['需求总数', q.totalRequirements],
-                  ['活跃需求', q.openRequirements],
-                  ['已完成需求', q.completedRequirements],
-                ],
-              );
+              if (!enterpriseId) return;
+              exportApi.downloadEnterpriseSummary(enterpriseId).catch(() => {
+                alert('导出失败，请稍后重试');
+              });
             }}
           >
             导出 CSV

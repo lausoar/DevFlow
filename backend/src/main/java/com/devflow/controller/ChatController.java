@@ -45,6 +45,7 @@ public class ChatController {
     private final ChatMessageMapper messageMapper;
     private final UserMapper userMapper;
     private final ProjectMemberMapper projectMemberMapper;
+    private final com.devflow.service.ContactVisibility contactVisibility;
     private final com.devflow.service.ChatMentionService chatMentionService;
     private final com.devflow.service.ProjectAccessService projectAccessService;
     private final SimpMessagingTemplate messagingTemplate;
@@ -77,8 +78,10 @@ public class ChatController {
     @Operation(summary = "获取频道成员（项目群=项目成员）")
     @GetMapping("/channels/{channelId}/members")
     public R<List<ProjectMember>> getChannelMembers(@PathVariable String channelId, Authentication authentication) {
-        ChatChannel channel = requireChannel(guard.userId(authentication), channelId);
-        return R.ok(projectMemberMapper.selectMembersWithUser(channel.getProjectId()));
+        String userId = guard.userId(authentication);
+        ChatChannel channel = requireChannel(userId, channelId);
+        return R.ok(contactVisibility.maskProjectMembers(userId, channel.getProjectId(),
+                projectMemberMapper.selectMembersWithUser(channel.getProjectId())));
     }
 
     /**

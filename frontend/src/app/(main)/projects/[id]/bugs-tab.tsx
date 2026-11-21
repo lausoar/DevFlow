@@ -25,11 +25,11 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { useInfiniteBugs, useCreateBug, useUpdateBug, useDeleteBug, useUpdateBugStatus, useConfirmGuestBug } from '@/lib/hooks/use-bugs';
-import { useProjectMembers } from '@/lib/hooks/use-projects';
+import { useProject, useProjectMembers } from '@/lib/hooks/use-projects';
 import { useMyPermissions } from '@/lib/hooks/use-permissions';
 import { useAuthStore } from '@/stores/auth-store';
 import { bugApi } from '@/lib/api/bug';
-import { downloadCsv } from '@/lib/csv';
+import { exportApi } from '@/lib/api/export';
 import {
   Plus,
   Search,
@@ -127,6 +127,7 @@ export function BugsTab({ projectId }: { projectId: string }) {
 
   // 项目成员（用于负责人选择与详情页姓名解析）
   const { data: membersRes } = useProjectMembers(projectId);
+  const { data: projectRes } = useProject(projectId);
   const projectMembers = membersRes?.data || [];
   const memberMap: Record<string, ProjectMember> = {};
   projectMembers.forEach((m) => {
@@ -174,20 +175,14 @@ export function BugsTab({ projectId }: { projectId: string }) {
     BLOCKER: '致命', CRITICAL: '严重', MAJOR: '一般', MINOR: '轻微', TRIVIAL: '微小',
   };
   const PRIORITY_LABELS: Record<string, string> = { CRITICAL: '紧急', HIGH: '高', MEDIUM: '中', LOW: '低' };
+  // 导出走服务端：取全量数据、统一转义并写审计，不再只导出已加载的那一页
   const handleExport = () => {
-    downloadCsv(
-      `Bug列表-${new Date().toISOString().slice(0, 10)}`,
-      ['标题', '状态', '严重程度', '优先级', '负责人', '报告人', '创建时间'],
-      filteredBugs.map((b) => [
-        b.title,
-        BUG_STATUS_LABELS[b.status] || b.status,
-        SEVERITY_LABELS[b.severity] || b.severity,
-        PRIORITY_LABELS[b.priority] || b.priority,
-        b.assigneeId ? memberMap[b.assigneeId]?.realName || memberMap[b.assigneeId]?.username || '' : '',
-        b.reporterType === 'GUEST' ? `游客「${b.guestNickname || ''}」` : b.reporterId ? memberMap[b.reporterId]?.realName || memberMap[b.reporterId]?.username || '' : '',
-        b.createdAt ? new Date(b.createdAt).toLocaleString('zh-CN') : '',
-      ]),
-    );
+    exportApi.downloadIssues(projectId, 'bugs', {
+      keyword: search.trim() || undefined,
+      status: statusFilter === 'ALL' ? undefined : statusFilter,
+    }, projectRes?.data?.name).catch(() => {
+      alert('导出失败，请稍后重试');
+    });
   };
 
   // 处理删除 Bug
@@ -255,7 +250,7 @@ export function BugsTab({ projectId }: { projectId: string }) {
           size="sm"
           className="gap-1 shrink-0"
           onClick={handleExport}
-          title={hiddenBugCount > 0 ? '导出已加载的当前筛选结果（尚有未加载 Bug）' : '导出当前筛选结果'}
+          title="从服务端导出全部缺陷（含审计记录）"
         >
           <Download className="h-3.5 w-3.5" />
           导出
@@ -429,7 +424,7 @@ export function BugsTab({ projectId }: { projectId: string }) {
         <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
           <span>
             已加载 {bugs.length} / {bugTotal} 条 Bug，剩余 {hiddenBugCount} 条。
-            当前列表、状态数量与导出仅包含已加载结果。
+            当前列表仅显示已加载结果；导出由服务端按当前条件生成。
           </span>
           <Button
             variant="outline"
