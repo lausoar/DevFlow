@@ -39,6 +39,16 @@ def stomp_frame(command: str, headers: dict[str, str], body: str = "") -> str:
     return "\n".join(lines) + "\n\n" + body + "\x00"
 
 
+def send_stomp(ws: websocket.WebSocket, command: str,
+               headers: dict[str, str], body: str = "") -> None:
+    """Send a STOMP frame using SockJS's JSON-array WebSocket envelope.
+
+    SockJS /websocket does not accept a raw STOMP string: the server first
+    parses the message as JSON and closes with c[1007] when it sees CONNECT.
+    """
+    ws.send(json.dumps([stomp_frame(command, headers, body)]))
+
+
 class ProductionSmoke:
     def __init__(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory(prefix="devflow-prod-smoke-")
@@ -209,12 +219,12 @@ class ProductionSmoke:
             subprotocols=["v12.stomp"],
         )
         assert ws.recv() == "o", "SockJS did not send its open frame"
-        ws.send(stomp_frame("CONNECT", {
+        send_stomp(ws, "CONNECT", {
             "accept-version": "1.2", "heart-beat": "0,0",
             # STOMP 1.2 虚拟主机头：部分代理/服务端会按它路由 CONNECT
             "host": "127.0.0.1",
             "Authorization": f"Bearer {token}",
-        }))
+        })
         self.wait_for_frame(ws, "CONNECTED")
         return ws
 
@@ -242,9 +252,9 @@ class ProductionSmoke:
         raise TimeoutError(f"Did not receive STOMP {command}")
 
     def subscribe(self, ws: websocket.WebSocket, subscription_id: str, destination: str) -> None:
-        ws.send(stomp_frame("SUBSCRIBE", {
+        send_stomp(ws, "SUBSCRIBE", {
             "id": subscription_id, "destination": destination, "receipt": subscription_id,
-        }))
+        })
 
     def assert_subscription_rejected(self, token: str, destination: str) -> None:
         ws = self.open_stomp(token)
@@ -268,10 +278,10 @@ class ProductionSmoke:
         ws = self.open_stomp(first["token"])
         try:
             self.subscribe(ws, "presence", f"/topic/presence.{first['enterpriseId']}")
-            self.wait_for_frame(ws, "RECEIPT")
             destination = f"/topic/chat.events.{first['channelId']}"
             self.subscribe(ws, "events", destination)
-            self.wait_for_frame(ws, "RECEIPT")
+            # SimpleBroker 对成功订阅不保证 RECEIPT；成功路径等待真实 MESSAGE，
+            # 只有越权订阅才预期返回 ERROR。
             self.request("POST", f"/api/v1/channels/{first['channelId']}/messages",
                          token=first["token"], payload={"content": "production smoke"})
             event = self.wait_for_frame(ws, "MESSAGE")
