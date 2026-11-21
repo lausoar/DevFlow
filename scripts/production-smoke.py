@@ -204,6 +204,8 @@ class ProductionSmoke:
         assert ws.recv() == "o", "SockJS did not send its open frame"
         ws.send(stomp_frame("CONNECT", {
             "accept-version": "1.2", "heart-beat": "0,0",
+            # STOMP 1.2 虚拟主机头：部分代理/服务端会按它路由 CONNECT
+            "host": "127.0.0.1",
             "Authorization": f"Bearer {token}",
         }))
         self.wait_for_frame(ws, "CONNECTED")
@@ -227,6 +229,9 @@ class ProductionSmoke:
             for frame in self.receive_frames(ws):
                 if frame.startswith(command + "\n") or frame == command:
                     return frame
+                if frame.startswith("ERROR\n") or frame == "ERROR":
+                    # 鉴权失败时服务端会发 ERROR 再关闭；把原因暴露到 CI 日志里
+                    raise AssertionError(f"STOMP {command} was rejected: {frame}")
         raise TimeoutError(f"Did not receive STOMP {command}")
 
     def subscribe(self, ws: websocket.WebSocket, subscription_id: str, destination: str) -> None:
