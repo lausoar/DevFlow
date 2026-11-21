@@ -40,11 +40,21 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    # 冒烟/开发环境密码为空时不能传 --requirepass（会把它当成缺少参数而退出）；
+    # 生产设置密码时才追加认证参数。
+    command: >
+      /bin/sh -c 'if [ -n "$$REDIS_PASSWORD" ]; then
+        exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD";
+      else
+        exec redis-server --appendonly yes;
+      fi'
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # 有密码用认证 PING，无密码直接 PING；不能让健康检查只支持其中一种模式
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping; else redis-cli ping; fi"]
       interval: 10s
       timeout: 5s
       retries: 5
