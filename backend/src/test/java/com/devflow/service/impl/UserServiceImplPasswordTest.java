@@ -27,6 +27,17 @@ class UserServiceImplPasswordTest {
     @InjectMocks
     private UserServiceImpl service;
 
+    @org.junit.jupiter.api.BeforeEach
+    void registerTableInfo() {
+        // LambdaUpdateWrapper 的 SQL 断言需要 TableInfo 缓存（CI 全新 JVM 也必须可用）
+        if (com.baomidou.mybatisplus.core.metadata.TableInfoHelper.getTableInfo(User.class) == null) {
+            com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                    new org.apache.ibatis.builder.MapperBuilderAssistant(
+                            new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
+                    User.class);
+        }
+    }
+
     @Test
     @DisplayName("自助改密递增 sessionVersion 并清除强制改密标记")
     void selfPasswordChangeIncrementsSessionVersion() {
