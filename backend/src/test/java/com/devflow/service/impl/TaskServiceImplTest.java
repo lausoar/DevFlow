@@ -55,6 +55,13 @@ class TaskServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // argThat 断言会真实解析 LambdaWrapper，需要 TableInfo 缓存（CI 全新 JVM 也必须可用）
+        if (com.baomidou.mybatisplus.core.metadata.TableInfoHelper.getTableInfo(Task.class) == null) {
+            com.baomidou.mybatisplus.core.metadata.TableInfoHelper.initTableInfo(
+                    new org.apache.ibatis.builder.MapperBuilderAssistant(
+                            new com.baomidou.mybatisplus.core.MybatisConfiguration(), ""),
+                    Task.class);
+        }
         task = new Task();
         task.setId("t1");
         task.setProjectId("p1");
