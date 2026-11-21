@@ -72,7 +72,8 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # Chainguard 精简镜像没有 curl，但自带 /usr/bin/mc；用内置客户端探测就绪状态
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
