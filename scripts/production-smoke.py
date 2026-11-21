@@ -200,7 +200,14 @@ class ProductionSmoke:
 
     def open_stomp(self, token: str) -> websocket.WebSocket:
         url = f"ws://127.0.0.1:{self.port}/api/v1/ws/000/{secrets.token_hex(4)}/websocket"
-        ws = websocket.create_connection(url, origin=self.origin, timeout=15)
+        # 与浏览器 STOMP 客户端一致：声明 Spring 支持的 STOMP 子协议，
+        # 否则 SockJS 能打开连接，但服务端可能在 CONNECT 前直接关闭。
+        ws = websocket.create_connection(
+            url,
+            origin=self.origin,
+            timeout=15,
+            subprotocols=["v12.stomp"],
+        )
         assert ws.recv() == "o", "SockJS did not send its open frame"
         ws.send(stomp_frame("CONNECT", {
             "accept-version": "1.2", "heart-beat": "0,0",
