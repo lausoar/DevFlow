@@ -98,14 +98,14 @@ export function GlobalSearch() {
           <DialogTitle>全局搜索</DialogTitle>
           <DialogDescription>搜索你的项目、任务、Bug、需求与文档</DialogDescription>
         </DialogHeader>
-        <div className="flex items-center gap-3 border-b px-4 pr-16 pt-2">
+        <div className="flex items-center gap-3 border-b px-4 pb-1 pr-16 pt-2">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
           <Input
             autoFocus
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             placeholder="搜索项目 / 任务 / Bug / 需求 / 文档…"
-            className="h-10 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:border focus-visible:border-ring focus-visible:shadow-none focus-visible:ring-0"
+            className="h-9 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:border focus-visible:border-ring focus-visible:shadow-none focus-visible:ring-0"
           />
           {isFetching && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
           <kbd className="shrink-0 rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
