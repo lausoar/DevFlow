@@ -61,7 +61,8 @@ services:
   # MinIO 对象存储
   # 注意：宿主机 9000/9001 被其他项目容器占用，映射到 9002/9003（application.yml 已同步）
   minio:
-    image: minio/minio:latest
+    # minio/minio 已停止公开分发；Chainguard 镜像兼容相同的启动命令和健康检查。
+    image: ${MINIO_IMAGE:-cgr.dev/chainguard/minio:latest}
     container_name: devflow-minio
     restart: unless-stopped
     environment:
