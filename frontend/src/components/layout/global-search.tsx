@@ -98,7 +98,7 @@ export function GlobalSearch() {
           <DialogTitle>全局搜索</DialogTitle>
           <DialogDescription>搜索你的项目、任务、Bug、需求与文档</DialogDescription>
         </DialogHeader>
-        <div className="flex items-center gap-2 border-b px-4">
+        <div className="flex items-center gap-2 border-b px-4 pr-10">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
           <Input
             autoFocus
