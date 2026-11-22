@@ -85,11 +85,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
         )}
       >
         <TopBar />
-        <main
-          className="flex-1 min-h-0 overflow-auto bg-canvas p-4 md:px-6 md:py-5 md:pb-6"
-          // 刘海屏底部安全区 + 固定底栏高度，避免内容被 Home 指示条遮挡
-          style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
-        >
+        <main className="flex-1 min-h-0 overflow-auto bg-canvas p-4 pb-20 md:px-6 md:py-5 md:pb-6">
           {children}
         </main>
       </div>

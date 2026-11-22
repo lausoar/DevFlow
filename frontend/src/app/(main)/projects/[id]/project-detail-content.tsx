@@ -267,7 +267,7 @@ export default function ProjectDetailContent({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex min-h-full flex-col">
       {/* 项目头部 */}
       <div className="flex flex-wrap items-center gap-3 border-b px-4 py-4 sm:px-6">
         <Link href="/projects">
@@ -364,7 +364,7 @@ export default function ProjectDetailContent({
       </div>
 
       {/* 标签页 */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1">
         <div className="border-b px-4 sm:px-6">
           <TabsList className="h-10 bg-transparent">
             <TabsTrigger value="dashboard" className="gap-1.5 text-xs">
@@ -411,31 +411,31 @@ export default function ProjectDetailContent({
           </TabsList>
         </div>
 
-        <TabsContent value="dashboard" className="flex-1 overflow-auto p-6">
+        <TabsContent value="dashboard" className="flex-none p-6">
           <DashboardTab projectId={projectId} />
         </TabsContent>
-        <TabsContent value="requirements" className="flex-1 overflow-auto">
+        <TabsContent value="requirements" className="flex-none">
           <RequirementsTab projectId={projectId} initialRequirementId={initialRequirementId} />
         </TabsContent>
-        <TabsContent value="tasks" className="flex-1 overflow-auto p-6">
+        <TabsContent value="tasks" className="flex-none p-6">
           <TasksTab projectId={projectId} />
         </TabsContent>
-        <TabsContent value="bugs" className="flex-1 overflow-auto p-6">
+        <TabsContent value="bugs" className="flex-none p-6">
           <BugsTab projectId={projectId} />
         </TabsContent>
-        <TabsContent value="triage" className="flex-1 overflow-auto p-6">
+        <TabsContent value="triage" className="flex-none p-6">
           <TriageTab projectId={projectId} canManage={canEditProject} />
         </TabsContent>
-        <TabsContent value="feedback" className="flex-1 overflow-auto p-6">
+        <TabsContent value="feedback" className="flex-none p-6">
           <FeedbackTab projectId={projectId} />
         </TabsContent>
-        <TabsContent value="testing" className="flex-1 overflow-auto p-6">
+        <TabsContent value="testing" className="flex-none p-6">
           <TestCasesTab projectId={projectId} />
         </TabsContent>
-        <TabsContent value="releases" className="flex-1 overflow-auto p-6">
+        <TabsContent value="releases" className="flex-none p-6">
           <ReleasesTab projectId={projectId} canManage={canEditProject} />
         </TabsContent>
-        <TabsContent value="deployments" className="flex-1 overflow-auto p-6">
+        <TabsContent value="deployments" className="flex-none p-6">
           <DeploymentsTab projectId={projectId} canManage={canEditProject} />
         </TabsContent>
       </Tabs>

@@ -173,7 +173,7 @@ export function RequirementsTab({
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-full flex-col">
       {/* 工具栏 */}
       <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:px-6">
         {/* 搜索框 */}
@@ -281,7 +281,7 @@ export function RequirementsTab({
       )}
 
       {/* 需求列表 / 四象限 */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-none">
         {viewMode === 'quadrant' ? (
           <div className="p-4 sm:p-6">
             <RequirementScoreQuadrant requirements={requirements} />

@@ -232,7 +232,7 @@ export function BugsTab({ projectId }: { projectId: string }) {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-full flex-col">
       {/* 工具栏 */}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1">
@@ -450,7 +450,7 @@ export function BugsTab({ projectId }: { projectId: string }) {
           <p className="text-sm">暂无 Bug</p>
         </div>
       ) : (
-        <div className="flex-1 space-y-2 overflow-auto pr-1">
+        <div className="space-y-2 pr-1">
           {filteredBugs.map((bug) => (
             <BugCard
               key={bug.id}

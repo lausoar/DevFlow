@@ -274,7 +274,7 @@ export function TasksTab({ projectId }: { projectId: string }) {
   const defaultSprintId = activeSprint?.id || sprints.find((sp) => sp.status === 'PLANNING')?.id || '';
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-full flex-col">
       {/* 工具栏 */}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1">
@@ -873,7 +873,7 @@ function KanbanColumn({
       </div>
 
       {/* 任务卡片列表 */}
-        <div className="flex flex-col gap-2 px-2 pb-2 md:flex-1 md:overflow-auto">
+        <div className="flex flex-col gap-2 px-2 pb-2">
         {tasks.length === 0 ? (
           <div className="flex h-20 items-center justify-center text-xs text-muted-foreground">
             暂无任务

@@ -96,7 +96,7 @@ export function TestCasesTab({ projectId }: { projectId: string }) {
   const toBug = useToBug(projectId);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-full flex-col">
       {/* 统计卡 */}
       {stats && (
         <div className="mb-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
@@ -163,7 +163,7 @@ export function TestCasesTab({ projectId }: { projectId: string }) {
           )}
         </div>
       ) : (
-        <div className="flex-1 space-y-2 overflow-auto pb-4 pr-1">
+        <div className="space-y-2 pb-4 pr-1">
           {cases.map((c) => {
             const resultMeta = RESULT_CONFIG[c.latestResult] || RESULT_CONFIG.UNEXECUTED;
             const ResultIcon =
