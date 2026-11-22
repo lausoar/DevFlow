@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -278,18 +278,8 @@ export default function EnterpriseContent() {
     'permission.denied': '权限拒绝',
   };
 
-  // 在线状态：进入页面拉取快照，WebSocket 推送实时更新
+  // 在线状态由 NotificationSocket 全局拉取快照并通过 WebSocket 实时更新。
   const onlineUserIds = usePresenceStore((st) => st.onlineUserIds);
-  useEffect(() => {
-    if (!enterprise?.id) return;
-    request<{ onlineUserIds: string[] }>('GET', '/presence', undefined, { enterpriseId: enterprise.id })
-      .then((res) => {
-        if (res.data?.onlineUserIds) {
-          usePresenceStore.getState().setOnlineUserIds(res.data.onlineUserIds);
-        }
-      })
-      .catch(() => {});
-  }, [enterprise?.id]);
   const isOnline = (userId: string) => onlineUserIds.includes(userId);
 
   const canInvite = myLevel >= roleLevel('MANAGER');

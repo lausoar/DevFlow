@@ -8,6 +8,8 @@ import { useAuthStore } from '@/stores';
 import { usePresenceStore } from '@/stores/presence-store';
 import { useChatUnreadStore } from '@/stores/chat-unread-store';
 import { useChannels } from '@/lib/hooks/use-chat';
+import { isTemporaryEnterpriseError, useCurrentEnterprise } from '@/lib/hooks/use-enterprise';
+import { request } from '@/lib/api/client';
 
 // 后端 WebSocket 端点（SockJS）位于 servlet context-path 之下，
 // 即 http://localhost:8080/api/v1/ws —— 不能去掉 /api/v1 前缀
@@ -24,6 +26,14 @@ function getWsUrl(): string {
 export function NotificationSocket() {
   const queryClient = useQueryClient();
   const accessToken = useAuthStore((s) => s.accessToken);
+  const persistedEnterpriseId = useAuthStore((s) => s.user?.enterpriseId);
+  const currentEnterpriseQuery = useCurrentEnterprise();
+  // 服务端企业优先；只有临时查询故障才降级到登录缓存。
+  const enterpriseId = currentEnterpriseQuery.data?.data?.id ?? (
+    currentEnterpriseQuery.isError && isTemporaryEnterpriseError(currentEnterpriseQuery.error)
+      ? persistedEnterpriseId
+      : undefined
+  );
   const clientRef = useRef<Client | null>(null);
   const syncChatSubscriptionsRef = useRef<() => void>(() => {});
   const { data: channelsRes } = useChannels();
@@ -41,6 +51,42 @@ export function NotificationSocket() {
     // 未登录或 token 无效时不建立连接
     if (!accessToken || accessToken === 'mock-jwt-token') return;
 
+    let active = true;
+    let presenceRevision = 0;
+    let presenceSnapshotRequest = 0;
+    let presenceRetryAttempt = 0;
+    let presenceRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearPresenceRetry = () => {
+      if (presenceRetryTimer !== null) clearTimeout(presenceRetryTimer);
+      presenceRetryTimer = null;
+    };
+    const loadPresenceSnapshot = () => {
+      if (!active || !enterpriseId) return;
+      clearPresenceRetry();
+      const revision = presenceRevision;
+      const requestId = ++presenceSnapshotRequest;
+      request<{ onlineUserIds: string[] }>('GET', '/presence', undefined, { enterpriseId })
+        .then((res) => {
+          if (!active || requestId !== presenceSnapshotRequest) return;
+          if (!Array.isArray(res.data?.onlineUserIds)) throw new Error('Invalid presence snapshot');
+          presenceRetryAttempt = 0;
+          if (revision === presenceRevision) {
+            usePresenceStore.getState().setOnlineUserIds(res.data.onlineUserIds);
+          }
+        })
+        .catch(() => {
+          if (!active || requestId !== presenceSnapshotRequest || revision !== presenceRevision) return;
+          const delay = Math.min(5000 * 2 ** presenceRetryAttempt, 60000);
+          presenceRetryAttempt += 1;
+          presenceRetryTimer = setTimeout(() => {
+            presenceRetryTimer = null;
+            loadPresenceSnapshot();
+          }, delay);
+        });
+    };
+
+    // 广播不可重放，定期校准以恢复订阅激活间隙或断线期间错过的变化。
+    const presenceReconcileTimer = setInterval(loadPresenceSnapshot, 30000);
     const chatSubscriptions = new Map<string, StompSubscription>();
     const handleChatEvent = (message: IMessage) => {
       try {
@@ -60,13 +106,14 @@ export function NotificationSocket() {
       webSocketFactory: () => new SockJS(getWsUrl()),
       connectHeaders: { Authorization: `Bearer ${accessToken}` },
       reconnectDelay: 5000,
+      onWebSocketClose: loadPresenceSnapshot,
+      onStompError: loadPresenceSnapshot,
       onConnect: () => {
         client.subscribe('/user/queue/notifications', () => {
           // 收到实时通知，刷新通知相关查询
           queryClient.invalidateQueries({ queryKey: ['notifications'] });
         });
         // 只有明确属于某企业的用户才订阅该企业在线名单。
-        const enterpriseId = useAuthStore.getState().user?.enterpriseId;
         if (enterpriseId) {
           client.subscribe(`/topic/presence.${enterpriseId}`, (message: IMessage) => {
             try {
@@ -74,18 +121,21 @@ export function NotificationSocket() {
                 enterpriseId?: string;
                 onlineUserIds?: unknown;
               };
-              const currentEnterpriseId = useAuthStore.getState().user?.enterpriseId;
-              if (currentEnterpriseId !== enterpriseId || body.enterpriseId && body.enterpriseId !== enterpriseId) {
+              if (!active || body.enterpriseId && body.enterpriseId !== enterpriseId) {
                 return;
               }
               // 空数组是有效的“当前无人在线”广播，不能当作无效消息忽略。
               if (Array.isArray(body.onlineUserIds)) {
+                presenceRevision += 1;
+                presenceRetryAttempt = 0;
+                clearPresenceRetry();
                 usePresenceStore.getState().setOnlineUserIds(body.onlineUserIds);
               }
             } catch {
               // 忽略非法消息
             }
           });
+          loadPresenceSnapshot();
         }
 
         const syncChatSubscriptions = () => {
@@ -115,13 +165,16 @@ export function NotificationSocket() {
     clientRef.current = client;
 
     return () => {
+      active = false;
+      clearInterval(presenceReconcileTimer);
+      clearPresenceRetry();
       syncChatSubscriptionsRef.current = () => {};
       for (const subscription of chatSubscriptions.values()) subscription.unsubscribe();
       chatSubscriptions.clear();
       client.deactivate();
       clientRef.current = null;
     };
-  }, [accessToken, queryClient]);
+  }, [accessToken, queryClient, enterpriseId]);
 
   return null;
 }

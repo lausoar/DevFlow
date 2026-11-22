@@ -5,12 +5,17 @@ import { enterpriseApi, type Enterprise, type EnterpriseDetail } from '@/lib/api
 // 企业相关 Hooks
 // ============================================
 
+export function isTemporaryEnterpriseError(error: unknown) {
+  const status = (error as { response?: { status?: number } } | null)?.response?.status;
+  return status === undefined || status === 429 || status >= 500;
+}
+
 /** 获取当前企业 */
 export function useCurrentEnterprise() {
   return useQuery({
     queryKey: ['enterprise', 'current'],
     queryFn: () => enterpriseApi.getCurrent(),
-    retry: false,
+    retry: (failureCount, error) => failureCount < 3 && isTemporaryEnterpriseError(error),
     staleTime: 1000 * 60 * 5,
   });
 }
