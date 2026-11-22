@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MainLayout } from '@/components/layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { useAuthStore } from '@/stores/auth-store';
-import { useUpdateProfile, useChangePassword, useUpdateAvatar } from '@/lib/hooks';
+import { useUpdateProfile, useChangePassword, useUpdateAvatar } from '@/lib/hooks/use-user';
 import type { User as UserType } from '@/types';
 import { User, Lock, Save, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { MfaCard } from '@/components/auth/mfa-card';
@@ -30,7 +29,7 @@ export default function SettingsPage() {
   const { user, setUser } = useAuthStore();
 
   return (
-    <MainLayout>
+    <>
       <div className="space-y-6">
         <div>
           <h1 className="text-headline text-ink">设置</h1>
@@ -51,7 +50,7 @@ export default function SettingsPage() {
           <NotificationPreferencesCard />
         </div>
       </div>
-    </MainLayout>
+    </>
   );
 }
 

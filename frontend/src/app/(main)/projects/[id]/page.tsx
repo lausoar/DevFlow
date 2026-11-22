@@ -1,5 +1,4 @@
 import React from 'react';
-import { MainLayout } from '@/components/layout';
 import ProjectDetailContent from './project-detail-content';
 
 export const metadata = {
@@ -36,12 +35,12 @@ export default async function ProjectDetailPage({
   const { tab, requirement } = await searchParams;
 
   return (
-    <MainLayout>
+    <>
       <ProjectDetailContent
         projectId={id}
         initialTab={TABS.has(tab || '') ? tab : undefined}
         initialRequirementId={requirement}
       />
-    </MainLayout>
+    </>
   );
 }

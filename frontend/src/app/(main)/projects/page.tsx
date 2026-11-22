@@ -1,4 +1,3 @@
-import { MainLayout } from '@/components/layout';
 import ProjectsContent from './projects-content';
 
 export const metadata = {
@@ -11,8 +10,8 @@ export const metadata = {
 // ============================================
 export default function ProjectsPage() {
   return (
-    <MainLayout>
+    <>
       <ProjectsContent />
-    </MainLayout>
+    </>
   );
 }

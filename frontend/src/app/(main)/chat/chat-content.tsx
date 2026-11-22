@@ -24,7 +24,7 @@ import {
 import { MessageActions, ReactionBar, RecalledBubble } from './message-actions';
 import { chatApi } from '@/lib/api/chat';
 import { parseSources } from '@/lib/api/ai-history';
-import { AnswerWithCitations } from '@/components/common/answer-with-citations';
+import dynamic from 'next/dynamic';
 import { useAuthStore } from '@/stores';
 import { usePresenceStore } from '@/stores/presence-store';
 import { useChatUnreadStore } from '@/stores/chat-unread-store';
@@ -43,6 +43,10 @@ import {
   Users,
 } from 'lucide-react';
 import type { ChatChannel, ChatMessage, ProjectMember, Attachment } from '@/types';
+
+const AnswerWithCitations = dynamic(() =>
+  import('@/components/common/answer-with-citations').then((mod) => mod.AnswerWithCitations),
+);
 
 // 常用表情列表
 const EMOJI_LIST = [

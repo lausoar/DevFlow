@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { MainLayout } from '@/components/layout';
 import ReportsContent from './reports-content';
 
 // ============================================
@@ -12,8 +11,8 @@ export const metadata: Metadata = {
 
 export default function ReportsPage() {
   return (
-    <MainLayout>
+    <>
       <ReportsContent />
-    </MainLayout>
+    </>
   );
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { MainLayout } from '@/components/layout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -58,7 +57,7 @@ export default function ObjectivesPage() {
   };
 
   return (
-    <MainLayout>
+    <>
       <div className="flex h-full flex-col">
         <div className="flex flex-wrap items-center gap-3 border-b px-4 py-4 sm:px-6">
           <div className="flex items-center gap-2">
@@ -187,7 +186,7 @@ export default function ObjectivesPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </MainLayout>
+    </>
   );
 }
 

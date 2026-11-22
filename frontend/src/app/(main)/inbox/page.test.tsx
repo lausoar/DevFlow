@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import InboxPage from './page';
+import MainRouteLayout from '../layout';
 
 vi.mock('@/components/layout', () => ({
   MainLayout: ({ children }: { children: React.ReactNode }) => (
@@ -9,6 +10,24 @@ vi.mock('@/components/layout', () => ({
       {children}
     </div>
   ),
+}));
+
+vi.mock('@/lib/ws/notification-socket', () => ({
+  NotificationSocket: () => null,
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  usePathname: () => '/inbox',
+}));
+
+vi.mock('@/stores', () => ({
+  useAuthStore: Object.assign(() => ({ accessToken: 'test-token' }), {
+    persist: {
+      hasHydrated: () => true,
+      onFinishHydration: () => () => {},
+    },
+  }),
 }));
 
 vi.mock('@/lib/hooks/use-inbox', () => ({
@@ -29,7 +48,11 @@ vi.mock('@/lib/hooks/use-inbox', () => ({
 
 describe('InboxPage', () => {
   it('keeps the application layout and prioritizes approval actions', () => {
-    render(<InboxPage />);
+    render(
+      <MainRouteLayout>
+        <InboxPage />
+      </MainRouteLayout>,
+    );
 
     // 回归：页面曾经独立全屏渲染，导致左侧栏消失
     expect(screen.getByRole('navigation', { name: '应用侧边栏' })).toBeInTheDocument();

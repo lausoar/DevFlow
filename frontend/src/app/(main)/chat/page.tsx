@@ -1,4 +1,3 @@
-import { MainLayout } from '@/components/layout';
 import ChatContent from './chat-content';
 
 export const metadata = {
@@ -11,8 +10,8 @@ export const metadata = {
 // ============================================
 export default function ChatPage() {
   return (
-    <MainLayout>
+    <>
       <ChatContent />
-    </MainLayout>
+    </>
   );
 }

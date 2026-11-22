@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useAuthStore } from '@/stores';
+import { MainLayout as AppMainLayout } from '@/components/layout';
 import { NotificationSocket } from '@/lib/ws/notification-socket';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 
 // ============================================
@@ -12,6 +13,7 @@ import { Loader2 } from 'lucide-react';
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { accessToken } = useAuthStore();
   const router = useRouter();
+  const pathname = usePathname();
   // zustand persist 从 localStorage 恢复 token 是异步的，恢复完成前
   // accessToken 为 null，此时不能判定"未登录"。hasHydrated() 在服务端为
   // false、客户端为 true，正好是 useSyncExternalStore 的两份快照，
@@ -77,7 +79,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   return (
     <>
       <NotificationSocket />
-      {children}
+      {pathname === '/projects/join' ? children : <AppMainLayout>{children}</AppMainLayout>}
     </>
   );
 }

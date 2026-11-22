@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { MainLayout } from '@/components/layout';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useInbox, useApproveDeployment, useRejectDeployment } from '@/lib/hooks/use-inbox';
@@ -21,7 +20,7 @@ export default function InboxPage() {
   const total = inbox?.total ?? 0;
 
   return (
-    <MainLayout>
+    <>
       <div className="mx-auto w-full max-w-4xl space-y-5">
         <header className="flex flex-wrap items-end justify-between gap-3 border-b border-hairline pb-4">
           <div className="space-y-1">
@@ -146,7 +145,7 @@ export default function InboxPage() {
           </div>
         )}
       </div>
-    </MainLayout>
+    </>
   );
 }
 

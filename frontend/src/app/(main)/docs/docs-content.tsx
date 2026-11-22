@@ -16,7 +16,8 @@ import {
 import { Label } from '@/components/ui/label';
 import { useDocuments, useCreateDocument, useUpdateDocument } from '@/lib/hooks/use-documents';
 import { documentApi } from '@/lib/api/document';
-import { DocSidePanelView, type DocSidePanel } from './doc-side-panel';
+import dynamic from 'next/dynamic';
+import type { DocSidePanel } from './doc-side-panel';
 import { History, MessageSquare } from 'lucide-react';
 import {
   Plus,
@@ -28,6 +29,10 @@ import {
   Calendar,
 } from 'lucide-react';
 import type { Document, DocType } from '@/types';
+
+const DocSidePanelView = dynamic(() => import('./doc-side-panel').then((mod) => mod.DocSidePanelView), {
+  loading: () => <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">加载中...</div>,
+});
 
 /** AI 引用跳转：原文区间 + 索引时的版本（用于提示文档已改版） */
 export interface CitationHighlight {

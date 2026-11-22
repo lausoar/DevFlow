@@ -1,4 +1,3 @@
-import { MainLayout } from '@/components/layout';
 import NotificationsContent from './notifications-content';
 
 export const metadata = {
@@ -11,8 +10,8 @@ export const metadata = {
 // ============================================
 export default function NotificationsPage() {
   return (
-    <MainLayout>
+    <>
       <NotificationsContent />
-    </MainLayout>
+    </>
   );
 }

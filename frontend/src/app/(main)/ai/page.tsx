@@ -1,4 +1,3 @@
-import { MainLayout } from '@/components/layout';
 import AiCenterContent from './ai-center-content';
 
 export const metadata = {
@@ -11,8 +10,8 @@ export const metadata = {
 // ============================================
 export default function AiCenterPage() {
   return (
-    <MainLayout>
+    <>
       <AiCenterContent />
-    </MainLayout>
+    </>
   );
 }

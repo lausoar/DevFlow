@@ -1,4 +1,3 @@
-import { MainLayout } from '@/components/layout';
 import FilesContent from './files-content';
 
 export const metadata = {
@@ -11,8 +10,8 @@ export const metadata = {
 // ============================================
 export default function FilesPage() {
   return (
-    <MainLayout>
+    <>
       <FilesContent />
-    </MainLayout>
+    </>
   );
 }

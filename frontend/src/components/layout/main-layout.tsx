@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { X, Zap } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 // ============================================
@@ -18,7 +17,6 @@ import type { ReactNode } from 'react';
 // ============================================
 export function MainLayout({ children }: { children: ReactNode }) {
   const { sidebarCollapsed, mobileMenuOpen, setMobileMenuOpen } = useAppStore();
-  const router = useRouter();
 
   // 移动端底部导航最多 5 项：多加会让 320px 屏幕挤成一排光点。
   // 抽屉保留全部入口，底部只放最高频的四条路径 + 收件箱。
@@ -96,14 +94,14 @@ export function MainLayout({ children }: { children: ReactNode }) {
         style={{ height: 'calc(4rem + env(safe-area-inset-bottom, 0px))', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         {mobileNavItems.map((item) => (
-          <button
+          <Link
             key={item.href}
-            onClick={() => router.push(item.href)}
+            href={item.href}
             className="flex flex-col items-center gap-1 px-3 py-1 text-xs text-muted-foreground transition-devflow hover:text-foreground"
           >
             <span className="text-xl">{item.icon}</span>
             <span>{item.title}</span>
-          </button>
+          </Link>
         ))}
       </nav>
       <AiAssistant />

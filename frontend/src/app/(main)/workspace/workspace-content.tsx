@@ -46,7 +46,7 @@ import {
   Route,
   Flag,
 } from 'lucide-react';
-import { useProjects } from '@/lib/hooks';
+import { useProjects } from '@/lib/hooks/use-projects';
 import { useRouter } from 'next/navigation';
 
 // 任务状态展示口径（我的任务卡）

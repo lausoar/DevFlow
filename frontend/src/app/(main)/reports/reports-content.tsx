@@ -33,12 +33,17 @@ import {
 import { useEnterpriseStats } from '@/lib/hooks/use-statistics';
 import { useAuthStore } from '@/stores/auth-store';
 import { exportApi } from '@/lib/api/export';
-import { useProjects } from '@/lib/hooks';
+import dynamic from 'next/dynamic';
 import EnterpriseStatsTab from './tabs/enterprise-stats-tab';
-import ProjectHealthTab from './tabs/project-health-tab';
-import MemberWorkloadTab from './tabs/member-workload-tab';
-import BurndownTab from './tabs/burndown-tab';
-import GanttTab from './tabs/gantt-tab';
+
+function ReportTabLoading() {
+  return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">加载中...</div>;
+}
+
+const ProjectHealthTab = dynamic(() => import('./tabs/project-health-tab'), { loading: ReportTabLoading });
+const MemberWorkloadTab = dynamic(() => import('./tabs/member-workload-tab'), { loading: ReportTabLoading });
+const BurndownTab = dynamic(() => import('./tabs/burndown-tab'), { loading: ReportTabLoading });
+const GanttTab = dynamic(() => import('./tabs/gantt-tab'), { loading: ReportTabLoading });
 
 // ============================================
 // 统计报表内容组件

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -30,8 +31,6 @@ import { useMyPermissions } from '@/lib/hooks/use-permissions';
 import { useAuthStore } from '@/stores/auth-store';
 import { AutomationRulesDialog } from './automation-rules-dialog';
 import { RecycleBinDialog } from './recycle-bin-dialog';
-import { ReleasesTab } from './releases-tab';
-import { DeploymentsTab } from './deployments-tab';
 import {
   ArrowLeft,
   Rocket,
@@ -75,14 +74,21 @@ import {
 } from '@/lib/hooks/use-projects';
 import type { ProjectMember, ProjectMemberRole } from '@/types';
 import { DashboardTab } from './dashboard-tab';
-import { TasksTab } from './tasks-tab';
-import { BugsTab } from './bugs-tab';
-import { RequirementsTab } from './requirements-tab';
-import { FeedbackTab } from './feedback-tab';
-import { TriageTab } from './triage-tab';
 import { useTriageCounts } from '@/lib/hooks/use-triage';
-import { TestCasesTab } from './test-cases-tab';
 import { GuestLinksPanel } from './guest-links-panel';
+
+function ProjectTabLoading() {
+  return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">加载中...</div>;
+}
+
+const TasksTab = dynamic(() => import('./tasks-tab').then((mod) => mod.TasksTab), { loading: ProjectTabLoading });
+const BugsTab = dynamic(() => import('./bugs-tab').then((mod) => mod.BugsTab), { loading: ProjectTabLoading });
+const RequirementsTab = dynamic(() => import('./requirements-tab').then((mod) => mod.RequirementsTab), { loading: ProjectTabLoading });
+const FeedbackTab = dynamic(() => import('./feedback-tab').then((mod) => mod.FeedbackTab), { loading: ProjectTabLoading });
+const TriageTab = dynamic(() => import('./triage-tab').then((mod) => mod.TriageTab), { loading: ProjectTabLoading });
+const TestCasesTab = dynamic(() => import('./test-cases-tab').then((mod) => mod.TestCasesTab), { loading: ProjectTabLoading });
+const ReleasesTab = dynamic(() => import('./releases-tab').then((mod) => mod.ReleasesTab), { loading: ProjectTabLoading });
+const DeploymentsTab = dynamic(() => import('./deployments-tab').then((mod) => mod.DeploymentsTab), { loading: ProjectTabLoading });
 
 // ============================================
 // 项目详情内容（客户端组件）
@@ -247,15 +253,7 @@ export default function ProjectDetailContent({
     });
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    );
-  }
-
-  if (!project) {
+  if (!isLoading && !project) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 text-muted-foreground">
         <p>项目不存在或已被删除</p>
@@ -269,6 +267,7 @@ export default function ProjectDetailContent({
   return (
     <div className="flex min-h-full flex-col">
       {/* 项目头部 */}
+      {project ? (
       <div className="flex flex-wrap items-center gap-3 border-b px-4 py-4 sm:px-6">
         <Link href="/projects">
           <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -362,6 +361,12 @@ export default function ProjectDetailContent({
           </DropdownMenu>
         </div>
       </div>
+      ) : (
+        <div className="flex h-[73px] items-center border-b px-4 sm:px-6" role="status">
+          <div className="h-5 w-40 animate-pulse rounded bg-muted" />
+          <span className="sr-only">正在加载项目信息...</span>
+        </div>
+      )}
 
       {/* 标签页 */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1">

@@ -1,4 +1,3 @@
-import { MainLayout } from '@/components/layout';
 import DocsContent from './docs-content';
 
 export const metadata = {
@@ -26,7 +25,7 @@ export default async function DocsPage({
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
   };
   return (
-    <MainLayout>
+    <>
       <DocsContent
         initialDocId={params.docId}
         initialHighlight={{
@@ -35,6 +34,6 @@ export default async function DocsPage({
           version: toInt(params.v),
         }}
       />
-    </MainLayout>
+    </>
   );
 }
